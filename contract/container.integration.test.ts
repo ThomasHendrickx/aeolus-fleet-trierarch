@@ -194,6 +194,12 @@ describe('a session in a container', () => {
     const image = `${SESSION_IMAGE}:${version}`;
 
     const words = run();
+    // Storage mounts are present on runtimes that isolate nested Podman. Older runtimes still satisfy the session contract.
+    const storage = join(machine.trierarchHome, 'ships', scout, 'containers');
+    const storageMount = words.includes(`${storage}:/containers`) ? ['--volume', `${storage}:/containers`] : [];
+    const runtimeMount: readonly unknown[] = words.some((word) => word.endsWith(':/containers-runtime'))
+      ? ['--volume', expect.stringMatching(/^\/.+\/aeolus\/[a-f0-9]{12}:\/containers-runtime$/)]
+      : [];
 
     expect(words.slice(0, words.indexOf(image) + 2)).toEqual([
       'run',
@@ -228,6 +234,8 @@ describe('a session in a container', () => {
       `${sockets}:${sockets}`,
       '--volume',
       `${join(machine.trierarchHome, 'ships', scout, 'tmp')}:/tmp`,
+      ...storageMount,
+      ...runtimeMount,
       ...mcpMount,
       '--env',
       'HOME=/home/ubuntu',

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -15,6 +16,7 @@ import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import { createCallerCheck } from './caller-check.js';
 import { createHoldRuntime, sessionsLaunch, systemdVersionOf } from './hold-runtime.js';
 import { runCommand } from './run-command.js';
+import { shipPodmanRuntime, userRuntimeDirectory } from './paths.js';
 import { runningVersion } from './version.js';
 
 // Against real holds, each the trierarch program from source started as the
@@ -58,8 +60,8 @@ afterEach(async () => {
 /** Twenty turns started and interrupted, each a stdin line and a poll of the events. */
 const TWENTY_TURNS_MS = 30_000;
 
-function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string; modelTokenFile?: string } = {}) {
-  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.modelTokenFile !== undefined && { modelTokenFile: at.modelTokenFile }), ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
+function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string; modelTokenFile?: string; hasHostContainerStorage?: boolean } = {}) {
+  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.modelTokenFile !== undefined && { modelTokenFile: at.modelTokenFile }), ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), ...(at.hasHostContainerStorage === true && { hasHostContainerStorage: true }), ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
   runtimes.push(runtime);
   return runtime;
 }
@@ -104,6 +106,140 @@ async function aClaudeCodeSession(runtime: SessionRuntime, flags: readonly strin
   await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE, ...flags], harness: 'claude-code' });
   return shipId;
 }
+
+it.runIf(process.platform === 'linux')("starts a ship's Podman service beside its host session and stops it with the session", async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+
+  await expect.poll(() => starts().length).toBeGreaterThan(0);
+  const env = starts()[0]?.env;
+  expect(env).toMatchObject({
+    CONTAINERS_STORAGE_CONF: join(shipFolder, 'containers', 'storage.conf'),
+    DOCKER_HOST: `unix://${shipFolder}/podman.sock`,
+    CONTAINER_HOST: `unix://${shipFolder}/podman.sock`,
+  });
+  expect(existsSync(join(shipFolder, 'podman.sock'))).toBe(true);
+  await runtime.stop(shipId);
+  await expect.poll(() => existsSync(join(shipFolder, 'podman.sock'))).toBe(false);
+});
+
+it.runIf(process.platform === 'linux')("gives every host Podman invocation the ship's own root, runroot and tmpdir", async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const podman = join(folder, 'podman');
+  const runtimeRoot = realpathSync(aShortHome('podman-runtime'));
+  const runtimeDirectory = join(runtimeRoot, 'aeolus', createHash('sha256').update(shipId).digest('hex').slice(0, 12));
+  const calls = join(folder, 'podman-calls');
+  writeFileSync(podman, `#!/bin/sh\nprintf '%s\n' "$*" >> '${calls}'\ncase " $* " in *" system service "*) exec sleep 30;; esac\nexit 0\n`);
+  chmodSync(podman, 0o755);
+  const previous = process.env.PATH;
+  const previousRuntime = process.env.XDG_RUNTIME_DIR;
+  process.env.PATH = `${folder}:${previous ?? '/usr/bin:/bin'}`;
+  process.env.XDG_RUNTIME_DIR = runtimeRoot;
+  try {
+    await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    expect(statSync(runtimeDirectory).mode & 0o777).toBe(0o700);
+    await runtime.stop(shipId);
+    expect(existsSync(runtimeDirectory)).toBe(false);
+    const invocations = readFileSync(calls, 'utf8').trim().split('\n');
+    expect(invocations.length).toBeGreaterThanOrEqual(3);
+    for (const invocation of invocations) {
+      expect(invocation).toContain(`--root ${shipFolder}/containers/graph`);
+      expect(invocation).toContain(`--runroot ${runtimeDirectory}/run`);
+      expect(invocation).toContain(`--tmpdir ${runtimeDirectory}/tmp`);
+    }
+  } finally {
+    restore('PATH', previous);
+    restore('XDG_RUNTIME_DIR', previousRuntime);
+    await runtime.stop(shipId);
+    rmSync(runtimeRoot, { recursive: true, force: true });
+  }
+}, 20_000);
+
+it.runIf(process.platform === 'linux')('starts the host session with its own socket when Podman fails to start', async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const podman = join(folder, 'podman');
+  writeFileSync(podman, '#!/bin/sh\necho podman-refused >&2\nexit 1\n');
+  chmodSync(podman, 0o755);
+  const previous = process.env.PATH;
+  process.env.PATH = `${folder}:${previous ?? '/usr/bin:/bin'}`;
+  try {
+    await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    await expect.poll(() => starts().length).toBeGreaterThan(0);
+    expect(starts()[0]?.env.DOCKER_HOST).toBe(`unix://${shipFolder}/podman.sock`);
+    expect(existsSync(join(shipFolder, 'podman.sock'))).toBe(false);
+    const runtimeRoot = await userRuntimeDirectory();
+    if (runtimeRoot === undefined) throw new Error('no private user runtime directory');
+    await expect.poll(() => existsSync(shipPodmanRuntime(runtimeRoot, shipId))).toBe(false);
+    await expect.poll(async () => (await runtime.events(shipId)).join('\n')).toContain('podman-refused');
+    expect(() => {
+      for (const line of readFileSync(join(sessions, shipId, 'events.jsonl'), 'utf8').trim().split('\n')) JSON.parse(line);
+    }).not.toThrow();
+  } finally {
+    restore('PATH', previous);
+    await runtime.stop(shipId);
+  }
+}, 20_000);
+
+it.runIf(process.platform === 'linux')('starts the session when its named runtime directory cannot be used', async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const invalid = join(folder, 'not-a-directory');
+  writeFileSync(invalid, 'file');
+  const previous = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = invalid;
+  try {
+    await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    await expect.poll(() => starts().length).toBeGreaterThan(0);
+    expect(await runtime.sessionRootOf(shipId)).toBeGreaterThan(1);
+    expect(starts()[0]?.env.DOCKER_HOST).toBe(`unix://${shipFolder}/podman.sock`);
+    await expect.poll(async () => (await runtime.events(shipId)).join('\n')).toContain('Podman service could not start');
+  } finally {
+    restore('XDG_RUNTIME_DIR', previous);
+    await runtime.stop(shipId);
+  }
+}, 20_000);
+
+it.runIf(process.platform === 'linux')('logs a Podman service that exits without an error message', async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const podman = join(folder, 'podman');
+  writeFileSync(podman, '#!/bin/sh\ncase " $* " in *" system service "*) exit 1;; esac\nexit 0\n');
+  chmodSync(podman, 0o755);
+  const previous = process.env.PATH;
+  process.env.PATH = `${folder}:${previous ?? '/usr/bin:/bin'}`;
+  try {
+    await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    await expect.poll(async () => (await runtime.events(shipId)).join('\n')).toContain('Podman service exited with code 1');
+  } finally {
+    restore('PATH', previous);
+    await runtime.stop(shipId);
+  }
+}, 20_000);
+
+it.runIf(process.platform === 'linux')("removes the ship's test volumes when its host session starts again", async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const session = { shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' };
+  const url = `unix://${shipFolder}/podman.sock`;
+  await runtime.start(session);
+  const info = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', '--url', url, 'info', '--format', '{{.Store.GraphRoot}}'] });
+  expect(info.stdout.trim()).toBe(join(shipFolder, 'containers', 'graph'));
+  const made = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', '--url', url, 'volume', 'create', 'left-behind'] });
+  expect(made.status).toBe(0);
+  await runtime.start(session);
+  const listed = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', '--url', url, 'volume', 'ls', '--format', '{{.Name}}'] });
+  expect({ status: listed.status, volumes: listed.stdout.trim() }).toEqual({ status: 0, volumes: '' });
+});
+
 
 it('stops a session when its hold exits before it can be signalled', async () => {
   const runtime = aRuntime();

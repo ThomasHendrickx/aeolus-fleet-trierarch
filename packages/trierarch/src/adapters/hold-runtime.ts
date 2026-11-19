@@ -18,6 +18,8 @@ import { discard, type MoveWithinUserNamespace } from './trash.js';
 const CALL_TIMEOUT_MS = 2000;
 /** How long a hold has to answer its first call after its start. */
 const START_WAIT_MS = 10_000;
+/** The hold also has to clear a ship's Podman storage before it answers. */
+const STORAGE_WAIT_MS = 70_000;
 /** How often a starting hold is asked whether it answers. */
 const START_POLL_MS = 50;
 /** How long a stopped hold has to end with its harness before it is killed. */
@@ -84,6 +86,7 @@ export function createHoldRuntime(options: {
   program: readonly string[];
   version: string;
   platform: string;
+  hasHostContainerStorage?: boolean;
   /** What a hold's start goes through: a systemd scope of its own under a systemd unit (see sessionsLaunch). */
   launch?: readonly string[];
   /** What runs beside the holds, one per ship: stopped first when its ship's hold stops, and listed as of another version for a ship no hold holds. */
@@ -153,7 +156,8 @@ export function createHoldRuntime(options: {
     const pid = await runningPid(shipId);
     if (pid !== undefined) {
       signalHold(pid, 'SIGTERM');
-      const until = Date.now() + STOP_WAIT_MS;
+      const hasStorage = (await stat(join(filesOf(shipId).folder, 'ship-containers')).catch(() => undefined)) !== undefined;
+      const until = Date.now() + (hasStorage ? STORAGE_WAIT_MS : STOP_WAIT_MS);
       while ((await runningPid(shipId)) === pid && Date.now() < until) {
         await wait(START_POLL_MS);
       }
@@ -251,7 +255,8 @@ export function createHoldRuntime(options: {
       const tokenVariable = proxyToken === undefined ? [] : ['--proxy-token-variable', proxyToken.variable];
       const modelToken = harness === 'claude-code' && proxyToken === undefined && options.modelTokenFile !== undefined ? ['--model-token-file', options.modelTokenFile] : [];
       const { command, env } = options.heldAs === undefined ? { command: session.command, env: { ...session.env, ...(temp !== undefined && { TMPDIR: temp, TMP: temp, TEMP: temp }) } } : await options.heldAs(session, { ...files, temp });
-      const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...modelToken, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
+      const storage = options.hasHostContainerStorage === true && options.platform === 'linux' && session.shipFolder !== undefined ? ['--ship-containers', session.shipFolder] : [];
+      const hold = [...options.program, 'hold', shipId, '--sessions', sessions, ...storage, '--folder', folder, '--harness', harness, ...tokenVariable, ...modelToken, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
       const [program = 'sh', ...args] = [...(options.launch ?? []), 'sh', '-c', DETACHED, 'sh', ...hold];
       const starter = spawn(program, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
       let wrote = '';
@@ -269,7 +274,8 @@ export function createHoldRuntime(options: {
           }
         });
       });
-      const until = Date.now() + START_WAIT_MS;
+      const startWait = storage.length === 0 ? START_WAIT_MS : STORAGE_WAIT_MS;
+      const until = Date.now() + startWait;
       let lastAnswer: HoldAnswer | undefined;
       while (Date.now() < until) {
         lastAnswer = await callHold({ socket: files.socket, request: { call: 'state' }, timeoutMs: CALL_TIMEOUT_MS }).catch(() => undefined);
@@ -290,7 +296,7 @@ export function createHoldRuntime(options: {
       }
       // Where no `ss` lists the sockets, the hold cannot tell the trierarch from another caller and refuses it.
       const refusal = lastAnswer?.isOk === false && lastAnswer.error === REFUSED ? `: it refused the trierarch's call (${REFUSED}); on Linux it tells its caller with ss, so install iproute2 if ss is missing` : '';
-      throw new Error(`the hold of ${shipId} did not answer within ${String(START_WAIT_MS)} ms of its start${refusal}`);
+      throw new Error(`the hold of ${shipId} did not answer within ${String(startWait)} ms of its start${refusal}`);
     },
     // A Codex hold starts the line's turn once the last turn's process has ended, which it waits for as long as for an interrupted turn.
     send: async ({ shipId, line }) => {

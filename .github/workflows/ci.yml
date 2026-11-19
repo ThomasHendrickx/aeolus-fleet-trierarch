@@ -172,6 +172,15 @@ jobs:
       - run: npm ci
       # The images Testcontainers starts, from the Actions cache.
       - uses: ./.github/actions/test-images
+      # Ubuntu's pasta AppArmor profile blocks Podman's network teardown.
+      # Allow only the missing SIGTERM receive rule, as upstream documents:
+      # https://github.com/actions/runner-images/issues/15182
+      - name: Allow Podman to stop its rootless network helper
+        run: |
+          if [ -f /etc/apparmor.d/usr.bin.pasta ]; then
+            sudo sed -i '$ i\  signal (receive) set=(term) peer=podman,' /etc/apparmor.d/usr.bin.pasta
+            sudo apparmor_parser -r /etc/apparmor.d/usr.bin.pasta
+          fi
       - id: tests
         run: npm run test:integration
         env:

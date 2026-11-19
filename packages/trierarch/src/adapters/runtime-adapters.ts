@@ -15,7 +15,7 @@ import type { TrustedClones } from './trusted-clones.js';
 import type { TrierarchPaths } from './paths.js';
 import { createHoldRuntime } from './hold-runtime.js';
 import { createProxyRuntime, type ProxyRuntime } from './proxy-runtime.js';
-import { createTrash, foldersUnder, moveWithinUserNamespace, removeWithinUserNamespace, type MoveWithinUserNamespace } from './trash.js';
+import { createTrash, foldersUnder, moveWithinIsolatedUserNamespace, moveWithinUserNamespace, removeWithinIsolatedUserNamespace, removeWithinUserNamespace, type MoveWithinUserNamespace } from './trash.js';
 
 /** The session image `release.yml` publishes with each version (decision 0011, 0039). */
 const SESSION_IMAGE = 'ghcr.io/thomashendrickx/aeolus-session';
@@ -32,7 +32,7 @@ export function modelProxy(at: { paths: TrierarchPaths; version: string; launch?
 export function hostSessions(at: { paths: TrierarchPaths; version: string; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string }): SessionRuntime & SessionRoots {
   const cache = join(at.paths.home, 'cache');
   const environment = { XDG_CACHE_HOME: join(cache, 'xdg'), npm_config_cache: join(cache, 'npm'), GOCACHE: join(cache, 'go-build'), GOMODCACHE: join(cache, 'go-mod'), PLAYWRIGHT_BROWSERS_PATH: join(cache, 'ms-playwright') };
-  return createHoldRuntime({ sessions: at.paths.sessions, modelTokenFile: at.paths.modelToken, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [], heldAs: async (session, { temp }) => {
+  return createHoldRuntime({ sessions: at.paths.sessions, modelTokenFile: at.paths.modelToken, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, hasHostContainerStorage: true, launch: at.launch ?? [], heldAs: async (session, { temp }) => {
     await Promise.all(Object.values(environment).map(async (folder) => mkdir(folder, { recursive: true })));
     return { command: session.command, env: { ...session.env, ...environment, ...(temp !== undefined && { TMPDIR: temp, TMP: temp, TEMP: temp }) } };
   } });
@@ -91,11 +91,11 @@ export function runtimeAdaptersOf(at: {
       sessions: hostSessions({ paths, version, launch, shipsRoot: root, ...(at.program !== undefined && { program: at.program }) }),
       workspace: createGitWorkspace({ configuration, root, ...(before !== undefined && { before }), ...(trusted !== undefined && { clones: trusted }) }),
       folderProcesses: createFolderProcesses(),
-      trash: createTrash({ beside }),
+      trash: createTrash({ beside, ...(process.platform === 'linux' && { unshare: removeWithinIsolatedUserNamespace('podman') }) }),
     };
   }
   // A clone or a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
-  const moveAsRuntime = moveWithinUserNamespace(runtime.binary);
+  const moveAsRuntime = (process.platform === 'linux' ? moveWithinIsolatedUserNamespace : moveWithinUserNamespace)(runtime.binary);
   const clones = createCloneWorkspace({ configuration, root, ...(before !== undefined && { before }), moveWithinUserNamespace: moveAsRuntime, ...(trusted !== undefined && { clones: trusted }) });
   return {
     sessions: createContainerRuntime({
@@ -125,7 +125,7 @@ export function runtimeAdaptersOf(at: {
     },
     folderProcesses: createContainerFolderProcesses({ binary: runtime.binary, host: createFolderProcesses() }),
     shipHomes: { homes: paths.homes, managedSettings, moveWithinUserNamespace: moveAsRuntime },
-    trash: createTrash({ beside: async () => [...(await beside()), paths.homes], unshare: removeWithinUserNamespace(runtime.binary) }),
+    trash: createTrash({ beside: async () => [...(await beside()), paths.homes], unshare: (process.platform === 'linux' ? removeWithinIsolatedUserNamespace : removeWithinUserNamespace)(runtime.binary) }),
     modelProxyUrlOf: containerProxyUrl,
   };
 }

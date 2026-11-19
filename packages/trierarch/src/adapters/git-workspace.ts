@@ -1,11 +1,12 @@
 import { lstat, mkdir, realpath, rm, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 
-import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import { idSchema, type TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { WorkspacePort } from '../core/ports.js';
 import { foldersUnderRoot, isUnderRoot } from './folders-under-root.js';
 import { gitInFolder, messageOf, RefusedRead } from './git-in-folder.js';
+import { shipPodmanRuntime, userRuntimeDirectory } from './paths.js';
 import { type CommandResult, runCommand } from './run-command.js';
 import { type MakeRepository, prepareShipFolder, repositoryFoldersIn, writeRootFiles } from './ship-folder.js';
 import { discard, type MoveWithinUserNamespace } from './trash.js';
@@ -53,6 +54,11 @@ export function rootsOf(at: WorkspaceRoots): readonly string[] {
 export async function removeShipFolder(shipFolder: string, withinUserNamespace?: MoveWithinUserNamespace): Promise<void> {
   if ((await lstat(shipFolder).catch(() => undefined)) === undefined) {
     return;
+  }
+  if (process.platform === 'linux') {
+    const shipId = idSchema('ship').safeParse(basename(shipFolder));
+    const runtime = shipId.success ? await userRuntimeDirectory() : undefined;
+    if (shipId.success && runtime !== undefined) await rm(shipPodmanRuntime(runtime, shipId.data), { recursive: true, force: true });
   }
   await discard(shipFolder, { at: new Date(), ...(withinUserNamespace !== undefined && { withinUserNamespace }) });
 }

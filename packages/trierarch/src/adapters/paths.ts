@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -109,4 +111,34 @@ const SOCKET_PATH_LIMIT = 108;
 /** The size of a socket's path the system takes, its ending zero byte with it: 104 bytes on macOS, 108 elsewhere. */
 export function socketPathLimit(platform: string): number {
   return SOCKET_PATH_LIMITS[platform] ?? SOCKET_PATH_LIMIT;
+}
+
+/** The named XDG runtime, or the conventional user runtime only when it is private and owned. */
+export async function runtimeDirectoryOf(at: { xdg?: string | undefined; fallback: string; uid: number }): Promise<string | undefined> {
+  if (at.xdg !== undefined && at.xdg !== '') return at.xdg;
+  const found = await lstat(at.fallback).catch(() => undefined);
+  return found?.isDirectory() === true && found.uid === at.uid && (found.mode & 0o7777) === 0o700 ? at.fallback : undefined;
+}
+
+/** The current user's runtime directory, if Podman can use it. */
+export async function userRuntimeDirectory(): Promise<string | undefined> {
+  const uid = process.getuid?.();
+  return uid === undefined ? undefined : runtimeDirectoryOf({ xdg: process.env.XDG_RUNTIME_DIR, fallback: `/run/user/${String(uid)}`, uid });
+}
+
+/** Keeps rootless network socket paths within the system socket path limit. */
+const PODMAN_RUNTIME_HASH_LENGTH = 12;
+
+function podmanRuntime(root: string, key: string): string {
+  return join(root, 'aeolus', createHash('sha256').update(key).digest('hex').slice(0, PODMAN_RUNTIME_HASH_LENGTH));
+}
+
+/** The short runtime directory of one ship. */
+export function shipPodmanRuntime(root: string, shipId: ShipId): string {
+  return podmanRuntime(root, shipId);
+}
+
+/** The short runtime directory of one isolated unshare operation, keyed by its scratch path. */
+export function unsharePodmanRuntime(root: string, scratchPath: string): string {
+  return podmanRuntime(root, scratchPath);
 }

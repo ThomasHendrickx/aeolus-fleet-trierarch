@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
-import { chmod, lstat, mkdir, readdir, rename, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 import type { LeftInTrash, TrashPort } from '../core/ports.js';
 import { runCommand, type CommandResult } from './run-command.js';
+import { unsharePodmanRuntime, userRuntimeDirectory } from './paths.js';
 
 /**
  * The trash a ship's clone and its ship's home go to when they are removed
@@ -198,14 +199,40 @@ const UNSHARE_TIME_LIMIT_MS = 60_000;
 type Run = (command: string, options: { args: readonly string[]; timeoutMs?: number }) => Promise<CommandResult>;
 
 /** Runs the words within the runtime's user namespace, ended at its time limit. */
-async function withinUserNamespace(runtime: { binary: string; run: Run }, args: readonly string[]): Promise<void> {
+async function withinUserNamespace(runtime: { binary: string; run: Run }, call: { args: readonly string[]; flags?: readonly string[] }): Promise<void> {
   const { binary, run } = runtime;
-  const result = await run(binary, { args: ['unshare', ...args], timeoutMs: UNSHARE_TIME_LIMIT_MS });
+  const { args, flags = [] } = call;
+  const result = await run(binary, { args: [...flags, 'unshare', ...args], timeoutMs: UNSHARE_TIME_LIMIT_MS });
   if (result.isTimedOut === true) {
     throw new Error(`${binary} unshare ${args[0] ?? ''} did not end within ${String(UNSHARE_TIME_LIMIT_MS)} ms`);
   }
   if (result.status !== 0) {
     throw new Error(`${binary} unshare ${args[0] ?? ''} failed: ${result.stderr.trim()}`);
+  }
+}
+
+/** A temporary, isolated Podman store for unshare, beside the item in the trash. */
+async function isolatedUnshare(runtime: { binary: string; run: Run }, call: { trash: string; args: readonly string[] }): Promise<void> {
+  const { trash, args } = call;
+  const made = await mkdtemp(join(trash, '.unshare-'));
+  const scratch = `${made}.${String(Date.now())}`;
+  await rename(made, scratch);
+  const runtimeRoot = await userRuntimeDirectory();
+  if (runtimeRoot === undefined) {
+    await rm(scratch, { recursive: true, force: true });
+    throw new Error('Podman unshare needs XDG_RUNTIME_DIR or a private owned user runtime directory');
+  }
+  const runtimeDirectory = unsharePodmanRuntime(runtimeRoot, scratch);
+  try {
+    const graph = join(scratch, 'graph');
+    const runroot = join(runtimeDirectory, 'run');
+    const temporaryDirectory = join(runtimeDirectory, 'tmp');
+    await mkdir(runroot, { recursive: true, mode: PRIVATE_FOLDER_MODE });
+    await mkdir(temporaryDirectory, { recursive: true, mode: PRIVATE_FOLDER_MODE });
+    await withinUserNamespace(runtime, { args, flags: ['--root', graph, '--runroot', runroot, '--tmpdir', temporaryDirectory] });
+  } finally {
+    await rm(runtimeDirectory, { recursive: true, force: true });
+    await rm(scratch, { recursive: true, force: true });
   }
 }
 
@@ -215,17 +242,27 @@ async function withinUserNamespace(runtime: { binary: string; run: Run }, args: 
  * left that the host user cannot remove.
  */
 export function removeWithinUserNamespace(binary: string, run: Run = runCommand): (path: string) => Promise<void> {
-  return (path) => withinUserNamespace({ binary, run }, ['rm', '-rf', '--', path]);
+  return (path) => withinUserNamespace({ binary, run }, { args: ['rm', '-rf', '--', path] });
 }
 
-/**
- * Gives a folder its owner's read, write and search and moves it to the path,
- * within the container runtime's user namespace: a folder whose own top the
- * host user cannot give its write, as one owned by an id a session mapped.
- */
+/** Removes a path through a Podman namespace whose store and runtime are in the trash. */
+export function removeWithinIsolatedUserNamespace(binary: string, run: Run = runCommand): (path: string) => Promise<void> {
+  return (path) => isolatedUnshare({ binary, run }, { trash: dirname(path), args: ['rm', '-rf', '--', path] });
+}
+
+/** Moves a folder through the runtime's user namespace. */
 export function moveWithinUserNamespace(binary: string, run: Run = runCommand): MoveWithinUserNamespace {
   return async (from, to) => {
-    await withinUserNamespace({ binary, run }, ['chmod', 'u+rwx', '--', from]);
-    await withinUserNamespace({ binary, run }, ['mv', '-T', '--', from, to]);
+    await withinUserNamespace({ binary, run }, { args: ['chmod', 'u+rwx', '--', from] });
+    await withinUserNamespace({ binary, run }, { args: ['mv', '-T', '--', from, to] });
+  };
+}
+
+/** Moves a folder through a Podman namespace whose store and runtime are in the trash. */
+export function moveWithinIsolatedUserNamespace(binary: string, run: Run = runCommand): MoveWithinUserNamespace {
+  return async (from, to) => {
+    const trash = dirname(to);
+    await isolatedUnshare({ binary, run }, { trash, args: ['chmod', 'u+rwx', '--', from] });
+    await isolatedUnshare({ binary, run }, { trash, args: ['mv', '-T', '--', from, to] });
   };
 }

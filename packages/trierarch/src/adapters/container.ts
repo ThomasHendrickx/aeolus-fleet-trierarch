@@ -1,18 +1,22 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { appendFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
 import { createHoldRuntime } from './hold-runtime.js';
-import { shipHome, shipSockets as socketsOf } from './paths.js';
+import { shipHome, shipPodmanRuntime, shipSockets as socketsOf, userRuntimeDirectory } from './paths.js';
 import { runCommand, type CommandResult } from './run-command.js';
-import { moveWithinUserNamespace, removeWithinUserNamespace } from './trash.js';
+import { discard, moveWithinIsolatedUserNamespace, moveWithinUserNamespace, removeWithinUserNamespace } from './trash.js';
 
 const PREFIX = 'trierarch-';
 const OWNER_LABEL = 'aeolus.trierarch';
 const CONTAINER_OWNER = 'aeolus-trierarch';
+const PODMAN_CLEANUP_TIMEOUT_MS = 60_000;
+const NESTED_CONTAINER_STORAGE = '/containers';
+const NESTED_CONTAINER_RUNTIME = '/containers-runtime';
+
 /** The variable Claude Code reads its long-lived model token from (`claude setup-token`). */
 export const MODEL_TOKEN_VARIABLE = 'CLAUDE_CODE_OAUTH_TOKEN';
 /** The session user's home in the image, where each container gets its ship's own home. */
@@ -43,7 +47,7 @@ export function containerProxyUrl(url: string): string {
 /** The env file in the session's own folder, beside its hold's files. */
 const ENV_FILE = 'session.env';
 
-type Run = (command: string, options: { args: readonly string[] }) => Promise<CommandResult>;
+type Run = (command: string, options: { args: readonly string[]; timeoutMs?: number }) => Promise<CommandResult>;
 
 export interface ContainerRuntimeOptions {
   /** The docker-style binary of a rootless runtime: podman on Linux, docker in a Colima context on macOS. */
@@ -169,7 +173,14 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     removeWithinUserNamespace: removeWithinUserNamespace(options.binary),
     heldAs: async ({ shipId, folder, command, env = {}, proxyToken, shipFolder }, files) => {
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
-      const content = envFileOf({ ...env, ...login });
+      const runtimeRoot = options.platform === 'linux' && shipFolder !== undefined ? await userRuntimeDirectory() : undefined;
+      let shipRuntime = runtimeRoot === undefined ? undefined : shipPodmanRuntime(runtimeRoot, shipId);
+      const nestedEnvironment: Readonly<Record<string, string>> = options.platform === 'linux' && shipFolder !== undefined ? {
+        CONTAINERS_CONF: `${NESTED_CONTAINER_STORAGE}/containers.conf`,
+        CONTAINERS_STORAGE_CONF: `${NESTED_CONTAINER_STORAGE}/storage.conf`,
+        XDG_RUNTIME_DIR: NESTED_CONTAINER_RUNTIME,
+      } : {};
+      const content = envFileOf({ ...env, ...login, ...nestedEnvironment });
       const network = proxyToken === undefined ? [] : ['--network', proxyNetworkOf(await proxyPortOf(options.proxyUrl))];
       const ship = { shipId, ...(shipFolder !== undefined && { shipFolder }) };
       const home = shipHome(options.homes, ship);
@@ -177,7 +188,45 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       // The runtime mounts only a folder that exists, and the ship's socket may not have made it yet.
       await mkdir(shipSockets, { recursive: true, mode: 0o700 });
       await mkdir(home, { recursive: true, mode: 0o700 });
+      const storage = options.platform === 'linux' && shipFolder !== undefined ? join(shipFolder, 'containers') : undefined;
       await mkdir(files.folder, { recursive: true, mode: 0o700 });
+      if (shipRuntime !== undefined) {
+        try {
+          await rm(shipRuntime, { recursive: true, force: true });
+          await mkdir(join(shipRuntime, 'tmp'), { recursive: true, mode: 0o700 });
+          await mkdir(join(shipRuntime, 'run'), { recursive: true, mode: 0o700 });
+        } catch (error) {
+          await appendFile(files.events, `${JSON.stringify({ type: 'system', subtype: 'podman', message: `Nested Podman cannot start: ${String(error)}` })}\n`);
+          shipRuntime = undefined;
+        }
+      }
+      const runtimeMount = shipRuntime === undefined ? [] : ['--volume', `${shipRuntime}:${NESTED_CONTAINER_RUNTIME}`];
+      if (storage !== undefined && shipFolder !== undefined) {
+        if (shipRuntime === undefined) {
+          await appendFile(files.events, `${JSON.stringify({ type: 'system', subtype: 'podman', message: 'Nested Podman cannot start: no private user runtime directory' })}\n`);
+        }
+        const hasStorage = (await stat(storage).catch(() => undefined)) !== undefined;
+        const prepareStorage = async (): Promise<void> => {
+          await mkdir(storage, { recursive: true, mode: 0o700 });
+          await writeFile(join(storage, 'storage.conf'), `[storage]\ndriver = "overlay"\ngraphroot = "${NESTED_CONTAINER_STORAGE}/graph"\nrootless_storage_path = "${NESTED_CONTAINER_STORAGE}/graph"\nrunroot = "${NESTED_CONTAINER_RUNTIME}/run/containers"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n`);
+          await writeFile(join(storage, 'containers.conf'), `[containers]\ncgroups = "disabled"\ndefault_sysctls = []\n[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\ntmp_dir = "${NESTED_CONTAINER_RUNTIME}/tmp"\n`);
+        };
+        await prepareStorage();
+        if (hasStorage) {
+          const cleaned = shipRuntime === undefined ? undefined : await run(options.binary, { args: [
+            'run', '--rm', '--pull=never', `--userns=keep-id:${SESSION_USER}`,
+            '--device', '/dev/fuse', '--device', '/dev/net/tun', '--cap-add', 'SYS_ADMIN', '--security-opt', 'unmask=ALL',
+            '--volume', `${home}:${SESSION_HOME}`, '--volume', `${storage}:${NESTED_CONTAINER_STORAGE}`, ...runtimeMount,
+            '--env', `HOME=${SESSION_HOME}`, ...Object.entries(nestedEnvironment).flatMap(([key, value]) => ['--env', `${key}=${value}`]), '--entrypoint', '/bin/sh', options.image, '-c',
+            'podman rm --all --force --time 0 --volumes && podman volume rm --all --force',
+          ], timeoutMs: PODMAN_CLEANUP_TIMEOUT_MS }).catch(() => undefined);
+          if (cleaned?.status !== 0) {
+            await appendFile(files.events, `${JSON.stringify({ type: 'system', subtype: 'podman', message: `Nested Podman cleanup failed: ${cleaned?.stderr ?? 'runtime could not start'}` })}\n`);
+            await discard(storage, { at: new Date(), into: dirname(shipFolder), withinUserNamespace: moveWithinIsolatedUserNamespace(options.binary, run) });
+            await prepareStorage();
+          }
+        }
+      }
       const envFile = join(files.folder, ENV_FILE);
       await writeFile(envFile, content, { mode: 0o600 });
       return {
@@ -216,6 +265,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           '--volume',
           `${shipSockets}:${shipSockets}`,
           ...((shipFolder ?? (options.shipsRoot === undefined ? undefined : join(options.shipsRoot, shipId))) === undefined ? [] : ['--volume', `${join(shipFolder ?? join(options.shipsRoot ?? '', shipId), 'tmp')}:/tmp`]),
+          ...(storage === undefined ? [] : ['--volume', `${storage}:${NESTED_CONTAINER_STORAGE}`, ...runtimeMount]),
           '--env',
           `HOME=${SESSION_HOME}`,
           ...(proxyToken === undefined ? [] : ['--env', proxyToken.variable]),
@@ -235,6 +285,16 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
 
   return {
     ...holds,
+    stop: async (shipId) => {
+      await holds.stop(shipId);
+      if (options.platform === 'linux') {
+        const root = await userRuntimeDirectory();
+        if (root !== undefined) {
+          const runtime = shipPodmanRuntime(root, shipId);
+          if ((await stat(runtime).catch(() => undefined)) !== undefined) await rm(runtime, { recursive: true, force: true });
+        }
+      }
+    },
     // The container's first process as the host sees it: every process of the session runs under it; none once it runs no more.
     sessionRootOf: async (shipId) => {
       const inspected = await runtime(['inspect', '--format', '{{.State.Pid}}', containerName(shipId)]);
