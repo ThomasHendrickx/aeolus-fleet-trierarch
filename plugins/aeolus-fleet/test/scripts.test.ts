@@ -4104,6 +4104,23 @@ describe("where a folder's identity lives (#658)", () => {
     expect(readFileSync(join(named, identityName()), 'utf8')).toContain(`crewToken=${CREW_TOKEN}\n`);
   });
 
+  it.each(['show', 'launch', 'turn', 'store'])('does not recreate a removed ship folder when reading %s', (command) => {
+    const ship = join(home, 'ships', 'scout');
+    const env = { AEOLUS_CREWS: join(ship, 'home', '.aeolus', 'crews', 'claude-code'), AEOLUS_DATA: join(ship, 'home', '.claude', 'plugins', 'data') };
+
+    run('aeolus-identity.sh', { args: [command], env });
+
+    expect(statSync(ship, { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('does not create a missing crews folder on a read when plugin data exists', () => {
+    const ship = join(home, 'ships', 'scout');
+
+    run('aeolus-identity.sh', { args: ['launch'], env: { AEOLUS_CREWS: join(ship, 'home', 'crews'), AEOLUS_DATA: data } });
+
+    expect(statSync(ship, { throwIfNoEntry: false })).toBeUndefined();
+  });
+
   it('moves the identities of a session on the old layout to ~/.aeolus/crews/claude-code at the next session start', () => {
     anOldLayout();
 

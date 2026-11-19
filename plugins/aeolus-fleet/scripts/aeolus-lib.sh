@@ -165,19 +165,19 @@ aeolus_ships_dir() {
 aeolus_move_ships() {
   local crews="$1" data old entry
   data="${AEOLUS_DATA:-${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}}"
-  if [ ! -d "$crews" ]; then
-    (umask 077 && mkdir -p "$crews") 2>/dev/null || return 0
-  fi
   aeolus_crews_known || return 0
   [ -n "$data" ] && [ -d "$data" ] || return 0
   old="$data/ships"
   if [ -d "$old" ] && [ ! -L "$old" ]; then
+    # Only migration creates the destination: reads leave a missing ship folder alone.
+    (umask 077 && mkdir -p "$crews") 2>/dev/null || return 0
     for entry in "$old"/*; do
       [ -e "$entry" ] || continue
       [ -e "$crews/${entry##*/}" ] || mv "$entry" "$crews/" 2>/dev/null || true
     done
     rmdir "$old" 2>/dev/null || return 0
   fi
+  [ -d "$crews" ] || return 0
   [ -e "$old" ] || [ -L "$old" ] || ln -s "$crews" "$old" 2>/dev/null || true
 }
 

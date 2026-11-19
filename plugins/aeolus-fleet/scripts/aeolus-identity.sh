@@ -38,8 +38,8 @@ case "$command" in
     IFS= read -r token || true
     [ -n "$token" ] || { echo "$usage" >&2; exit 2; }
     folder="$(aeolus_folder)"
-    mkdir -p "$(dirname "$file")"
     umask 077
+    mkdir -p "$(dirname "$file")"
     printf 'fleetUrl=%s\nshipId=%s\nshipName=%s\n' "${1%/}" "$2" "$3" > "$file.tmp"
     # A folder whose calls go over its trierarch's socket holds no crew token, only the lease it
     # stands for, so its store and reports still tell its crews apart; any other keeps its own.
