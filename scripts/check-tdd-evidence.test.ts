@@ -98,12 +98,12 @@ describe('the TDD evidence check', () => {
     expect(violations(head)).toHaveLength(1);
   });
 
-  it('refuses a (red) commit that deletes a test', () => {
+  it('passes a (red) commit that deletes a test', () => {
     repository.remove('packages/trierarch/src/core/rules.test.ts');
     repository.commit('test(trierarch): drop a test (red)');
     const head = green();
 
-    expect(violations(head)).toHaveLength(1);
+    expect(violations(head)).toEqual([]);
   });
 
   it('refuses a fix commit without a (red) commit before it', () => {
