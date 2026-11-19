@@ -6,7 +6,6 @@ import { createFreeDisk } from './free-disk.js';
 const MINUTE_MS = 60_000;
 
 function disk(at: { hasBrokenTrash?: boolean; hasBrokenImages?: boolean; hasBrokenCache?: boolean } = {}) {
-  const calls = { images: 0, cache: 0 };
   const stored = { trash: ['old-worktree'], images: ['old-image'], cache: ['unused-package'] };
   const logger = new CollectingLogger();
   const clock = new TestClock();
@@ -17,13 +16,11 @@ function disk(at: { hasBrokenTrash?: boolean; hasBrokenImages?: boolean; hasBrok
       return Promise.resolve([]);
     } },
     images: { removeUnused: () => {
-      calls.images += 1;
       if (at.hasBrokenImages === true) return Promise.reject(new Error('images unavailable'));
       stored.images = [];
       return Promise.resolve();
     } },
     cache: { trim: (_now, request) => {
-      calls.cache += 1;
       if (at.hasBrokenCache === true) return Promise.reject(new Error('cache unavailable'));
       // Ordinary trimming is not due yet. Urgent trimming moves entries to trash.
       if (request.isUrgent) { stored.trash.push(...stored.cache); stored.cache = []; }
@@ -31,7 +28,8 @@ function disk(at: { hasBrokenTrash?: boolean; hasBrokenImages?: boolean; hasBrok
     } },
     clock, logger,
   });
-  return { free, stored, logger, calls, clock };
+  const leaveBehind = (): void => { stored.images = ['old-image']; stored.cache = ['unused-package']; };
+  return { free, stored, logger, clock, leaveBehind };
 }
 
 describe('freeing disk before the alert', () => {
@@ -65,19 +63,21 @@ describe('freeing disk before the alert', () => {
     expect(machine.logger.warnings).toContain('Could not free disk: trash unavailable');
   });
 
-  it('measures the cache and removes images at most hourly while the disk stays low', async () => {
+  it('leaves new unused images and evictable cache alone while the disk stays low within the hour', async () => {
     const machine = disk();
     await machine.free();
+    machine.leaveBehind();
     machine.clock.advance(MINUTE_MS);
     await machine.free();
-    expect(machine.calls).toEqual({ images: 1, cache: 1 });
+    expect(machine.stored).toEqual({ trash: [], images: ['old-image'], cache: ['unused-package'] });
   });
 
-  it('measures the cache and removes images again an hour later', async () => {
+  it('removes new unused images and evictable cache again an hour later', async () => {
     const machine = disk();
     await machine.free();
+    machine.leaveBehind();
     machine.clock.advance(60 * MINUTE_MS);
     await machine.free();
-    expect(machine.calls).toEqual({ images: 2, cache: 2 });
+    expect(machine.stored).toEqual({ trash: [], images: [], cache: [] });
   });
 });
