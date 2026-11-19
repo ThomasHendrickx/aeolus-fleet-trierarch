@@ -31,6 +31,7 @@ import { PLUGIN_HARNESSES } from '../adapters/plugin.js';
 import { createCallerCheck } from '../adapters/caller-check.js';
 import { createShipSockets } from '../adapters/ship-sockets.js';
 import { sessionsLaunch, systemdVersionOf } from '../adapters/hold-runtime.js';
+import { createSessionImages } from '../adapters/session-images.js';
 import { createSessionCache } from '../adapters/session-cache.js';
 import { createTrust } from '../adapters/trust.js';
 import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../adapters/trusted-repositories-file.js';
@@ -175,7 +176,38 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexSetup(),
   });
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
-  const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: shipsRoot }), fleet, state, clock, logger });
+  const cache = createSessionCache({ root: join(paths.home, 'cache'), ...(configured.cacheSizeBytes !== undefined && { maxBytes: configured.cacheSizeBytes }) });
+  const images = createSessionImages({ binary: configured.runtime?.kind === 'container' ? configured.runtime.binary : 'podman', version });
+  const warnCleanup = (error: unknown): void => { logger.warn(`Could not free disk: ${error instanceof Error ? error.message : String(error)}`); };
+  const diskReadings = new Map<string, { at: number; bytes: number }>();
+  const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: shipsRoot }), fleet, state, clock, logger, disk: {
+    removeUnusedImages: () => images.removeUnused(),
+    free: async () => {
+      await trash.empty().catch(warnCleanup);
+      await images.removeUnused().catch(warnCleanup);
+      await cache.trim(clock.now(), { isUrgent: true }).catch(warnCleanup);
+      // Cache eviction goes through its trash; reclaim those bytes before reading disk again.
+      await trash.empty().catch(warnCleanup);
+    },
+    largestShips: async () => {
+      const entries = Object.values((await state.load()).entries);
+      const held = await Promise.all(entries.map(async (entry) => {
+        const folder = entry.shipFolder ?? entry.folder;
+        if (folder === undefined) return [];
+        try {
+          const previous = diskReadings.get(folder);
+          const now = clock.now().getTime();
+          const bytes = previous !== undefined && now - previous.at < 600_000 ? previous.bytes : await measureShipFolder(folder);
+          diskReadings.set(folder, { at: previous !== undefined && now - previous.at < 600_000 ? previous.at : now, bytes });
+          return [{ name: entry.shipName ?? entry.shipId, bytes }];
+        } catch (error) {
+          logger.warn(`Could not measure ${entry.shipId} for low disk: ${error instanceof Error ? error.message : String(error)}`);
+          return [];
+        }
+      }));
+      return held.flat().sort((a, b) => b.bytes - a.bytes).slice(0, 5);
+    },
+  } });
   const usage = createUsage({
     'claude-code': createClaudeCodeUsage({
       // In containers each ship's conversations are in its own home (decision 0039).
@@ -194,7 +226,6 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
   const sendUsage = createSendUsage({ fleet, usage, state, readUsage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
-  const cache = createSessionCache({ root: join(paths.home, 'cache'), ...(configured.cacheSizeBytes !== undefined && { maxBytes: configured.cacheSizeBytes }) });
   const keepProxy = async (): Promise<void> => {
     const held = await Promise.all(PLUGIN_HARNESSES.map((harness) => keys.has(harness)));
     await proxy.keep({ isNeeded: held.includes(true) }).catch((error: unknown) => {

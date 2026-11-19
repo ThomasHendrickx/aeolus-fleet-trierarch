@@ -34,14 +34,14 @@ async function directories(path: string): Promise<string[]> {
 }
 
 /** Trims whole tool-managed units, never following links or touching a person's cache. */
-export function createSessionCache(options: { root: string; maxBytes?: number }): { trim(now: Date): Promise<void> } {
+export function createSessionCache(options: { root: string; maxBytes?: number }): { trim(now: Date, options?: { isUrgent: boolean }): Promise<void> } {
   let lastCheck: number | undefined;
   let isRunning = false;
   return {
-    trim: async (now) => {
+    trim: async (now, request) => {
       const { root, maxBytes } = options;
       const time = now.getTime();
-      if (maxBytes === undefined || isRunning || (lastCheck !== undefined && time - lastCheck < HOUR_MS)) return;
+      if (maxBytes === undefined || isRunning || (request?.isUrgent !== true && lastCheck !== undefined && time - lastCheck < HOUR_MS)) return;
       isRunning = true;
       lastCheck = time;
       try {

@@ -113,7 +113,7 @@ describe("the machine's load, as the trierarch reads it (#400)", () => {
 });
 
 /** Cleanup changes the machine, rather than merely recording that a callback ran. */
-function diskTrierarch(at: { recovers?: boolean; fails?: boolean } = {}) {
+function diskTrierarch(at: { hasRecovered?: boolean; isFailing?: boolean } = {}) {
   const machine = new InMemoryMachine();
   machine.current = LOW_DISK;
   const fleet = new InMemoryFleet();
@@ -123,20 +123,21 @@ function diskTrierarch(at: { recovers?: boolean; fails?: boolean } = {}) {
   let cleanups = 0;
   let imagePasses = 0;
   const read = createReadLoad({ machine, fleet, state, clock, logger, disk: {
-    removeUnusedImages: async () => { imagePasses += 1; },
-    free: async () => {
+    removeUnusedImages: () => { imagePasses += 1; return Promise.resolve(); },
+    free: () => {
       cleanups += 1;
-      if (at.fails === true) throw new Error('cannot clean');
-      if (at.recovers === true) machine.current = aMachineLoad();
+      if (at.isFailing === true) return Promise.reject(new Error('cannot clean'));
+      if (at.hasRecovered === true) machine.current = aMachineLoad();
+      return Promise.resolve();
     },
-    largestShips: async () => [{ name: 'large-ship', bytes: 900 }, { name: 'small-ship', bytes: 100 }],
+    largestShips: () => Promise.resolve([{ name: 'large-ship', bytes: 900 }, { name: 'small-ship', bytes: 100 }]),
   } });
   return { read, machine, fleet, state, clock, logger, cleanups: () => cleanups, imagePasses: () => imagePasses };
 }
 
 describe('low disk cleanup before telling argo (#352)', () => {
   it('returns the recovered load and tells nobody when freeing disk reaches 5 percent', async () => {
-    const trierarch = diskTrierarch({ recovers: true });
+    const trierarch = diskTrierarch({ hasRecovered: true });
     expect(await trierarch.read()).toEqual(aMachineLoad());
     expect(trierarch.fleet.toArgo).toEqual([]);
     expect(trierarch.cleanups()).toBe(1);
@@ -153,8 +154,8 @@ describe('low disk cleanup before telling argo (#352)', () => {
     expect(trierarch.cleanups()).toBe(2);
   });
 
-  it('still tells argo when cleanup fails and the disk remains low', async () => {
-    const trierarch = diskTrierarch({ fails: true });
+  it('still tells argo when cleanup isFailing and the disk remains low', async () => {
+    const trierarch = diskTrierarch({ isFailing: true });
     await trierarch.read();
     expect(trierarch.fleet.toArgo).toHaveLength(1);
     expect(trierarch.logger.warnings).toContain('Could not free disk: cannot clean');
