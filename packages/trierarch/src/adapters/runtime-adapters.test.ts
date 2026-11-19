@@ -73,7 +73,7 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
   it('points host sessions at the trierarch cache', async () => {
     const { sessions } = adaptersOf();
     try {
-      await sessions.start({ shipId, folder: home, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+      await sessions.start({ shipId, folder: home, shipFolder: join(home, 'ship'), command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
       const file = join(home, 'fake-starts.jsonl');
       await expect.poll(() => existsSync(file)).toBe(true);
       const started: unknown = JSON.parse(readFileSync(file, 'utf8').trim());
@@ -83,6 +83,7 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
         GOCACHE: join(paths.home, 'cache', 'go-build'),
         GOMODCACHE: join(paths.home, 'cache', 'go-mod'),
         PLAYWRIGHT_BROWSERS_PATH: join(paths.home, 'cache', 'ms-playwright'),
+        TMPDIR: join(home, 'ship', 'tmp'), TMP: join(home, 'ship', 'tmp'), TEMP: join(home, 'ship', 'tmp'),
       } });
     } finally {
       await sessions.stop(shipId);
