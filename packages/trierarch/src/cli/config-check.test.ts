@@ -43,6 +43,13 @@ describe('config check, with the session runtime (decision 0039)', () => {
     expect({ runtime: report.runtime, says: report.text.includes('Sessions run on the host.') }).toEqual({ runtime: { kind: 'host' }, says: true });
   });
 
+  it('says a missing host model token blocks Claude Code subscription sessions without refusing the configuration', async () => {
+    configured(SESSIONS);
+    host.hasModelToken = false;
+    const report = await configCheck(paths, { files: FILES, host });
+    expect(report.text).toContain(`Claude Code subscription sessions cannot start: the model token ${paths.modelToken} is missing or empty`);
+  });
+
   it('says the sessions run in containers, with their caps and where the model token is read, when the container runtime fits', async () => {
     configured({ ...SESSIONS, runtime: CONTAINER });
 

@@ -16,7 +16,7 @@ const crew = { fleetUrl: 'https://fleet.example.com', shipId, crewToken: 'aeolus
 
 function inspect(
   trierarch = aTrierarch(),
-  more: { service?: ServiceStatus; lease?: Lease; running?: RunningFile; configuration?: TrierarchConfiguration; pluginVersions?: Readonly<Record<string, string>> } = {},
+  more: { service?: ServiceStatus; lease?: Lease; running?: RunningFile; configuration?: TrierarchConfiguration; pluginVersions?: Readonly<Record<string, string>>; modelTokenProblem?: string } = {},
 ) {
   return inspectStatus({
     configuration: more.configuration ?? CONFIGURATION,
@@ -28,10 +28,16 @@ function inspect(
     lease: () => Promise.resolve(more.lease ?? 'valid'),
     processes: trierarch.processes,
     state: trierarch.state,
+    ...(more.modelTokenProblem !== undefined && { modelTokenProblem: () => Promise.resolve(more.modelTokenProblem) }),
   });
 }
 
 describe('aeolus-trierarch status', () => {
+  it('says a missing model token blocks Claude Code subscription sessions', async () => {
+    const report = await inspect(aTrierarch(), { modelTokenProblem: 'Claude Code subscription sessions cannot start: the model token /model-token is missing or empty' });
+    expect(describeStatus(report)).toContain('Claude Code subscription sessions cannot start: the model token /model-token is missing or empty');
+  });
+
   it('says how the service runs, the fleet and its own lease, the caps in use, the entries by state, kept worktrees and orphans', async () => {
     const trierarch = aTrierarch();
     const scout = trierarch.fleet.commission('scout');
