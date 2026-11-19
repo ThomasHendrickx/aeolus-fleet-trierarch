@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { appendFileSync, writeFileSync, createWriteStream } from 'node:fs';
 import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { createServer, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
@@ -12,6 +12,7 @@ import { copilotSessionIdOf, copilotStderrEvent, copilotTurnCommand } from './co
 import type { HoldAnswer, HoldFiles, HoldRequest } from './hold-protocol.js';
 import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
 import { runCommand } from './run-command.js';
+import { shipPodmanRuntime, userRuntimeDirectory } from './paths.js';
 import { discard } from './trash.js';
 
 /**
@@ -198,43 +199,70 @@ export async function runHold(options: HoldOptions): Promise<number> {
   let clearContainers: (() => Promise<void>) | undefined;
   let service: ReturnType<typeof spawn> | undefined;
   let socket: string | undefined;
+  let shipRuntime: string | undefined;
   const sessionEnvironment: Record<string, string> = { ...environment };
   if (options.shipContainers !== undefined) {
     const storage = join(options.shipContainers, 'containers');
     socket = join(options.shipContainers, 'podman.sock');
     const config = join(storage, 'storage.conf');
-    await mkdir(storage, { recursive: true, mode: 0o700 });
-    const graph = join(storage, 'graph');
-    const content = `[storage]\ndriver = "overlay"\ngraphroot = ${JSON.stringify(graph)}\nrootless_storage_path = ${JSON.stringify(graph)}\nrunroot = ${JSON.stringify(join(storage, 'run'))}\n`;
-    await writeFile(config, content);
-    const cleanup = async (args: readonly string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', ...args], timeoutMs: 60_000 });
-    clearContainers = async () => {
-      const removed = await cleanup(['rm', '--all', '--force', '--time', '0', '--volumes']).catch(() => undefined);
-      if (removed?.status !== 0) logPodman(`Podman cleanup failed: ${removed?.stderr ?? 'podman could not start'}`);
-    };
-    const containers = await cleanup(['rm', '--all', '--force', '--time', '0', '--volumes']).catch(() => undefined);
-    const volumes = containers?.status === 0 ? await cleanup(['volume', 'rm', '--all', '--force']).catch(() => undefined) : undefined;
-    if (containers?.status !== 0 || volumes?.status !== 0) {
-      logPodman(`Podman cleanup failed: ${containers?.status !== 0 ? containers?.stderr ?? 'podman could not start' : volumes?.stderr ?? 'podman could not start'}`);
-      await discard(storage, { at: new Date(), into: dirname(options.shipContainers) });
-      await mkdir(storage, { recursive: true, mode: 0o700 });
-      await writeFile(config, content);
-    }
-    await rm(socket, { force: true });
     Object.assign(sessionEnvironment, { CONTAINERS_STORAGE_CONF: config, DOCKER_HOST: `unix://${socket}`, CONTAINER_HOST: `unix://${socket}` });
-    const serviceEnv = { ...process.env, CONTAINERS_STORAGE_CONF: config };
-    Reflect.deleteProperty(serviceEnv, 'CONTAINER_HOST');
-    Reflect.deleteProperty(serviceEnv, 'DOCKER_HOST');
-    service = spawn('podman', ['system', 'service', '--time=0', `unix://${socket}`], { env: serviceEnv, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
-    if (service.pid !== undefined) guard.stdin.write(`${String(service.pid)}\n`);
-    service.stderr?.on('data', (chunk: Buffer) => { logPodman(`Podman service: ${chunk.toString('utf8').trim()}`); });
-    service.on('error', (error) => { logPodman(`Podman service: ${error.message}`); });
-    service.on('exit', (code, signal) => {
-      if (!isStopping) logPodman(`Podman service exited with ${signal === null ? `code ${String(code)}` : `signal ${signal}`}`);
-    });
-    for (let attempt = 0; attempt < 100 && service.exitCode === null; attempt += 1) {
-      if ((await stat(socket).catch(() => undefined))?.isSocket() === true) break;
-      await wait(50);
+    try {
+      await mkdir(storage, { recursive: true, mode: 0o700 });
+      const graph = join(storage, 'graph');
+      await rm(socket, { force: true });
+      const runtimeRoot = await userRuntimeDirectory();
+      if (runtimeRoot === undefined) {
+        logPodman('Podman service could not start: XDG_RUNTIME_DIR is unset and the user runtime directory is missing, not private or not owned');
+      } else {
+        shipRuntime = shipPodmanRuntime(runtimeRoot, basename(files.folder));
+        const runroot = join(shipRuntime, 'run');
+        const tmpdir = join(shipRuntime, 'tmp');
+        const podmanStorage = ['--root', graph, '--runroot', runroot, '--tmpdir', tmpdir];
+        await mkdir(runroot, { recursive: true, mode: 0o700 });
+        await mkdir(tmpdir, { recursive: true, mode: 0o700 });
+        const content = `[storage]\ndriver = "overlay"\ngraphroot = ${JSON.stringify(graph)}\nrootless_storage_path = ${JSON.stringify(graph)}\nrunroot = ${JSON.stringify(runroot)}\n`;
+        await writeFile(config, content);
+        const cleanup = async (args: readonly string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', ...podmanStorage, ...args], timeoutMs: 60_000 });
+        clearContainers = async () => {
+          const removed = await cleanup(['rm', '--all', '--force', '--time', '0', '--volumes']).catch(() => undefined);
+          if (removed?.status !== 0) logPodman(`Podman cleanup failed: ${removed?.stderr ?? 'podman could not start'}`);
+        };
+        const containers = await cleanup(['rm', '--all', '--force', '--time', '0', '--volumes']).catch(() => undefined);
+        const volumes = containers?.status === 0 ? await cleanup(['volume', 'rm', '--all', '--force']).catch(() => undefined) : undefined;
+        if (containers?.status !== 0 || volumes?.status !== 0) {
+          logPodman(`Podman cleanup failed: ${containers?.status !== 0 ? containers?.stderr ?? 'podman could not start' : volumes?.stderr ?? 'podman could not start'}`);
+          await discard(storage, { at: new Date(), into: dirname(options.shipContainers) });
+          await mkdir(storage, { recursive: true, mode: 0o700 });
+          await writeFile(config, content);
+        }
+        const serviceEnv = { ...process.env, CONTAINERS_STORAGE_CONF: config };
+        Reflect.deleteProperty(serviceEnv, 'CONTAINER_HOST');
+        Reflect.deleteProperty(serviceEnv, 'DOCKER_HOST');
+        service = spawn('podman', [...podmanStorage, 'system', 'service', '--time=0', `unix://${socket}`], { env: serviceEnv, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+        if (service.pid !== undefined) guard.stdin.write(`${String(service.pid)}\n`);
+        service.stderr?.on('data', (chunk: Buffer) => { logPodman(`Podman service: ${chunk.toString('utf8').trim()}`); });
+        const clearFailedService = async (): Promise<void> => {
+          await clearContainers?.();
+          if (shipRuntime !== undefined) await rm(shipRuntime, { recursive: true, force: true });
+        };
+        const serviceFailed = (): void => { void clearFailedService().catch((error: unknown) => { logPodman(`Podman service cleanup failed: ${String(error)}`); }); };
+        service.on('error', (error) => { logPodman(`Podman service: ${error.message}`); serviceFailed(); });
+        service.on('exit', (code, signal) => {
+          if (!isStopping) {
+            logPodman(`Podman service exited with ${signal === null ? `code ${String(code)}` : `signal ${signal}`}`);
+            serviceFailed();
+          }
+        });
+        for (let attempt = 0; attempt < 100 && service.exitCode === null; attempt += 1) {
+          if ((await stat(socket).catch(() => undefined))?.isSocket() === true) break;
+          await wait(50);
+        }
+      }
+    } catch (error) {
+      logPodman(`Podman service could not start: ${String(error)}`);
+      clearContainers = undefined;
+      if (shipRuntime !== undefined) await rm(shipRuntime, { recursive: true, force: true }).catch(() => undefined);
+      shipRuntime = undefined;
     }
   }
 
@@ -459,6 +487,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
     }
   }
   if (socket !== undefined) await rm(socket, { force: true });
+  if (shipRuntime !== undefined) await rm(shipRuntime, { recursive: true, force: true });
   await rm(files.socket, { force: true });
   await new Promise((resolve) => events.end(resolve));
   return code;
