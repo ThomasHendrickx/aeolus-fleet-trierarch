@@ -169,7 +169,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     removeWithinUserNamespace: removeWithinUserNamespace(options.binary),
     heldAs: async ({ shipId, folder, command, env = {}, proxyToken, shipFolder }, files) => {
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
-      const content = envFileOf({ ...env, ...login });
+      const content = envFileOf({ ...env, ...login, ...(options.platform === 'linux' && shipFolder !== undefined && { AEOLUS_SHIP_CONTAINER_STORAGE: '1' }) });
       const network = proxyToken === undefined ? [] : ['--network', proxyNetworkOf(await proxyPortOf(options.proxyUrl))];
       const ship = { shipId, ...(shipFolder !== undefined && { shipFolder }) };
       const home = shipHome(options.homes, ship);
