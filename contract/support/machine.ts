@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -425,17 +424,9 @@ async function git(args: readonly string[]): Promise<void> {
 /** The harnesses a machine may have installed, besides Claude Code, which every machine has. */
 export type OtherHarness = 'codex' | 'copilot';
 
-/** A new folder of four characters in the run's short folder, for the machine: a ship's socket path under its home is within the system's limit only for a short path. */
+/** A new short folder made atomically in the run's short folder, keeping a ship's socket path within the system limit. */
 function aShortFolder(): string {
-  for (;;) {
-    const folder = join(process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '', randomBytes(2).toString('hex'));
-    try {
-      mkdirSync(folder);
-      return realpathSync(folder);
-    } catch (error) {
-      if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') throw error;
-    }
-  }
+  return realpathSync(mkdtempSync(`${process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '.'}/`));
 }
 
 /** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet. */
