@@ -9,7 +9,7 @@ import { aShortHome } from '../../test/support/short-home.js';
 import { createContainerRuntime } from './container.js';
 import { shipPodmanRuntime } from './paths.js';
 
-it('keeps nested Podman storage and runtime files in the ship folder', async () => {
+it('keeps nested Podman storage with the ship and runtime in the user runtime directory', async () => {
   const folder = realpathSync(aShortHome('nested-storage'));
   const sessions = realpathSync(aShortHome('nested-holds'));
   const shipId = newId('ship');
