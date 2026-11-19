@@ -123,7 +123,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, proxyUrl: async () => {
       const url = await proxy.url();
       return url === undefined ? undefined : modelProxyUrlOf(url);
-    }, ...(shipHomes !== undefined && { shipHomes }) });
+    }, ...(shipHomes !== undefined ? { shipHomes } : { hostShipHomes: { homes: paths.homes, managedSettings } }) });
   const state = createJsonState(paths.state);
   const trust = createTrust({ configuration, homeDirectory, env, managedSettings });
   const clock = { now: () => new Date() };

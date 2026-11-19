@@ -53,8 +53,8 @@ const PRIVATE_FOLDER_MODE = 0o700;
  * under `homes` goes with the ship's identity, as on a release, through the
  * trash beside it; one in a ship's folder goes with that folder.
  */
-export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: string; moveWithinUserNamespace?: MoveWithinUserNamespace; pluginRoot: AeolusPlugin['root']; host: Pick<ClaudeCodeSetup, 'isSkipPermissionsAccepted'> }): ClaudeCodeHomes {
-  const setupOf = (ship: ShipFiles): ClaudeCodeSetup => createClaudeCodeSetup({ homeDirectory: shipHome(at.homes, ship), managedSettings: at.managedSettings });
+export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: string; moveWithinUserNamespace?: MoveWithinUserNamespace; pluginRoot: AeolusPlugin['root']; isConfigDirectory?: boolean; host: Pick<ClaudeCodeSetup, 'isSkipPermissionsAccepted'> }): ClaudeCodeHomes {
+  const setupOf = (ship: ShipFiles): ClaudeCodeSetup => createClaudeCodeSetup({ homeDirectory: shipHome(at.homes, ship), managedSettings: at.managedSettings, ...(at.isConfigDirectory === true && { configDirectory: join(shipHome(at.homes, ship), '.claude') }) });
 
   return {
     of: (ship) => {
