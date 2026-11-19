@@ -191,7 +191,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
             'podman rm --all --force --time 0 --volumes && podman volume rm --all --force',
           ], timeoutMs: 60_000 }).catch(() => undefined);
           if (cleaned?.status !== 0) {
-            await appendFile(files.events, `Nested Podman cleanup failed: ${cleaned?.stderr ?? 'runtime could not start'}\n`);
+            await appendFile(files.events, `${JSON.stringify({ type: 'system', subtype: 'podman', message: `Nested Podman cleanup failed: ${cleaned?.stderr ?? 'runtime could not start'}` })}\n`);
             await discard(storage, { at: new Date(), into: dirname(shipFolder), withinUserNamespace: moveWithinUserNamespace(options.binary, run) });
             await mkdir(storage, { recursive: true, mode: 0o700 });
           }

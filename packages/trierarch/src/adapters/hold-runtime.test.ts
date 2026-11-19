@@ -138,7 +138,9 @@ it.runIf(process.platform === 'linux')('starts the host session with its own soc
     expect(starts()[0]?.env.DOCKER_HOST).toBe(`unix://${shipFolder}/podman.sock`);
     expect(existsSync(join(shipFolder, 'podman.sock'))).toBe(false);
     await expect.poll(async () => (await runtime.events(shipId)).join('\n')).toContain('podman-refused');
-    expect(() => (readFileSync(join(sessions, shipId, 'events.jsonl'), 'utf8').trim().split('\n')).map((line) => JSON.parse(line))).not.toThrow();
+    expect(() => {
+      for (const line of readFileSync(join(sessions, shipId, 'events.jsonl'), 'utf8').trim().split('\n')) JSON.parse(line);
+    }).not.toThrow();
   } finally {
     restore('PATH', previous);
     await runtime.stop(shipId);

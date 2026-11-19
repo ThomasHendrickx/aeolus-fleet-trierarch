@@ -193,6 +193,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
     signalGroup(running, 'SIGKILL');
   };
 
+  const logPodman = (message: string): void => { events.write(`${JSON.stringify({ type: 'system', subtype: 'podman', message })}\n`); };
   let clearContainers: (() => Promise<void>) | undefined;
   let service: ReturnType<typeof spawn> | undefined;
   let socket: string | undefined;
@@ -208,12 +209,12 @@ export async function runHold(options: HoldOptions): Promise<number> {
     const cleanup = async (args: readonly string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', ...args], timeoutMs: 60_000 });
     clearContainers = async () => {
       const removed = await cleanup(['rm', '--all', '--force', '--time', '0', '--volumes']).catch(() => undefined);
-      if (removed?.status !== 0) events.write(`Podman cleanup failed: ${removed?.stderr ?? 'podman could not start'}\n`);
+      if (removed?.status !== 0) logPodman(`Podman cleanup failed: ${removed?.stderr ?? 'podman could not start'}`);
     };
     const containers = await cleanup(['rm', '--all', '--force', '--time', '0', '--volumes']).catch(() => undefined);
     const volumes = containers?.status === 0 ? await cleanup(['volume', 'rm', '--all', '--force']).catch(() => undefined) : undefined;
     if (containers?.status !== 0 || volumes?.status !== 0) {
-      events.write(`Podman cleanup failed: ${containers?.stderr ?? volumes?.stderr ?? 'podman could not start'}\n`);
+      logPodman(`Podman cleanup failed: ${containers?.status !== 0 ? containers?.stderr ?? 'podman could not start' : volumes?.stderr ?? 'podman could not start'}`);
       await discard(storage, { at: new Date(), into: dirname(options.shipContainers) });
       await mkdir(storage, { recursive: true, mode: 0o700 });
       await writeFile(config, content);
@@ -225,8 +226,8 @@ export async function runHold(options: HoldOptions): Promise<number> {
     Reflect.deleteProperty(serviceEnv, 'DOCKER_HOST');
     service = spawn('podman', ['system', 'service', '--time=0', `unix://${socket}`], { env: serviceEnv, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
     if (service.pid !== undefined) guard.stdin.write(`${String(service.pid)}\n`);
-    service.stderr?.on('data', (chunk: Buffer) => events.write(`Podman service: ${chunk.toString('utf8')}`));
-    service.on('error', (error) => events.write(`Podman service: ${error.message}\n`));
+    service.stderr?.on('data', (chunk: Buffer) => { logPodman(`Podman service: ${chunk.toString('utf8').trim()}`); });
+    service.on('error', (error) => { logPodman(`Podman service: ${error.message}`); });
     for (let attempt = 0; attempt < 100 && service.exitCode === null; attempt += 1) {
       if ((await stat(socket).catch(() => undefined))?.isSocket() === true) break;
       await wait(50);
