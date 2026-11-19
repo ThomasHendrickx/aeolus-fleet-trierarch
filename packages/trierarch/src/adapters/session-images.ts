@@ -27,7 +27,8 @@ export function createSessionImages(options: { binary: string; version: string; 
         // Includes stopped containers too. A container created after this check still makes a non-forced removal fail safely.
         const containers = await command(['ps', '--all', '--filter', `ancestor=${id}`, '--format', '{{.ID}}']);
         if (containers !== '') continue;
-        await command(['rmi', id]);
+        // A non-forced removal by id refuses an image with several tags: remove each tag, the last one removes the image.
+        for (const tag of tags.length > 1 ? tags : [id]) await command(['rmi', tag]);
       } catch (error) {
         failures.push(error instanceof Error ? error.message : String(error));
       }
