@@ -379,6 +379,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
   const shipFoldersGone: ShipId[] = [];
   for (const entry of Object.values(state.entries)) {
     if (entry.shipFolder !== undefined && keepsShipFolder(entry) && !(await deps.workspace.hasShipFolder(entry.shipFolder))) {
+      log(deps, { ...about(state, { shipId: entry.shipId, action: 'crew' }), outcome: 'observed its ship folder is gone' });
       shipFoldersGone.push(entry.shipId);
     }
     const session = sessions.find((each) => each.shipId === entry.shipId);
@@ -739,12 +740,18 @@ async function crewInTheShipFolderLayout(state: TrierarchState, at: EntryAt & { 
  */
 async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { harness: HarnessPort; crewToken: string }): Promise<TrierarchState> {
   const { entry, harness, crewToken, deps } = at;
+  const phase = (outcome: string): void => { log(deps, { ...about(state, { shipId: entry.shipId, action: 'crew' }), outcome }); };
+  phase('stopping its session for ship folder recovery');
   await deps.processes.stop(entry.shipId);
-  if (entry.folder === undefined) {
-    await deps.sockets.close(entry.shipId, entry.shipFolder);
-  } else {
-    await removeIdentity({ entry, deps, folder: entry.folder });
+  phase('stopped its session for ship folder recovery');
+  if (entry.folder !== undefined) {
+    phase('removing its identity for ship folder recovery');
+    await harnessOf(entry, deps)?.removeIdentity(sessionOf(entry, entry.folder));
+    phase('removed its identity for ship folder recovery');
   }
+  phase('closing its socket for ship folder recovery');
+  await deps.sockets.close(entry.shipId, entry.shipFolder);
+  phase('closed its socket for ship folder recovery');
   const shipName = entry.shipName ?? entry.shipId;
   log(deps, { ...about(state, { shipId: entry.shipId, action: 'crew' }), outcome: `its ship's folder ${entry.shipFolder ?? ''} is gone, so it is crewed again in a fresh one` });
   const shipFolder = await deps.workspace.shipFolderOf(entry.shipId);
@@ -763,6 +770,7 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
   const login = sessionLogin(crewing, deps);
   const launchId = deps.newLaunchId();
   await deps.workspace.writeRootFiles({ folder, workspace: entry.workspace });
+  phase('starting its session in a fresh ship folder');
   await harness.launch({
     shipId: entry.shipId,
     shipName,
@@ -776,6 +784,7 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
     login,
     firstPrompt: 'This is a continuation of an existing crew request in a fresh session. Your previous conversation is unavailable. Recover the current task and progress from the fleet before acting; do not repeat completed work.',
   });
+  phase('started its session in a fresh ship folder');
   const launchedAt = deps.clock.now().toISOString();
   const { isShipFolderGone, ...crewed } = crewing;
   const next = putEntry(state, { ...(isShipFolderGone === undefined ? crewing : crewed), hasStarted: true, launchedAt, launchId, ...startedOn(crewing, { login, at: launchedAt }) });

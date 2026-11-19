@@ -3329,6 +3329,26 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     expect(trierarch.logger.actions.map((logged) => logged.outcome)).toContain(`its ship's folder ${shipFolderOf(shipId)} is gone, so it is crewed again in a fresh one`);
   });
 
+  it('logs the phases of recovery when a ship folder is removed', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    const before = trierarch.logger.actions.length;
+
+    await removedByHand(trierarch, shipId);
+
+    expect(trierarch.logger.actions.slice(before).map((entry) => entry.outcome)).toEqual(expect.arrayContaining([
+      'observed its ship folder is gone',
+      'stopping its session for ship folder recovery',
+      'stopped its session for ship folder recovery',
+      'removing its identity for ship folder recovery',
+      'removed its identity for ship folder recovery',
+      'closing its socket for ship folder recovery',
+      'closed its socket for ship folder recovery',
+      'starting its session in a fresh ship folder',
+      'started its session in a fresh ship folder',
+    ]));
+  });
+
   it('removed by hand from a ship whose crew again is interrupted keeps the mark until it is crewed again: the next pass crews it under the lease it holds, never releasing it', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
