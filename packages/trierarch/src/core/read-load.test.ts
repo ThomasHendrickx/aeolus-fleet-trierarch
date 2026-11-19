@@ -121,7 +121,9 @@ function diskTrierarch(at: { recovers?: boolean; fails?: boolean } = {}) {
   const clock = new TestClock();
   const logger = new CollectingLogger();
   let cleanups = 0;
+  let imagePasses = 0;
   const read = createReadLoad({ machine, fleet, state, clock, logger, disk: {
+    removeUnusedImages: async () => { imagePasses += 1; },
     free: async () => {
       cleanups += 1;
       if (at.fails === true) throw new Error('cannot clean');
@@ -129,7 +131,7 @@ function diskTrierarch(at: { recovers?: boolean; fails?: boolean } = {}) {
     },
     largestShips: async () => [{ name: 'large-ship', bytes: 900 }, { name: 'small-ship', bytes: 100 }],
   } });
-  return { read, machine, fleet, state, clock, logger, cleanups: () => cleanups };
+  return { read, machine, fleet, state, clock, logger, cleanups: () => cleanups, imagePasses: () => imagePasses };
 }
 
 describe('low disk cleanup before telling argo (#352)', () => {
@@ -178,4 +180,13 @@ describe('low disk cleanup before telling argo (#352)', () => {
     expect(trierarch.cleanups()).toBe(0);
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
+});
+
+it('removes unused session images on the first pass even with healthy disk', async () => {
+  const trierarch = diskTrierarch();
+  trierarch.machine.current = aMachineLoad();
+  await trierarch.read();
+  trierarch.clock.advance(MINUTE_MS);
+  await trierarch.read();
+  expect(trierarch.imagePasses()).toBe(1);
 });
