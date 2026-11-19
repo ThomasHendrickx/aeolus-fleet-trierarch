@@ -3266,6 +3266,18 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     expect([trierarch.sockets.openShips.has(shipId), trierarch.sockets.openedIn.get(shipId), trierarch.state.current().entries[shipId]?.shipFolder, trierarch.state.current().entries[shipId]?.folder]).toEqual([true, undefined, undefined, scoutFolder(shipId)]);
   });
 
+  it('keeps and removes the temp folder of a ship crewed before ship folders', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aShipCrewedBefore(trierarch, { workspace: { kind: 'folder', name: 'notes' } });
+    const temp = shipFolderOf(shipId);
+    trierarch.workspace.folders.set(temp, { hasChanges: false, unsaved: [] });
+    await trierarch.pass();
+    expect(trierarch.workspace.folders.has(temp)).toBe(true);
+    trierarch.fleet.removeRequest(shipId);
+    await trierarch.pass();
+    expect([trierarch.workspace.folders.has(temp), trierarch.workspace.folders.has(NOTES_FOLDER)]).toEqual([false, true]);
+  });
+
   it('is none for a ship crewed before the ship folders, which is released on its own paths, its socket closed where it was', async () => {
     const trierarch = aTrierarch();
     const shipId = await aShipCrewedBefore(trierarch);
@@ -3273,7 +3285,7 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
 
     await trierarch.pass();
 
-    expect([trierarch.workspace.folders.has(scoutFolder(shipId)), trierarch.workspace.removedShipFolders]).toEqual([false, []]);
+    expect([trierarch.workspace.folders.has(scoutFolder(shipId)), trierarch.workspace.removedShipFolders]).toEqual([false, [shipFolderOf(shipId)]]);
     expect([trierarch.sockets.closedIn.has(shipId), trierarch.sockets.closedIn.get(shipId)]).toEqual([true, undefined]);
   });
 

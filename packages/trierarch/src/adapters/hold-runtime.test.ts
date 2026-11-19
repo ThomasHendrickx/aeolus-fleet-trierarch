@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -57,8 +58,8 @@ afterEach(async () => {
 /** Twenty turns started and interrupted, each a stdin line and a poll of the events. */
 const TWENTY_TURNS_MS = 30_000;
 
-function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[] } = {}) {
-  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
+function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string } = {}) {
+  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
   runtimes.push(runtime);
   return runtime;
 }
@@ -136,6 +137,149 @@ it('fails to stop a session when signalling its hold is denied', async () => {
     await expect(runtime.stop(shipId)).rejects.toBe(denied);
   } finally {
     signal.mockRestore();
+  }
+});
+
+it('empties the ship temp after stopping its session and points the host session there', async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  mkdirSync(temp, { recursive: true });
+  writeFileSync(join(temp, 'old'), 'old');
+  await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+  await expect.poll(() => starts().length).toBe(1);
+  expect([existsSync(join(temp, 'old')), starts()[0]?.env.TMPDIR, starts()[0]?.env.TMP, starts()[0]?.env.TEMP]).toEqual([false, temp, temp, temp]);
+  writeFileSync(join(temp, 'during'), 'running');
+  expect(existsSync(join(temp, 'during'))).toBe(true);
+  await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+  await expect.poll(() => starts().length).toBe(2);
+  expect(existsSync(join(temp, 'during'))).toBe(false);
+});
+
+it.each(['stale guard marker', 'reused pid'])('starts after a machine restart with a %s and empties only its temp', { timeout: 15_000 }, async (record) => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  const previous = join(sessions, shipId);
+  mkdirSync(temp, { recursive: true });
+  mkdirSync(previous, { recursive: true });
+  writeFileSync(join(temp, 'old'), 'old');
+  writeFileSync(join(folder, 'outside'), 'keep');
+  // This process belongs to the test, not to the persisted session.
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      unrelated.once('spawn', resolve);
+      unrelated.once('error', reject);
+    });
+    if (unrelated.pid === undefined) throw new Error('the unrelated process did not start');
+    writeFileSync(join(previous, 'hold.pid'), '2147483647');
+    writeFileSync(join(previous, 'harness-sessions'), `${String(unrelated.pid)}\n`);
+    if (record === 'stale guard marker') writeFileSync(join(previous, 'guard-active'), 'active');
+    utimesSync(join(previous, 'hold.pid'), new Date(0), new Date(0));
+
+    await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+
+    await expect.poll(() => starts().length).toBe(1);
+    expect(readdirSync(temp)).toEqual([]);
+    expect(readFileSync(join(folder, 'outside'), 'utf8')).toBe('keep');
+    expect(isAlive(unrelated.pid)).toBe(true);
+  } finally {
+    const ended = new Promise((resolve) => unrelated.once('exit', resolve));
+    if (unrelated.exitCode === null && unrelated.signalCode === null) {
+      unrelated.kill('SIGKILL');
+      await ended;
+    }
+  }
+});
+
+it('waits for a stubborn session to end before emptying its temp', { timeout: 15_000 }, async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'trap "" TERM; while :; do echo old > "$TMPDIR/writing"; sleep 0.1; done'], harness: 'claude-code' });
+  await expect.poll(() => existsSync(join(temp, 'writing'))).toBe(true);
+  await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(existsSync(join(temp, 'writing'))).toBe(false);
+});
+
+it('waits for a stubborn session of an older hold before emptying temp', { timeout: 15_000 }, async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'trap "" TERM; while :; do echo old > "$TMPDIR/writing"; sleep 0.1; done'], harness: 'claude-code' });
+  await expect.poll(() => existsSync(join(temp, 'writing'))).toBe(true);
+  rmSync(join(sessions, shipId, 'guard-active'));
+  await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(existsSync(join(temp, 'writing'))).toBe(false);
+});
+
+it('gives a ship crewed before ship folders its own temp without moving its workspace', async () => {
+  const shipsRoot = join(folder, 'ships');
+  const runtime = aRuntime({ shipsRoot });
+  const shipId = newId('ship');
+  const temp = join(shipsRoot, shipId, 'tmp');
+  await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+  await expect.poll(() => starts().length).toBe(1);
+  expect(starts()[0]?.env.TMPDIR).toBe(temp);
+});
+
+it('moves temp it cannot empty to the trash, logs it, and starts with an empty temp', async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  const locked = join(temp, 'locked');
+  mkdirSync(locked, { recursive: true });
+  writeFileSync(join(locked, 'left'), 'left');
+  chmodSync(locked, 0o500);
+  const logged = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  try {
+    await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    expect(readdirSync(temp)).toEqual([]);
+    const trashed = readdirSync(join(folder, '.trash'));
+    expect(trashed).toHaveLength(1);
+    expect(existsSync(join(folder, '.trash', trashed[0] ?? '', 'locked', 'left'))).toBe(true);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('moved it to the trash'));
+    chmodSync(join(folder, '.trash', trashed[0] ?? '', 'locked'), 0o700);
+  } finally {
+    logged.mockRestore();
+  }
+});
+
+it('moves two ships temp folders to the trash even at the same time', async () => {
+  const runtime = aRuntime();
+  const ships = [newId('ship'), newId('ship')];
+  const trash = join(folder, '.trash');
+  for (const shipId of ships) {
+    const locked = join(folder, shipId, 'tmp', 'locked');
+    mkdirSync(locked, { recursive: true });
+    writeFileSync(join(locked, 'left'), shipId);
+    chmodSync(locked, 0o500);
+  }
+  vi.setSystemTime(new Date('2026-11-19T00:00:00Z'));
+  const logged = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  try {
+    for (const shipId of ships) {
+      await runtime.start({ shipId, folder, shipFolder: join(folder, shipId), command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    }
+    const trashed = readdirSync(trash);
+    expect(trashed).toHaveLength(2);
+    for (const name of trashed) chmodSync(join(trash, name, 'locked'), 0o700);
+  } finally {
+    vi.useRealTimers();
+    logged.mockRestore();
+    for (const shipId of ships) {
+      const locked = join(folder, shipId, 'tmp', 'locked');
+      if (existsSync(locked)) chmodSync(locked, 0o700);
+    }
+    if (existsSync(trash)) for (const name of readdirSync(trash)) chmodSync(join(trash, name, 'locked'), 0o700);
   }
 });
 

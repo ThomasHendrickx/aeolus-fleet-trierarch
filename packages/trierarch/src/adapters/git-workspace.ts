@@ -1,4 +1,4 @@
-import { lstat, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -137,6 +137,7 @@ export function createGitWorkspace(
         if (folder === undefined) {
           throw new Error(`The configuration has no folder ${workspace.name}`);
         }
+        if (shipFolder !== undefined) await mkdir(join(shipFolder, 'tmp'), { recursive: true, mode: 0o700 });
         return { folder };
       }
       if (shipFolder === undefined) {

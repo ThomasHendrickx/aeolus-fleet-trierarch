@@ -72,7 +72,15 @@ const lines = require('node:readline').createInterface({ input: process.stdin })
 lines.on('line', (line) => { groups.add(Number(line)); });
 lines.on('close', () => {
   end('SIGTERM');
-  setTimeout(() => { end('SIGKILL'); }, ${String(GUARD_GRACE_MS)});
+  const until = Date.now() + ${String(GUARD_GRACE_MS)};
+  const done = () => require('node:fs').writeFileSync(process.argv[1], 'done');
+  const poll = () => {
+    const alive = [...groups].some((group) => { try { process.kill(-group, 0); return true; } catch { return false; } });
+    if (!alive) return done();
+    if (Date.now() >= until) { end('SIGKILL'); return done(); }
+    setTimeout(poll, 25);
+  };
+  poll();
 });
 `;
 
@@ -163,7 +171,8 @@ export async function runHold(options: HoldOptions): Promise<number> {
   };
 
   // A session of its own, so a signal to the hold's group does not end the guard before it ends the harness.
-  const guard = spawn(process.execPath, ['-e', GUARD], { env: {}, stdio: ['pipe', 'ignore', 'ignore'], detached: true });
+  await writeFile(`${files.folder}/guard-active`, 'active');
+  const guard = spawn(process.execPath, ['-e', GUARD, `${files.folder}/guard-done`], { env: {}, stdio: ['pipe', 'ignore', 'ignore'], detached: true });
   guard.stdin.on('error', () => undefined);
   guard.unref();
 
