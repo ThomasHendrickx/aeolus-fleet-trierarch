@@ -256,7 +256,10 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
     const ownVolumes = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', 'volume', 'ls', '--quiet'] });
     expect(ownVolumes.stdout.split('\n')).not.toContain(volumes.stdout.trim());
     await runtime.stop(shipId);
+    mkdirSync(join(runtimeDir, 'run'), { recursive: true, mode: 0o700 });
+    mkdirSync(join(runtimeDir, 'tmp'), { recursive: true, mode: 0o700 });
     const stopped = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${join(shipFolder, 'containers', 'storage.conf')}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(runtimeDir, 'run'), '--tmpdir', join(runtimeDir, 'tmp'), 'ps', '--quiet'] });
+    expect(stopped.status, stopped.stderr).toBe(0);
     expect(stopped.stdout.trim()).toBe('');
     await runtime.start({ ...session, command: [...FAKE_CLAUDE_CODE] });
     const after = await client(['ps', '--all', '--filter', `name=${name}`, '--quiet']);

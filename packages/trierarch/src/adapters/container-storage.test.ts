@@ -31,7 +31,7 @@ it('keeps nested Podman storage and runtime files in the ship folder', async () 
     const words = readFileSync(`${binary}.words`, 'utf8').split('\n');
     const envFile = words[words.indexOf('--env-file') + 1] ?? '';
     const env = readFileSync(envFile, 'utf8');
-    const nested = '/home/ubuntu/.local/share/containers/storage';
+    const nested = '/containers';
     expect(env).toContain(`CONTAINERS_CONF=${nested}/containers.conf`);
     expect(env).toContain(`CONTAINERS_STORAGE_CONF=${nested}/storage.conf`);
     expect(env).toContain(`XDG_RUNTIME_DIR=${nested}/runtime`);
