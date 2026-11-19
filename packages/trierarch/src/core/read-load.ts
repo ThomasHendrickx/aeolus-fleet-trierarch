@@ -48,6 +48,11 @@ export function createReadLoad(deps: { disk?: { free: () => Promise<void>; remov
       deps.logger.warn(`Could not read the machine load: ${messageOf(error)}`);
       return undefined;
     });
+    if (!hasRemovedImages && deps.disk !== undefined && (read === undefined || !lowResourcesOf(read).includes('disk'))) {
+      await deps.disk.removeUnusedImages().then(() => { hasRemovedImages = true; }).catch((error: unknown) => {
+        deps.logger.warn(`Could not remove unused session images: ${messageOf(error)}`);
+      });
+    }
     if (read === undefined) {
       return last?.load;
     }
@@ -56,11 +61,6 @@ export function createReadLoad(deps: { disk?: { free: () => Promise<void>; remov
       read = await deps.machine.load().catch((error: unknown) => {
         deps.logger.warn(`Could not read the machine load after freeing disk: ${messageOf(error)}`);
         return read;
-      });
-    }
-    if (!hasRemovedImages && deps.disk !== undefined) {
-      await deps.disk.removeUnusedImages().then(() => { hasRemovedImages = true; }).catch((error: unknown) => {
-        deps.logger.warn(`Could not remove unused session images: ${messageOf(error)}`);
       });
     }
     if (read === undefined) return last?.load;

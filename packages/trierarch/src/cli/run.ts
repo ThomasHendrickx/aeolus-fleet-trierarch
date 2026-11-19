@@ -21,6 +21,7 @@ import { createKeyStates } from '../adapters/key-states.js';
 import { keyStatesFileOf } from '../adapters/proxy-runtime.js';
 import { claudeCodeKeyInReach } from '../adapters/claude-code.js';
 import { createMachine } from '../adapters/machine.js';
+import { createLargestShips } from '../adapters/largest-ships.js';
 import { measureShipFolder } from '../adapters/ship-size.js';
 import { createShipSize } from '../core/ship-size.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
@@ -179,27 +180,16 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
   const cache = createSessionCache({ root: join(paths.home, 'cache'), ...(configured.cacheSizeBytes !== undefined && { maxBytes: configured.cacheSizeBytes }) });
   const images = createSessionImages({ binary: configured.runtime?.kind === 'container' ? configured.runtime.binary : 'podman', version });
-  const diskReadings = new Map<string, { at: number; bytes: number }>();
+  const largestShips = createLargestShips({ clock, logger });
   const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: shipsRoot }), fleet, state, clock, logger, disk: {
     removeUnusedImages: () => images.removeUnused(),
     free: createFreeDisk({ trash, images, cache, clock, logger }),
     largestShips: async () => {
       const entries = Object.values((await state.load()).entries);
-      const held = await Promise.all(entries.map(async (entry) => {
+      return largestShips(entries.flatMap((entry) => {
         const folder = entry.shipFolder ?? entry.folder;
-        if (folder === undefined) return [];
-        try {
-          const previous = diskReadings.get(folder);
-          const now = clock.now().getTime();
-          const bytes = previous !== undefined && now - previous.at < 600_000 ? previous.bytes : await measureShipFolder(folder);
-          diskReadings.set(folder, { at: previous !== undefined && now - previous.at < 600_000 ? previous.at : now, bytes });
-          return [{ name: entry.shipName ?? entry.shipId, bytes }];
-        } catch (error) {
-          logger.warn(`Could not measure ${entry.shipId} for low disk: ${error instanceof Error ? error.message : String(error)}`);
-          return [];
-        }
+        return folder === undefined ? [] : [{ name: entry.shipName ?? entry.shipId, folder }];
       }));
-      return held.flat().sort((a, b) => b.bytes - a.bytes).slice(0, 5);
     },
   } });
   const usage = createUsage({
