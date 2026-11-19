@@ -112,7 +112,7 @@ describe("the machine's load, as the trierarch reads it (#400)", () => {
   });
 });
 
-/** Cleanup changes the machine, rather than merely recording that a callback ran. */
+/** Managed leftovers are stored separately from the disk reading. */
 function diskTrierarch(at: { hasRecovered?: boolean; isFailing?: boolean } = {}) {
   const machine = new InMemoryMachine();
   machine.current = LOW_DISK;
@@ -120,48 +120,82 @@ function diskTrierarch(at: { hasRecovered?: boolean; isFailing?: boolean } = {})
   const state = new InMemoryState();
   const clock = new TestClock();
   const logger = new CollectingLogger();
-  let cleanups = 0;
-  let imagePasses = 0;
+  const leftovers = { trash: ['discarded-worktree'], images: ['old-session-image'] };
   const read = createReadLoad({ machine, fleet, state, clock, logger, disk: {
-    removeUnusedImages: () => { imagePasses += 1; return Promise.resolve(); },
+    removeUnusedImages: () => { leftovers.images = []; return Promise.resolve(); },
     free: () => {
-      cleanups += 1;
       if (at.isFailing === true) return Promise.reject(new Error('cannot clean'));
+      leftovers.trash = [];
+      leftovers.images = [];
       if (at.hasRecovered === true) machine.current = aMachineLoad();
       return Promise.resolve();
     },
     largestShips: () => Promise.resolve([{ name: 'large-ship', bytes: 900 }, { name: 'small-ship', bytes: 100 }]),
   } });
-  return { read, machine, fleet, state, clock, logger, cleanups: () => cleanups, imagePasses: () => imagePasses };
+  return { read, machine, fleet, state, clock, logger, leftovers };
 }
 
 describe('low disk cleanup before telling argo (#352)', () => {
-  it('returns the recovered load and tells nobody when freeing disk reaches 5 percent', async () => {
+  it('returns the recovered load when freeing disk reaches 5 percent', async () => {
     const trierarch = diskTrierarch({ hasRecovered: true });
     expect(await trierarch.read()).toEqual(aMachineLoad());
-    expect(trierarch.fleet.toArgo).toEqual([]);
-    expect(trierarch.cleanups()).toBe(1);
   });
 
-  it('names the ships holding the most only when the disk is still low after freeing', async () => {
+  it('tells nobody when freeing disk recovers the machine', async () => {
+    const trierarch = diskTrierarch({ hasRecovered: true });
+    await trierarch.read();
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('clears the stored low disk state after cleanup recovers the machine', async () => {
+    const trierarch = diskTrierarch({ hasRecovered: true });
+    await trierarch.state.save({ ...trierarch.state.current(), lowResources: ['disk'] });
+    await trierarch.read();
+    expect(trierarch.state.current().lowResources).toBeUndefined();
+  });
+
+  it('names the ships holding the most when the disk is still low after freeing', async () => {
+    const trierarch = diskTrierarch();
+    await trierarch.read();
+    expect(trierarch.fleet.toArgo[0]?.text).toContain('Ships holding the most:\n- large-ship: 900 bytes\n- small-ship: 100 bytes');
+  });
+
+  it('stores the remaining low disk condition', async () => {
+    const trierarch = diskTrierarch();
+    await trierarch.read();
+    expect(trierarch.state.current().lowResources).toEqual(['disk']);
+  });
+
+  it('tells argo only once while the disk remains low', async () => {
     const trierarch = diskTrierarch();
     await trierarch.read();
     trierarch.clock.advance(MINUTE_MS);
     await trierarch.read();
     expect(trierarch.fleet.toArgo).toHaveLength(1);
-    expect(trierarch.fleet.toArgo[0]?.text).toContain('large-ship: 900 bytes');
-    expect(trierarch.fleet.toArgo[0]?.text).toContain('small-ship: 100 bytes');
-    expect(trierarch.cleanups()).toBe(2);
+  });
+
+  it('reclaims new trash while the disk remains low', async () => {
+    const trierarch = diskTrierarch();
+    await trierarch.read();
+    trierarch.leftovers.trash.push('another-discarded-worktree');
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.read();
+    expect(trierarch.leftovers.trash).toEqual([]);
   });
 
   it('still tells argo when cleanup fails and the disk remains low', async () => {
     const trierarch = diskTrierarch({ isFailing: true });
     await trierarch.read();
-    expect(trierarch.fleet.toArgo).toHaveLength(1);
+    expect(trierarch.fleet.toArgo[0]?.text).toContain('Low on disk: 2 % free');
+  });
+
+  it('logs why disk cleanup failed', async () => {
+    const trierarch = diskTrierarch({ isFailing: true });
+    await trierarch.read();
     expect(trierarch.logger.warnings).toContain('Could not free disk: cannot clean');
   });
 
-  it('frees again and tells again only after recovery and another drop', async () => {
+  it('tells again after recovery and another drop', async () => {
     const trierarch = diskTrierarch();
     await trierarch.read();
     trierarch.clock.advance(MINUTE_MS);
@@ -171,14 +205,19 @@ describe('low disk cleanup before telling argo (#352)', () => {
     trierarch.machine.current = LOW_DISK;
     await trierarch.read();
     expect(trierarch.fleet.toArgo).toHaveLength(2);
-    expect(trierarch.cleanups()).toBe(2);
   });
 
-  it('leaves cleanup alone at exactly 5 percent free', async () => {
+  it('leaves trash alone at exactly 5 percent free', async () => {
     const trierarch = diskTrierarch();
     trierarch.machine.current = aMachineLoad({ disk: { totalBytes: 100, freeBytes: 5 } });
     await trierarch.read();
-    expect(trierarch.cleanups()).toBe(0);
+    expect(trierarch.leftovers.trash).toEqual(['discarded-worktree']);
+  });
+
+  it('tells nobody at exactly 5 percent free', async () => {
+    const trierarch = diskTrierarch();
+    trierarch.machine.current = aMachineLoad({ disk: { totalBytes: 100, freeBytes: 5 } });
+    await trierarch.read();
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
 });
@@ -187,14 +226,21 @@ it('removes unused session images on the first pass even with healthy disk', asy
   const trierarch = diskTrierarch();
   trierarch.machine.current = aMachineLoad();
   await trierarch.read();
-  trierarch.clock.advance(MINUTE_MS);
-  await trierarch.read();
-  expect(trierarch.imagePasses()).toBe(1);
+  expect(trierarch.leftovers.images).toEqual([]);
 });
 
-it('uses low disk cleanup for images before the first disk re-read', async () => {
+it('keeps image maintenance to the first healthy pass', async () => {
+  const trierarch = diskTrierarch();
+  trierarch.machine.current = aMachineLoad();
+  await trierarch.read();
+  trierarch.leftovers.images.push('new-unused-image');
+  trierarch.clock.advance(MINUTE_MS);
+  await trierarch.read();
+  expect(trierarch.leftovers.images).toEqual(['new-unused-image']);
+});
+
+it('reclaims unused images along with trash on low disk', async () => {
   const trierarch = diskTrierarch();
   await trierarch.read();
-  expect(trierarch.cleanups()).toBe(1);
-  expect(trierarch.imagePasses()).toBe(0);
+  expect(trierarch.leftovers).toEqual({ images: [], trash: [] });
 });
