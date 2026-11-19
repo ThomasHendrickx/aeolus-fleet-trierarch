@@ -2899,7 +2899,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
 
     const shipId = await aCrewedShip(trierarch);
 
-    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: {}, folder: scoutFolder(shipId) });
+    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: {}, folder: scoutFolder(shipId), shipFolder: `${SHIPS_ROOT}/${shipId}` });
   });
 
   it("asks with the options the request picked, whose flags may name settings of their own (K6)", async () => {
@@ -2909,7 +2909,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
 
     await trierarch.pass();
 
-    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: { model: 'sonnet' }, folder: scoutFolder(shipId) });
+    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: { model: 'sonnet' }, folder: scoutFolder(shipId), shipFolder: `${SHIPS_ROOT}/${shipId}` });
   });
 
   it('hands nothing to a running session on a key that is not ready: its deliveries wait in the inbox (K9)', async () => {
