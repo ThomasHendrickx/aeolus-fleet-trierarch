@@ -67,6 +67,12 @@ export function sessionOf(machine: Machine, shipName: string) {
       return join(folderOf(), 'main');
     },
     starts: () => linesOf(join(folderOf(), 'fake-starts.jsonl'), startSchema),
+    get claudeConfig(): string {
+      return linesOf(join(folderOf(), 'fake-starts.jsonl'), startSchema)[0]?.env.CLAUDE_CONFIG_DIR ?? join(machine.home, '.claude');
+    },
+    get crews(): string {
+      return linesOf(join(folderOf(), 'fake-starts.jsonl'), startSchema)[0]?.env.AEOLUS_CREWS ?? join(machine.home, '.aeolus', 'crews', 'claude-code');
+    },
     turns: () => linesOf(join(folderOf(), 'fake-turns.jsonl'), turnSchema),
   };
 }

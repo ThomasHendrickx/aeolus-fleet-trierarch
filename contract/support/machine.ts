@@ -58,7 +58,7 @@ export interface Machine {
   /** Makes every stream-json print-mode turn of Claude Code stream the rate limit event, as one on its subscription does; none streams none. */
   streamRateLimitEvent(event: string | undefined): void;
   /** Takes the identity out of the session's folder, as the aeolus-fleet plugin's own script does when a plugin is uninstalled. */
-  removeIdentity(folder: string): Promise<void>;
+  removeIdentity(folder: string, identityEnv?: Readonly<Record<string, string>>): Promise<void>;
   /** The pid of the trierarch the service runs now, none when it is stopped. */
   servicePid(): number | undefined;
   /** What the service's trierarch wrote, for a failing test to show. */
@@ -545,8 +545,8 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
         writeFileSync(file, model);
       }
     },
-    removeIdentity: async (folder) => {
-      const ran = await runProgram(['bash', join(PLUGIN_ROOT, 'scripts', 'aeolus-identity.sh'), 'delete'], { cwd: folder, env });
+    removeIdentity: async (folder, identityEnv = {}) => {
+      const ran = await runProgram(['bash', join(PLUGIN_ROOT, 'scripts', 'aeolus-identity.sh'), 'delete'], { cwd: folder, env: { ...env, ...identityEnv } });
       if (ran.status !== 0) {
         throw new Error(`aeolus-identity.sh delete failed: ${ran.stdout}${ran.stderr}`);
       }

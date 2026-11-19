@@ -71,7 +71,7 @@ describe('the hold', () => {
     const env = sessionOf(machine, 'scout').starts()[0]?.env ?? {};
 
     expect(Object.values(env).filter((value) => value.includes(CREW_TOKEN_PREFIX))).toEqual([]);
-    expect(Object.keys(env).filter((name) => name.startsWith('AEOLUS_') && name !== 'AEOLUS_LAUNCH')).toEqual([]);
+    expect(Object.keys(env).filter((name) => name.startsWith('AEOLUS_') && !['AEOLUS_LAUNCH', 'AEOLUS_DATA', 'AEOLUS_CREWS'].includes(name))).toEqual([]);
     expect(env).toHaveProperty('AEOLUS_LAUNCH');
   });
 });

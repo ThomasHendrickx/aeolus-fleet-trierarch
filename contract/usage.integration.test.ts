@@ -80,7 +80,7 @@ describe("a ship's tokens", () => {
     await aMachineWith([]);
     const scout = await aRunningScoutOn('claude-code');
     const now = new Date().toISOString();
-    const project = join(machine.home, '.claude', 'projects', sessionOf(machine, 'scout').folder.replace(/[^a-zA-Z0-9]/gu, '-'));
+    const project = join(sessionOf(machine, 'scout').claudeConfig, 'projects', sessionOf(machine, 'scout').folder.replace(/[^a-zA-Z0-9]/gu, '-'));
 
     await whileStopped(() => {
       const opus = { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 10_000, cache_creation_input_tokens: 3000 };
@@ -174,7 +174,7 @@ describe("a ship's usage sent to the trierarch plugin's ship", () => {
     await aMachineWith([]);
     const scout = await aRunningScoutOn('claude-code');
     const now = new Date().toISOString();
-    const project = join(machine.home, '.claude', 'projects', sessionOf(machine, 'scout').folder.replace(/[^a-zA-Z0-9]/gu, '-'));
+    const project = join(sessionOf(machine, 'scout').claudeConfig, 'projects', sessionOf(machine, 'scout').folder.replace(/[^a-zA-Z0-9]/gu, '-'));
 
     await whileStopped(() => {
       writeLines(join(project, 'conversation.jsonl'), [anAssistantLine({ id: 'msg_1', model: 'claude-opus-5-5', timestamp: now, usage: { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 10_000, cache_creation_input_tokens: 3000 } })]);
@@ -192,7 +192,7 @@ describe("a ship's usage sent to the trierarch plugin's ship", () => {
     const scout = await aRunningScoutOn('claude-code');
     const now = new Date().toISOString();
     const worktree = sessionOf(machine, 'scout').folder;
-    const transcript = join(machine.home, '.claude', 'projects', worktree.replace(/[^a-zA-Z0-9]/gu, '-'), 'conversation.jsonl');
+    const transcript = join(sessionOf(machine, 'scout').claudeConfig, 'projects', worktree.replace(/[^a-zA-Z0-9]/gu, '-'), 'conversation.jsonl');
     await whileStopped(() => {
       writeLines(transcript, [anAssistantLine({ id: 'msg_1', model: 'claude-opus-5-5', timestamp: now, usage: { input_tokens: 10, output_tokens: 2000 } })]);
     });

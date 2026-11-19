@@ -225,7 +225,7 @@ describe("a ship's folder", () => {
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
     expect(sessionOf(machine, 'scout').folder).toBe(join(shipFolderOf(scout), 'repositories'));
     expect(lstatSync(socketOf(scout)).isSocket()).toBe(true);
-    const identities = filesUnder(join(machine.home, '.aeolus', 'crews', 'claude-code')).map((path) => readFileSync(path, 'utf8'));
+    const identities = filesUnder(sessionOf(machine, 'scout').crews).map((path) => readFileSync(path, 'utf8'));
     expect(identities.filter((identity) => identity.includes(`socket=${socketOf(scout)}\n`))).toHaveLength(1);
   });
 

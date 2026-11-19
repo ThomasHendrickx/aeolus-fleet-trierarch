@@ -82,19 +82,22 @@ func (h Harness) homeOf(entry reconciler.Entry) string {
 
 // pluginOf is the plugin as the entry's session finds its files: in its ship's home in a container, where the image's plugin of the same version finds the identity the host's scripts wrote.
 func (h Harness) pluginOf(entry reconciler.Entry) plugin.Plugin {
-	if h.Homes == "" {
+	if h.Homes == "" && entry.ShipFolder == "" {
 		return h.Plugin
 	}
 	home := h.homeOf(entry)
 	found := h.Plugin
 	found.Data = filepath.Join(home, ".claude", "plugins", "data", plugin.DataFolder)
 	found.Crews = filepath.Join(home, ".aeolus", "crews", "claude-code")
+	if h.Homes == "" && !found.HasIdentity(entry.Folder) {
+		return h.Plugin
+	}
 	return found
 }
 
 // projectsOf is the projects folder the entry's session keeps its conversations in.
 func (h Harness) projectsOf(entry reconciler.Entry) string {
-	if h.Homes == "" {
+	if h.Homes == "" && h.pluginOf(entry).Crews == h.Plugin.Crews {
 		return h.Projects
 	}
 	return Projects(h.homeOf(entry), "")
@@ -228,8 +231,16 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	}
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
 	// --mcp-config takes every word up to the next flag, so it comes last.
-	command := append(CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder)), mcpFlags...)
-	if err := h.pluginOf(entry).ClearLaunch(entry.Folder); err != nil {
+	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder))
+	shipPlugin := h.pluginOf(entry)
+	if h.Homes == "" && shipPlugin.Crews != h.Plugin.Crews {
+		env["CLAUDE_CONFIG_DIR"] = filepath.Join(h.homeOf(entry), ".claude")
+		env["AEOLUS_DATA"] = shipPlugin.Data
+		env["AEOLUS_CREWS"] = shipPlugin.Crews
+		command = append(command, "--plugin-dir", h.Plugin.Root)
+	}
+	command = append(command, mcpFlags...)
+	if err := shipPlugin.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
 	env[launchVariable] = launchID
