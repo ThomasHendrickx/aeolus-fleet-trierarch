@@ -865,3 +865,23 @@ func TestOnTheHostAFormerSessionKeepsItsShipHomeIdentity(t *testing.T) {
 		t.Fatal("the identity in the ship's home is not found")
 	}
 }
+
+func TestOnTheHostAFormerShipHomeSessionRestartsWithItsIdentity(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	entry := anEntry(t)
+	entry.ShipFolder = t.TempDir()
+	home := filepath.Join(entry.ShipFolder, "home")
+	shipPlugin := harness.Plugin
+	shipPlugin.Data = filepath.Join(home, ".claude", "plugins", "data", plugin.DataFolder)
+	shipPlugin.Crews = filepath.Join(home, ".aeolus", "crews", "claude-code")
+	if err := shipPlugin.WriteIdentity(entry.Folder, anIdentity(), "crew-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.Launch(entry, false, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+	start := running.started[0]
+	if start.Env["AEOLUS_CREWS"] != shipPlugin.Crews || start.Env["AEOLUS_DATA"] != shipPlugin.Data || start.Env["CLAUDE_CONFIG_DIR"] != filepath.Join(home, ".claude") || !slices.Contains(start.Command, "--plugin-dir") {
+		t.Fatalf("started %+v, want the ship home and plugin", start)
+	}
+}
