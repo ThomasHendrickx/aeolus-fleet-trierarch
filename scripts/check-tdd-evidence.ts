@@ -2,7 +2,7 @@
  * CI check: test-driven development leaves evidence in the history (decision
  * 0014). In a pull request, every `feat` or `fix` commit that changes
  * production code in the package's src folder comes right after a (red)
- * commit: one whose subject ends in "(red)" and that only adds or changes test
+ * commit: one whose subject ends in "(red)" and that only adds, changes or deletes test
  * files. Every other commit type passes.
  *
  * Production code is every file under that folder except tests and Markdown.
@@ -55,20 +55,21 @@ function needsRedCommit(commit: Commit): boolean {
   return commit.parents.length === 1 && FEAT_OR_FIX_SUBJECT.test(commit.subject) && touchesProduction(commit);
 }
 
-/** A commit that only adds or changes tests, labelled `(red)`: the failing test before the code. */
+/** A commit that only adds, changes or deletes tests, labelled `(red)`: the failing test before the code. */
 export function isRedCommit(commit: Commit): boolean {
-  const hasOnlyAddedOrChangedTests = commit.files.every(
+  const hasOnlyTestChanges = commit.files.every(
     (file) =>
       isTestFile(file.path) &&
       (file.status === 'A' ||
         file.status === 'M' ||
+        file.status === 'D' ||
         (file.status.startsWith('R') && file.previousPath !== undefined && isTestFile(file.previousPath))),
   );
   return (
     commit.subject.trimEnd().endsWith('(red)') &&
     commit.parents.length === 1 &&
     commit.files.length > 0 &&
-    hasOnlyAddedOrChangedTests
+    hasOnlyTestChanges
   );
 }
 
@@ -86,7 +87,7 @@ export function tddViolations(commits: readonly Commit[]): string[] {
       .filter(isProductionFile)
       .join(', ');
     return [
-      `${commit.hash.slice(0, 12)} "${commit.subject}" changes production code (${production}), but the commit before it is not a (red) commit that only adds or changes tests`,
+      `${commit.hash.slice(0, 12)} "${commit.subject}" changes production code (${production}), but the commit before it is not a (red) commit that only adds, changes or deletes tests`,
     ];
   });
 }
