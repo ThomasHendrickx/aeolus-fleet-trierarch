@@ -870,10 +870,22 @@ describe('why a hold does not start', () => {
   });
 
   it('names ss and iproute2 when the hold answers every call of the trierarch with a refusal, as it does where ss is missing', { timeout: 20_000 }, async () => {
-    const refusing = "const net = require('node:net'); const a = process.argv; const socket = a[a.indexOf('--sessions') + 1] + '/' + a[2] + '/hold.sock'; require('node:fs').mkdirSync(require('node:path').dirname(socket), { recursive: true }); net.createServer((c) => { c.on('error', () => undefined); c.end(JSON.stringify({ isOk: false, error: 'refused: only the trierarch talks to a hold' }) + '\\n'); }).listen(socket);";
+    const pidFile = join(folder, 'refusing.pid');
+    const refusing = `const net = require('node:net'); const a = process.argv; const socket = a[a.indexOf('--sessions') + 1] + '/' + a[2] + '/hold.sock'; require('node:fs').mkdirSync(require('node:path').dirname(socket), { recursive: true }); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); require('node:fs').writeFileSync(require('node:path').join(require('node:path').dirname(socket), 'hold.pid'), String(process.pid)); net.createServer((c) => { c.on('error', () => undefined); c.end(JSON.stringify({ isOk: false, error: 'refused: only the trierarch talks to a hold' }) + '\\n'); }).listen(socket);`;
     const runtime = aRuntime({ program: [process.execPath, '-e', refusing] });
+    const shipId = newId('ship');
 
-    await expect(runtime.start({ shipId: newId('ship'), folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' })).rejects.toThrow(/refused.*iproute2/s);
+    try {
+      await expect(runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' })).rejects.toThrow(/refused.*iproute2/s);
+      const pid = Number(readFileSync(pidFile, 'utf8'));
+      await runtime.stop(shipId);
+      await expect.poll(() => isAlive(pid), { timeout: 1_000 }).toBe(false);
+    } finally {
+      if (existsSync(pidFile)) {
+        const pid = Number(readFileSync(pidFile, 'utf8'));
+        if (isAlive(pid)) process.kill(pid, 'SIGTERM');
+      }
+    }
   });
 });
 
