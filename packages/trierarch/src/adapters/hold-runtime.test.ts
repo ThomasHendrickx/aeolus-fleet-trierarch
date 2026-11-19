@@ -135,7 +135,7 @@ it.runIf(process.platform === 'linux')("gives every host Podman invocation the s
   const runtimeRoot = realpathSync(aShortHome('podman-runtime'));
   const runtimeDir = join(runtimeRoot, 'aeolus', createHash('sha256').update(shipId).digest('hex').slice(0, 12));
   const calls = join(folder, 'podman-calls');
-  writeFileSync(podman, `#!/bin/sh\nprintf '%s\n' "$*" >> '${calls}'\nexit 0\n`);
+  writeFileSync(podman, `#!/bin/sh\nprintf '%s\n' "$*" >> '${calls}'\ncase " $* " in *" system service "*) exec sleep 30;; esac\nexit 0\n`);
   chmodSync(podman, 0o755);
   const previous = process.env.PATH;
   const previousRuntime = process.env.XDG_RUNTIME_DIR;
