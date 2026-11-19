@@ -200,3 +200,29 @@ func TestAConfigurationKeepsExactlyTheHarnessesWrittenToIt(t *testing.T) {
 		})
 	}
 }
+
+func TestPreservesConfiguredCacheSizeIncludingZero(t *testing.T) {
+	for _, value := range []string{"0", "1024"} {
+		t.Run(value, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			input := `{"caps":{"ships":4,"running":2},"repositories":{},"folders":{},"harnesses":{},"cacheSizeBytes":` + value + `}`
+			if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			configuration, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Write(path, configuration); err != nil {
+				t.Fatal(err)
+			}
+			written, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(written), `"cacheSizeBytes": `+value) {
+				t.Errorf("written configuration = %s, want cacheSizeBytes %s", written, value)
+			}
+		})
+	}
+}
