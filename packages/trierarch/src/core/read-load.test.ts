@@ -111,3 +111,71 @@ describe("the machine's load, as the trierarch reads it (#400)", () => {
     expect(fleet.toArgo).toHaveLength(1);
   });
 });
+
+/** Cleanup changes the machine, rather than merely recording that a callback ran. */
+function diskTrierarch(at: { recovers?: boolean; fails?: boolean } = {}) {
+  const machine = new InMemoryMachine();
+  machine.current = LOW_DISK;
+  const fleet = new InMemoryFleet();
+  const state = new InMemoryState();
+  const clock = new TestClock();
+  const logger = new CollectingLogger();
+  let cleanups = 0;
+  const read = createReadLoad({ machine, fleet, state, clock, logger, disk: {
+    free: async () => {
+      cleanups += 1;
+      if (at.fails === true) throw new Error('cannot clean');
+      if (at.recovers === true) machine.current = aMachineLoad();
+    },
+    largestShips: async () => [{ name: 'large-ship', bytes: 900 }, { name: 'small-ship', bytes: 100 }],
+  } });
+  return { read, machine, fleet, state, clock, logger, cleanups: () => cleanups };
+}
+
+describe('low disk cleanup before telling argo (#352)', () => {
+  it('returns the recovered load and tells nobody when freeing disk reaches 5 percent', async () => {
+    const trierarch = diskTrierarch({ recovers: true });
+    expect(await trierarch.read()).toEqual(aMachineLoad());
+    expect(trierarch.fleet.toArgo).toEqual([]);
+    expect(trierarch.cleanups()).toBe(1);
+  });
+
+  it('names the ships holding the most only when the disk is still low after freeing', async () => {
+    const trierarch = diskTrierarch();
+    await trierarch.read();
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.read();
+    expect(trierarch.fleet.toArgo).toHaveLength(1);
+    expect(trierarch.fleet.toArgo[0]?.text).toContain('large-ship: 900 bytes');
+    expect(trierarch.fleet.toArgo[0]?.text).toContain('small-ship: 100 bytes');
+    expect(trierarch.cleanups()).toBe(2);
+  });
+
+  it('still tells argo when cleanup fails and the disk remains low', async () => {
+    const trierarch = diskTrierarch({ fails: true });
+    await trierarch.read();
+    expect(trierarch.fleet.toArgo).toHaveLength(1);
+    expect(trierarch.logger.warnings).toContain('Could not free disk: cannot clean');
+  });
+
+  it('frees again and tells again only after recovery and another drop', async () => {
+    const trierarch = diskTrierarch();
+    await trierarch.read();
+    trierarch.clock.advance(MINUTE_MS);
+    trierarch.machine.current = aMachineLoad();
+    await trierarch.read();
+    trierarch.clock.advance(MINUTE_MS);
+    trierarch.machine.current = LOW_DISK;
+    await trierarch.read();
+    expect(trierarch.fleet.toArgo).toHaveLength(2);
+    expect(trierarch.cleanups()).toBe(2);
+  });
+
+  it('leaves cleanup alone at exactly 5 percent free', async () => {
+    const trierarch = diskTrierarch();
+    trierarch.machine.current = aMachineLoad({ disk: { totalBytes: 100, freeBytes: 5 } });
+    await trierarch.read();
+    expect(trierarch.cleanups()).toBe(0);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+});
