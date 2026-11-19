@@ -53,3 +53,37 @@ it('keeps nested Podman storage with the ship and runtime in the user runtime di
     rmSync(sessions, { recursive: true, force: true });
   }
 });
+
+it('starts a container session without Podman when its runtime directory cannot be used', async () => {
+  const folder = realpathSync(aShortHome('nested-storage'));
+  const sessions = realpathSync(aShortHome('nested-holds'));
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ships', shipId);
+  const binary = join(folder, 'runtime');
+  const tokenFile = join(folder, 'token');
+  const invalid = join(folder, 'not-a-directory');
+  writeFileSync(tokenFile, 'token');
+  writeFileSync(invalid, 'file');
+  writeFileSync(binary, '#!/bin/sh\nprintf "%s\\n" "$@" > "$0.words"\nexec sleep 30\n');
+  chmodSync(binary, 0o755);
+  mkdirSync(shipFolder, { recursive: true });
+  const runtime = createContainerRuntime({
+    binary, image: 'test-image', tokenFile, homes: join(folder, 'homes'), sockets: join(folder, 'sockets'),
+    sessions, program: TRIERARCH_PROGRAM, version: 'test', platform: 'linux', memory: '512m', cpus: 1,
+    proxyUrl: () => Promise.resolve(undefined),
+    run: () => Promise.resolve({ status: 0, stdout: '', stderr: '' }),
+  });
+  const previous = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = invalid;
+  try {
+    await runtime.start({ shipId, shipFolder, folder, command: ['claude'], harness: 'claude-code' });
+    await expect.poll(() => existsSync(`${binary}.words`)).toBe(true);
+    expect(readFileSync(join(sessions, shipId, 'events.jsonl'), 'utf8')).toContain('Nested Podman cannot start');
+  } finally {
+    if (previous === undefined) Reflect.deleteProperty(process.env, 'XDG_RUNTIME_DIR');
+    else process.env.XDG_RUNTIME_DIR = previous;
+    await runtime.stop(shipId);
+    rmSync(folder, { recursive: true, force: true });
+    rmSync(sessions, { recursive: true, force: true });
+  }
+});
