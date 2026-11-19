@@ -11,7 +11,7 @@ import type { SessionRoots } from './caller-check.js';
 import { INTERRUPT_WAIT_MS } from './hold.js';
 import { callHold, holdFilesOf, REFUSED, type HoldAnswer, type HoldFiles, type HoldRequest } from './hold-protocol.js';
 import { writeProxyToken } from './proxy-tokens.js';
-import type { runCommand } from './run-command.js';
+import { runCommand } from './run-command.js';
 import { discard, type MoveWithinUserNamespace } from './trash.js';
 
 /** How long a hold has to answer a call other than interrupt. */
@@ -159,14 +159,21 @@ export function createHoldRuntime(options: {
         signalHold(pid, 'SIGKILL');
       }
     }
-    const hasGuard = await access(join(files.folder, 'guard-active')).then(() => true, () => false);
-    if (hasGuard) {
-      const until = Date.now() + STOP_WAIT_MS;
-      while (!(await access(join(files.folder, 'guard-done')).then(() => true, () => false))) {
-        if (Date.now() >= until) throw new Error(`the guard of ${shipId} did not finish stopping its session`);
-        await wait(START_POLL_MS);
-      }
-    } else {
+    // A PID alone may have been reused. Only this session's guard owns its done path.
+    const isGuardRunning = async (): Promise<boolean> => {
+      const guard = Number(await readFile(join(files.folder, 'guard-active'), 'utf8').catch(() => ''));
+      if (!Number.isInteger(guard) || guard <= 1) return false;
+      const command = await runCommand('ps', { args: ['-o', 'command=', '-p', String(guard)] });
+      return command.status === 0 && command.stdout.trim().endsWith(` ${join(files.folder, 'guard-done')}`);
+    };
+    const isGuardDone = () => access(join(files.folder, 'guard-done')).then(() => true, () => false);
+    const until = Date.now() + STOP_WAIT_MS;
+    while (!(await isGuardDone()) && await isGuardRunning()) {
+      if (Date.now() >= until) throw new Error(`the guard of ${shipId} did not finish stopping its session`);
+      await wait(START_POLL_MS);
+    }
+    if (!(await isGuardDone())) {
+      // The hold can start no more harnesses. Recover the crashed guard's work before removing temp.
       const groups = (await readFile(files.harnessSessions, 'utf8').catch(() => '')).split('\n').map(Number).filter((pid) => Number.isInteger(pid) && pid > 1);
       const isRunning = (): boolean => groups.some((pid) => {
         try {
@@ -177,9 +184,16 @@ export function createHoldRuntime(options: {
           throw error;
         }
       });
-      const until = Date.now() + STOP_WAIT_MS;
+      const signalGroups = (signal: NodeJS.Signals): void => {
+        for (const group of groups) signalHold(-group, signal);
+      };
+      signalGroups('SIGTERM');
+      const grace = Date.now() + STOP_WAIT_MS;
+      while (isRunning() && Date.now() < grace) await wait(START_POLL_MS);
+      if (isRunning()) signalGroups('SIGKILL');
+      const stopped = Date.now() + STOP_WAIT_MS;
       while (isRunning()) {
-        if (Date.now() >= until) throw new Error(`the processes of ${shipId} did not stop`);
+        if (Date.now() >= stopped) throw new Error(`the processes of ${shipId} did not stop`);
         await wait(START_POLL_MS);
       }
     }
