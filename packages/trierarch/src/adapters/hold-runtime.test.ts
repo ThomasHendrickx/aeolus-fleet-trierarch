@@ -123,6 +123,28 @@ it.runIf(process.platform === 'linux')("starts a ship's Podman service beside it
   await expect.poll(() => existsSync(join(shipFolder, 'podman.sock'))).toBe(false);
 });
 
+it.runIf(process.platform === 'linux')('starts the host session with its own socket when Podman fails to start', async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const podman = join(folder, 'podman');
+  writeFileSync(podman, '#!/bin/sh\necho podman-refused >&2\nexit 1\n');
+  chmodSync(podman, 0o755);
+  const previous = process.env.PATH;
+  process.env.PATH = `${folder}:${previous ?? '/usr/bin:/bin'}`;
+  try {
+    await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    await expect.poll(() => starts().length).toBeGreaterThan(0);
+    expect(starts()[0]?.env.DOCKER_HOST).toBe(`unix://${shipFolder}/podman.sock`);
+    expect(existsSync(join(shipFolder, 'podman.sock'))).toBe(false);
+    await expect.poll(async () => (await runtime.events(shipId)).join('\n')).toContain('podman-refused');
+    expect(() => (readFileSync(join(sessions, shipId, 'events.jsonl'), 'utf8').trim().split('\n')).map((line) => JSON.parse(line))).not.toThrow();
+  } finally {
+    restore('PATH', previous);
+    await runtime.stop(shipId);
+  }
+}, 20_000);
+
 it.runIf(process.platform === 'linux')("removes the ship's test volumes when its host session starts again", async () => {
   const runtime = aRuntime({ hasHostContainerStorage: true });
   const shipId = newId('ship');
