@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import { FAKE_CLAUDE_CODE, FAKE_CODEX, FAKE_COPILOT, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
+import { buildTestSessionImage } from '../../test/support/podman.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import { aShortHome } from '../../test/support/short-home.js';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
@@ -178,7 +179,7 @@ it.runIf(process.platform === 'linux')('logs a Podman service that exits without
   const shipId = newId('ship');
   const shipFolder = join(sessions, shipId + '-ship');
   const podman = join(folder, 'podman');
-  writeFileSync(podman, '#!/bin/sh\n[ "$1" = system ] && exit 1\nexit 0\n');
+  writeFileSync(podman, '#!/bin/sh\ncase " $* " in *" system service "*) exit 1;; esac\nexit 0\n');
   chmodSync(podman, 0o755);
   const previous = process.env.PATH;
   process.env.PATH = `${folder}:${previous ?? '/usr/bin:/bin'}`;
@@ -223,7 +224,13 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
   const session = { shipId, shipFolder, folder, command: [process.execPath, '-e', program], harness: 'claude-code', env: { TESTCONTAINERS_RYUK_DISABLED: 'true', TESTCONTAINERS_HOST_OVERRIDE: '127.0.0.1' } };
   const url = `unix://${shipFolder}/podman.sock`;
   const client = (args: string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', '--url', url, ...args] });
+  const own = (args: string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', ...args] });
+  const ownImage = `localhost/tri348-${shipId}:latest`;
+  const ownContainer = `tri348-${shipId}`;
   try {
+    await buildTestSessionImage(ownImage);
+    const started = await own(['run', '--detach', '--name', ownContainer, '--network', 'bridge', ownImage, 'sleep', '120']);
+    expect(started.status).toBe(0);
     await runtime.start(session);
     await expect.poll(() => existsSync(ready), { timeout: 180_000 }).toBe(true);
     const before = await client(['ps', '--all', '--filter', `name=${name}`, '--format', '{{.Names}}']);
@@ -235,7 +242,7 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
     const ownVolumes = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', 'volume', 'ls', '--quiet'] });
     expect(ownVolumes.stdout.split('\n')).not.toContain(volumes.stdout.trim());
     await runtime.stop(shipId);
-    const stopped = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${join(shipFolder, 'containers', 'storage.conf')}`, 'podman', 'ps', '--quiet'] });
+    const stopped = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${join(shipFolder, 'containers', 'storage.conf')}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(shipFolder, 'containers', 'run'), '--tmpdir', join(shipFolder, 'containers', 'tmp'), 'ps', '--quiet'] });
     expect(stopped.stdout.trim()).toBe('');
     await runtime.start({ ...session, command: [...FAKE_CLAUDE_CODE] });
     const after = await client(['ps', '--all', '--filter', `name=${name}`, '--quiet']);
@@ -243,13 +250,17 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
     const retained = await client(['image', 'ls', '--quiet']);
     expect(retained.stdout.trim()).toBe(images.stdout.trim());
     expect([after.stdout.trim(), remaining.stdout.trim()]).toEqual(['', '']);
-    const own = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', 'ps', '--all', '--filter', `name=${name}`, '--quiet'] });
-    expect(own.stdout.trim()).toBe('');
+    const ownContainers = await own(['ps', '--all', '--filter', `name=${name}`, '--quiet']);
+    expect(ownContainers.stdout.trim()).toBe('');
+    const bridge = await own(['run', '--rm', '--network', 'bridge', ownImage, '/bin/sh', '-c', ':']);
+    expect(bridge.status, bridge.stderr).toBe(0);
   } finally {
     await runtime.stop(shipId);
+    await own(['rm', '--force', '--time', '0', ownContainer]);
+    await own(['image', 'rm', '--force', ownImage]);
     const config = join(shipFolder, 'containers', 'storage.conf');
     if (existsSync(config)) {
-      await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', 'rm', '--all', '--force', '--time', '0', '--volumes'] });
+      await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(shipFolder, 'containers', 'run'), '--tmpdir', join(shipFolder, 'containers', 'tmp'), 'rm', '--all', '--force', '--time', '0', '--volumes'] });
       await runCommand('podman', { args: ['unshare', 'rm', '-rf', '--', shipFolder] });
     }
   }
