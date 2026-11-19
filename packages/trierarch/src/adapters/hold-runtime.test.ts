@@ -199,6 +199,7 @@ it.runIf(process.platform === 'linux')('starts the session when its named runtim
   try {
     await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
     await expect.poll(() => starts().length).toBeGreaterThan(0);
+    expect(await runtime.sessionRootOf(shipId)).toBeGreaterThan(1);
     expect(starts()[0]?.env.DOCKER_HOST).toBe(`unix://${shipFolder}/podman.sock`);
     await expect.poll(async () => (await runtime.events(shipId)).join('\n')).toContain('Podman service could not start');
   } finally {
