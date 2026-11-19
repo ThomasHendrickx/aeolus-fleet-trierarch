@@ -193,6 +193,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
     signalGroup(running, 'SIGKILL');
   };
 
+  let clearContainers: (() => Promise<void>) | undefined;
   let service: ReturnType<typeof spawn> | undefined;
   let socket: string | undefined;
   const sessionEnvironment: Record<string, string> = { ...environment };
@@ -204,8 +205,12 @@ export async function runHold(options: HoldOptions): Promise<number> {
     const graph = join(storage, 'graph');
     const content = `[storage]\ndriver = "overlay"\ngraphroot = ${JSON.stringify(graph)}\nrootless_storage_path = ${JSON.stringify(graph)}\nrunroot = ${JSON.stringify(join(storage, 'run'))}\n`;
     await writeFile(config, content);
-    const cleanup = async (args: readonly string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', ...args] });
-    const containers = await cleanup(['rm', '--all', '--force', '--volumes']).catch(() => undefined);
+    const cleanup = async (args: readonly string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', ...args], timeoutMs: 60_000 });
+    clearContainers = async () => {
+      const removed = await cleanup(['rm', '--all', '--force', '--time', '0', '--volumes']).catch(() => undefined);
+      if (removed?.status !== 0) events.write(`Podman cleanup failed: ${removed?.stderr ?? 'podman could not start'}\n`);
+    };
+    const containers = await cleanup(['rm', '--all', '--force', '--time', '0', '--volumes']).catch(() => undefined);
     const volumes = containers?.status === 0 ? await cleanup(['volume', 'rm', '--all', '--force']).catch(() => undefined) : undefined;
     if (containers?.status !== 0 || volumes?.status !== 0) {
       events.write(`Podman cleanup failed: ${containers?.stderr ?? volumes?.stderr ?? 'podman could not start'}\n`);
@@ -439,8 +444,13 @@ export async function runHold(options: HoldOptions): Promise<number> {
 
   const code = await ended;
   server.close();
+  await clearContainers?.();
   if (service?.pid !== undefined) {
     try { process.kill(-service.pid, 'SIGTERM'); } catch { /* Already ended. */ }
+    if (service.exitCode === null && service.signalCode === null) {
+      const stopping = service;
+      await Promise.race([new Promise<void>((resolve) => { stopping.once('exit', () => { resolve(); }); }), wait(2000)]);
+    }
   }
   if (socket !== undefined) await rm(socket, { force: true });
   await rm(files.socket, { force: true });

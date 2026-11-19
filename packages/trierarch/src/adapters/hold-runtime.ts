@@ -17,11 +17,11 @@ import { discard, type MoveWithinUserNamespace } from './trash.js';
 /** How long a hold has to answer a call other than interrupt. */
 const CALL_TIMEOUT_MS = 2000;
 /** How long a hold has to answer its first call after its start. */
-const START_WAIT_MS = 10_000;
+const START_WAIT_MS = 70_000;
 /** How often a starting hold is asked whether it answers. */
 const START_POLL_MS = 50;
 /** How long a stopped hold has to end with its harness before it is killed. */
-const STOP_WAIT_MS = 5000;
+const STOP_WAIT_MS = 70_000;
 /** How many of the last event lines are read: the launch window's error event is among the last. */
 const EVENT_LINES = 200;
 /** Runs the command in the background and returns at once: its process is then nobody's child, so no session runs under the trierarch's own process. */
