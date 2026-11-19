@@ -123,6 +123,22 @@ it.runIf(process.platform === 'linux')("starts a ship's Podman service beside it
   await expect.poll(() => existsSync(join(shipFolder, 'podman.sock'))).toBe(false);
 });
 
+it.runIf(process.platform === 'linux')("removes the ship's test volumes when its host session starts again", async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const session = { shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' };
+  const url = `unix://${shipFolder}/podman.sock`;
+  await runtime.start(session);
+  const info = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', '--url', url, 'info', '--format', '{{.Store.GraphRoot}}'] });
+  expect(info.stdout.trim()).toBe(join(shipFolder, 'containers', 'graph'));
+  const made = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', '--url', url, 'volume', 'create', 'left-behind'] });
+  expect(made.status).toBe(0);
+  await runtime.start(session);
+  const listed = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', '--url', url, 'volume', 'ls', '--format', '{{.Name}}'] });
+  expect({ status: listed.status, volumes: listed.stdout.trim() }).toEqual({ status: 0, volumes: '' });
+});
+
 it('stops a session when its hold exits before it can be signalled', async () => {
   const runtime = aRuntime();
   const shipId = await aClaudeCodeSession(runtime);
