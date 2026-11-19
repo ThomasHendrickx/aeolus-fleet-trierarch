@@ -147,6 +147,24 @@ it.runIf(process.platform === 'linux')('starts the host session with its own soc
   }
 }, 20_000);
 
+it.runIf(process.platform === 'linux')('logs a Podman service that exits without an error message', async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const podman = join(folder, 'podman');
+  writeFileSync(podman, '#!/bin/sh\n[ "$1" = system ] && exit 1\nexit 0\n');
+  chmodSync(podman, 0o755);
+  const previous = process.env.PATH;
+  process.env.PATH = `${folder}:${previous ?? '/usr/bin:/bin'}`;
+  try {
+    await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    await expect.poll(async () => (await runtime.events(shipId)).join('\n')).toContain('Podman service exited with code 1');
+  } finally {
+    restore('PATH', previous);
+    await runtime.stop(shipId);
+  }
+}, 20_000);
+
 it.runIf(process.platform === 'linux')("removes the ship's test volumes when its host session starts again", async () => {
   const runtime = aRuntime({ hasHostContainerStorage: true });
   const shipId = newId('ship');
