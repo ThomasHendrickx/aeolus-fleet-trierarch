@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -16,6 +17,7 @@ import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import { createCallerCheck } from './caller-check.js';
 import { createHoldRuntime, sessionsLaunch, systemdVersionOf } from './hold-runtime.js';
 import { runCommand } from './run-command.js';
+import { removeWithinIsolatedUserNamespace } from './trash.js';
 import { runningVersion } from './version.js';
 
 // Against real holds, each the trierarch program from source started as the
@@ -129,24 +131,32 @@ it.runIf(process.platform === 'linux')("gives every host Podman invocation the s
   const shipId = newId('ship');
   const shipFolder = join(sessions, shipId + '-ship');
   const podman = join(folder, 'podman');
+  const runtimeRoot = realpathSync(aShortHome('podman-runtime'));
+  const runtimeDir = join(runtimeRoot, 'aeolus', createHash('sha256').update(shipId).digest('hex').slice(0, 12));
   const calls = join(folder, 'podman-calls');
   writeFileSync(podman, `#!/bin/sh\nprintf '%s\n' "$*" >> '${calls}'\nexit 0\n`);
   chmodSync(podman, 0o755);
   const previous = process.env.PATH;
+  const previousRuntime = process.env.XDG_RUNTIME_DIR;
   process.env.PATH = `${folder}:${previous ?? '/usr/bin:/bin'}`;
+  process.env.XDG_RUNTIME_DIR = runtimeRoot;
   try {
     await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    expect(statSync(runtimeDir).mode & 0o777).toBe(0o700);
     await runtime.stop(shipId);
+    expect(existsSync(runtimeDir)).toBe(false);
     const invocations = readFileSync(calls, 'utf8').trim().split('\n');
     expect(invocations.length).toBeGreaterThanOrEqual(3);
     for (const invocation of invocations) {
       expect(invocation).toContain(`--root ${shipFolder}/containers/graph`);
-      expect(invocation).toContain(`--runroot ${shipFolder}/containers/run`);
-      expect(invocation).toContain(`--tmpdir ${shipFolder}/containers/tmp`);
+      expect(invocation).toContain(`--runroot ${runtimeDir}/run`);
+      expect(invocation).toContain(`--tmpdir ${runtimeDir}/tmp`);
     }
   } finally {
     restore('PATH', previous);
+    restore('XDG_RUNTIME_DIR', previousRuntime);
     await runtime.stop(shipId);
+    rmSync(runtimeRoot, { recursive: true, force: true });
   }
 }, 20_000);
 
@@ -261,7 +271,7 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
     const config = join(shipFolder, 'containers', 'storage.conf');
     if (existsSync(config)) {
       await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(shipFolder, 'containers', 'run'), '--tmpdir', join(shipFolder, 'containers', 'tmp'), 'rm', '--all', '--force', '--time', '0', '--volumes'] });
-      await runCommand('podman', { args: ['unshare', 'rm', '-rf', '--', shipFolder] });
+      await removeWithinIsolatedUserNamespace('podman')(shipFolder);
     }
   }
 }, 240_000);
