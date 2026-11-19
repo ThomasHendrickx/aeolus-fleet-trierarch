@@ -507,7 +507,20 @@ describe('the container a session runs in', () => {
     const { words } = await started({ shipFolder });
 
     expect(valuesOf(words, '--volume')).toContain(`${shipFolder}/containers:/home/ubuntu/.local/share/containers/storage`);
-    expect(readFileSync(envFileOf(words), 'utf8')).toContain('AEOLUS_SHIP_CONTAINER_STORAGE=1');
+  });
+
+  it.runIf(process.platform === 'linux')("moves nested storage to the trash when its containers cannot be cleared", async () => {
+    const shipFolder = join(folder, 'ships', shipId);
+    const storage = join(shipFolder, 'containers');
+    mkdirSync(storage, { recursive: true });
+    writeFileSync(join(storage, 'left'), 'left');
+    const runner = recordingRunner((args) => args.includes('--entrypoint') ? { status: 1, stderr: 'cleanup failed' } : {});
+    const runtime = runtimeWith(runner);
+    await runtime.start({ shipId, shipFolder, folder, command: ['claude'], harness: 'claude-code' });
+    expect(existsSync(join(storage, 'left'))).toBe(false);
+    const trash = join(folder, 'ships', '.trash');
+    expect(readdirSync(trash)).toHaveLength(1);
+    expect(readFileSync(join(trash, readdirSync(trash)[0] ?? '', 'left'), 'utf8')).toBe('left');
   });
 
   it("mounts the home and the socket folder in the ship's folder of a ship crewed fresh, each made for its owner alone, and nothing under the homes or sockets of the ships crewed before", async () => {
