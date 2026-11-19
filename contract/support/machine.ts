@@ -427,9 +427,15 @@ export type OtherHarness = 'codex' | 'copilot';
 
 /** A new folder of four characters in the run's short folder, for the machine: a ship's socket path under its home is within the system's limit only for a short path. */
 function aShortFolder(): string {
-  const folder = join(process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '', randomBytes(2).toString('hex'));
-  mkdirSync(folder);
-  return realpathSync(folder);
+  for (;;) {
+    const folder = join(process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '', randomBytes(2).toString('hex'));
+    try {
+      mkdirSync(folder);
+      return realpathSync(folder);
+    } catch (error) {
+      if (!(error instanceof Error) || !('code' in error) || error.code !== 'EEXIST') throw error;
+    }
+  }
 }
 
 /** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet. */
