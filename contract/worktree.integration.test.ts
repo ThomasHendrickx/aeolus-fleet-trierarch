@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import { type Dirent, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -209,11 +209,35 @@ const shipFolderOf = (shipId: string): string => join(machine.trierarchHome, 'sh
 /** A ship's fleet socket, in its ship's folder. */
 const socketOf = (shipId: string): string => join(shipFolderOf(shipId), 'sockets', 'fleet.sock');
 
-/** Every file under the folder, by its path; a socket or a link is no file. */
+const isGone = (error: unknown): boolean => error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+/**
+ * Every file under the folder, by its path; a socket or a link is no file. The trierarch empties
+ * `ships/.trash` while the walk runs, so an entry removed after it was listed is skipped.
+ */
 function filesUnder(folder: string): string[] {
-  return readdirSync(folder, { recursive: true, encoding: 'utf8' })
-    .map((name) => join(folder, name))
-    .filter((path) => lstatSync(path).isFile());
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(folder, { withFileTypes: true });
+  } catch (error) {
+    if (isGone(error)) return [];
+    throw error;
+  }
+  return entries.flatMap((entry) => {
+    const path = join(folder, entry.name);
+    if (entry.isDirectory()) return filesUnder(path);
+    return entry.isFile() ? [path] : [];
+  });
+}
+
+/** A file's text; a file the trierarch removed after it was listed holds none. */
+function textOf(path: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (error) {
+    if (isGone(error)) return '';
+    throw error;
+  }
 }
 
 const savedSchema = z.object({ entries: z.record(z.string(), z.object({ crewToken: z.string().optional() }).loose()) });
@@ -236,7 +260,7 @@ describe("a ship's folder", () => {
     const tokens = [crewToken, readFileSync(join(machine.trierarchHome, 'crew-token'), 'utf8').trim()];
     expect(tokens.filter((token) => token.length < 20)).toEqual([]);
 
-    const holding = filesUnder(join(machine.trierarchHome, 'ships')).filter((path) => tokens.some((token) => readFileSync(path, 'utf8').includes(token)));
+    const holding = filesUnder(join(machine.trierarchHome, 'ships')).filter((path) => tokens.some((token) => textOf(path).includes(token)));
 
     expect(holding).toEqual([]);
     expect(existsSync(join(machine.trierarchHome, 'sessions', scout, 'hold.pid'))).toBe(true);
