@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
+import { FAKE_CLAUDE_CODE, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId, inRepositories } from '../../test/support/in-memory.js';
 import { aShortHome } from '../../test/support/short-home.js';
 import { trierarchPaths, type TrierarchPaths } from './paths.js';
@@ -70,6 +70,27 @@ function adaptersOf(runtime?: TrierarchConfiguration['runtime'], shipsRoot?: str
 }
 
 describe('the adapters the session runtime picks (decision 0039)', () => {
+  it('points host sessions at the trierarch cache', async () => {
+    const { sessions } = adaptersOf();
+    mkdirSync(paths.home, { recursive: true });
+    writeFileSync(paths.modelToken, MODEL_TOKEN);
+    try {
+      await sessions.start({ shipId, folder: home, shipFolder: join(home, 'ship'), command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+      const file = join(home, 'fake-starts.jsonl');
+      await expect.poll(() => existsSync(file)).toBe(true);
+      const started: unknown = JSON.parse(readFileSync(file, 'utf8').trim());
+      expect(started).toMatchObject({ env: {
+        XDG_CACHE_HOME: join(paths.home, 'cache', 'xdg'),
+        npm_config_cache: join(paths.home, 'cache', 'npm'),
+        GOCACHE: join(paths.home, 'cache', 'go-build'),
+        GOMODCACHE: join(paths.home, 'cache', 'go-mod'),
+        PLAYWRIGHT_BROWSERS_PATH: join(paths.home, 'cache', 'ms-playwright'),
+        TMPDIR: join(home, 'ship', 'tmp'), TMP: join(home, 'ship', 'tmp'), TEMP: join(home, 'ship', 'tmp'),
+      } });
+    } finally {
+      await sessions.stop(shipId);
+    }
+  });
   it('gives sessions on the host a worktree and the host home', async () => {
     const adapters = adaptersOf();
 

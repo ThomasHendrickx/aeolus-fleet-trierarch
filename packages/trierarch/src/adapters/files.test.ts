@@ -197,3 +197,8 @@ describe('aip in the configuration', () => {
     expect(configurationSchema.safeParse({ ...initialConfiguration(), aip: { server: 'https://aip.example.invalid', tokenSecret: 'aip-read' } }).success).toBe(false);
   });
 });
+
+it('accepts an optional nonnegative cache size in bytes', () => {
+  expect(configurationSchema.parse({ ...initialConfiguration(), cacheSizeBytes: 1024 })).toMatchObject({ cacheSizeBytes: 1024 });
+  expect(configurationSchema.safeParse({ ...initialConfiguration(), cacheSizeBytes: -1 }).success).toBe(false);
+});

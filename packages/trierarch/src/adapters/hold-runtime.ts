@@ -89,7 +89,7 @@ export function createHoldRuntime(options: {
   /** What runs beside the holds, one per ship: stopped first when its ship's hold stops, and listed as of another version for a ship no hold holds. */
   beside?: Pick<SessionRuntime, 'list' | 'stop'>;
   /** What the hold runs for a session, once the ship's last session is stopped and its folder is new; the session's command and environment unless given. */
-  heldAs?: (session: SessionStart, files: HoldFiles) => Promise<HeldCommand>;
+  heldAs?: (session: SessionStart, files: HoldFiles & { temp: string | undefined }) => Promise<HeldCommand>;
   /** When the machine started. */
   bootedAt?: () => Date;
   moveWithinUserNamespace?: MoveWithinUserNamespace;
@@ -248,7 +248,7 @@ export function createHoldRuntime(options: {
       }
       const tokenVariable = proxyToken === undefined ? [] : ['--proxy-token-variable', proxyToken.variable];
       const modelToken = harness === 'claude-code' && proxyToken === undefined && options.modelTokenFile !== undefined ? ['--model-token-file', options.modelTokenFile] : [];
-      const { command, env } = options.heldAs === undefined ? { command: session.command, env: { ...session.env, ...(temp !== undefined && { TMPDIR: temp, TMP: temp, TEMP: temp }) } } : await options.heldAs(session, files);
+      const { command, env } = options.heldAs === undefined ? { command: session.command, env: { ...session.env, ...(temp !== undefined && { TMPDIR: temp, TMP: temp, TEMP: temp }) } } : await options.heldAs(session, { ...files, temp });
       const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...modelToken, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
       const [program = 'sh', ...args] = [...(options.launch ?? []), 'sh', '-c', DETACHED, 'sh', ...hold];
       const starter = spawn(program, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
