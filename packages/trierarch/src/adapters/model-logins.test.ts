@@ -12,12 +12,14 @@ import { createModelLogins } from './model-logins.js';
 let keyInReach: string | undefined;
 let codexLogin: 'chatgpt' | 'apiKey' | 'none';
 let askedFolders: (string | undefined)[];
+let askedShipFolders: (string | undefined)[];
 let askedOptions: Readonly<Record<string, string>>[];
 const harnesses = () => ({
   keyStates: createKeyStates({ keys: join(home, 'keys'), file: join(home, 'proxy', 'key-states.json') }),
   claudeCode: {
-    keyInReach: (at: { options: Readonly<Record<string, string>>; folder?: string }) => {
+    keyInReach: (at: { options: Readonly<Record<string, string>>; folder?: string; shipFolder?: string }) => {
       askedFolders.push(at.folder);
+      askedShipFolders.push(at.shipFolder);
       askedOptions.push(at.options);
       return Promise.resolve(keyInReach);
     },
@@ -34,6 +36,7 @@ beforeEach(() => {
   keyInReach = undefined;
   codexLogin = 'chatgpt';
   askedFolders = [];
+  askedShipFolders = [];
   askedOptions = [];
 });
 
@@ -87,6 +90,11 @@ describe('whether a session can start on its login (api keys K9)', () => {
     await keys.write('claude-code', 'test-key-not-real');
 
     await expect(createModelLogins(harnesses()).startProblem({ harness: 'claude-code', login: 'apiKey', options: {} })).resolves.toBeUndefined();
+  });
+
+  it('checks the settings in the ship home for a Claude subscription', async () => {
+    await createModelLogins(harnesses()).startProblem({ harness: 'claude-code', login: 'subscription', options: {}, folder: '/work/scout', shipFolder: '/ships/scout' });
+    expect(askedShipFolders).toEqual(['/ships/scout']);
   });
 
   it("not on Claude Code's subscription with a key in reach of it, naming where, in the folder it starts in", async () => {
