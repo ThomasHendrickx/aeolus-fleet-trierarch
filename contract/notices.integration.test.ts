@@ -198,7 +198,7 @@ describe('a ship whose folder holds no identity', () => {
     const scout = await fleet.commission('scout');
     await aRunning(scout);
 
-    await machine.removeIdentity(sessionOf(machine, 'scout').folder);
+    await machine.removeIdentity(sessionOf(machine, 'scout').folder, sessionOf(machine, 'scout').starts()[0]?.env);
 
     await expect(told(1)).resolves.toEqual([
       {

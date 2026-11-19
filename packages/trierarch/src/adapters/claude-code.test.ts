@@ -718,6 +718,44 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
   /** The identity file of the folder, as the plugin names it in a home. */
   const identityFile = () => `.aeolus/crews/claude-code/${createHash('sha256').update(folder).digest('hex').slice(0, 32)}.identity`;
 
+  it('prepares a host ship home and starts Claude Code with its own configuration and plugin', async () => {
+    const shipFolder = join(homes, 'ships', shipId);
+    const claudeCode = createClaudeCodeHarness({
+      configuration: CONFIGURATION,
+      plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
+      projects,
+      setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
+      hostShipHomes: { homes, managedSettings: join(home, 'managed') },
+      permissionModes: () => undefined,
+      sessions: { start: (session) => { started.push(session); return Promise.resolve(); }, send: () => Promise.resolve(), interrupt: () => Promise.resolve(), events: () => Promise.resolve([]), lastEventAt: () => Promise.resolve(undefined) },
+    });
+    await claudeCode.prepareIdentity({ folder, identity, crewToken: CREW_TOKEN, shipFolder });
+    await claudeCode.launch({ ...launchOf(shipId), options: {}, isFirstStart: true, shipFolder });
+    expect(started[0]?.env).toMatchObject({ CLAUDE_CONFIG_DIR: join(shipFolder, 'home', '.claude'), AEOLUS_CREWS: join(shipFolder, 'home', '.aeolus', 'crews', 'claude-code'), AEOLUS_DATA: join(shipFolder, 'home', '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet') });
+    expect(started[0]?.command).toContain('--plugin-dir');
+    expect(started[0]?.command).toContain(PLUGIN_ROOT);
+    expect(existsSync(join(shipFolder, 'home', identityFile()))).toBe(true);
+    expect(readFileSync(join(shipFolder, 'home', identityFile()), 'utf8')).not.toContain(CREW_TOKEN);
+    const setup = createClaudeCodeSetup({ homeDirectory: join(shipFolder, 'home'), configDirectory: join(shipFolder, 'home', '.claude'), managedSettings: join(home, 'managed') });
+    expect(await setup.isOnboardingComplete()).toBe(true);
+    expect(await setup.isTrusted(folder)).toBe(true);
+  });
+
+  it('finds the host identity of a session started before ship homes', async () => {
+    const shipFolder = join(homes, 'ships', shipId);
+    await harness().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
+    const upgraded = createClaudeCodeHarness({
+      configuration: CONFIGURATION,
+      plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
+      projects,
+      setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
+      hostShipHomes: { homes, managedSettings: join(home, 'managed') },
+      permissionModes: () => undefined,
+      sessions: { start: () => Promise.resolve(), send: () => Promise.resolve(), interrupt: () => Promise.resolve(), events: () => Promise.resolve([]), lastEventAt: () => Promise.resolve(undefined) },
+    });
+    await expect(upgraded.hasIdentity({ shipId, folder, shipFolder })).resolves.toBe(true);
+  });
+
   it("keeps each ship's identity in its own home alone, never in the host's home or another ship's", async () => {
     await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
     await inContainers().prepareIdentity({ folder, identity: otherIdentity, crewToken: CREW_TOKEN });

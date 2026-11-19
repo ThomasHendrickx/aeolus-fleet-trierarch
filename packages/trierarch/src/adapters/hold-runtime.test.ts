@@ -58,8 +58,8 @@ afterEach(async () => {
 /** Twenty turns started and interrupted, each a stdin line and a poll of the events. */
 const TWENTY_TURNS_MS = 30_000;
 
-function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string } = {}) {
-  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
+function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string; modelTokenFile?: string } = {}) {
+  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.modelTokenFile !== undefined && { modelTokenFile: at.modelTokenFile }), ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
   runtimes.push(runtime);
   return runtime;
 }
@@ -309,8 +309,23 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await expect(eventsOfType({ runtime: runtime, shipId: lookout }, 'result')).resolves.toEqual([]);
   });
 
+  it('hands a host Claude subscription its machine token without putting it on the command line', async () => {
+    const modelTokenFile = join(sessions, 'model-token');
+    const token = 'test-model-token-not-real';
+    writeFileSync(modelTokenFile, token);
+    const runtime = aRuntime({ modelTokenFile });
+    const shipId = await aClaudeCodeSession(runtime);
+    await expect.poll(() => written('fake-starts.jsonl')).toHaveLength(1);
+    expect(starts()[0]?.env.CLAUDE_CODE_OAUTH_TOKEN).toBe(token);
+    const holdPid = Number(readFileSync(join(sessions, shipId, 'hold.pid'), 'utf8'));
+    const commandLine = (await runCommand('ps', { args: ['-o', 'args=', '-p', String(holdPid)] })).stdout;
+    expect(commandLine).not.toContain(token);
+  });
+
   it("hands the session its proxy token in the variable named, from a file of the session's own, never on a command line (api keys K7)", async () => {
-    const runtime = aRuntime();
+    const modelTokenFile = join(sessions, 'model-token');
+    writeFileSync(modelTokenFile, 'test-model-token-not-real');
+    const runtime = aRuntime({ modelTokenFile });
     const shipId = newId('ship');
     const token = 'test-proxy-token-not-real';
 
@@ -319,6 +334,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await expect.poll(() => written('fake-starts.jsonl')).toHaveLength(1);
     const [start] = starts();
     expect(start?.env.ANTHROPIC_AUTH_TOKEN).toBe(token);
+    expect(start?.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(start?.args.join(' ')).not.toContain(token);
     const tokenFile = join(sessions, shipId, 'proxy-token');
     expect(statSync(tokenFile).mode & 0o777).toBe(0o600);

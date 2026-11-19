@@ -128,7 +128,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, proxyUrl: async () => {
       const url = await proxy.url();
       return url === undefined ? undefined : modelProxyUrlOf(url);
-    }, ...(shipHomes !== undefined && { shipHomes }) });
+    }, ...(shipHomes !== undefined ? { shipHomes } : { hostShipHomes: { homes: paths.homes, managedSettings } }) });
   const state = createJsonState(paths.state);
   const trust = createTrust({ configuration, homeDirectory, env, managedSettings });
   const clock = { now: () => new Date() };
@@ -167,9 +167,10 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   });
   const claudeCodeSetup = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
   const modelLogins = createModelLogins({
+    ...(configuration.runtime?.kind !== 'container' && { modelTokenFile: paths.modelToken }),
     keyStates: createKeyStates({ keys: paths.keys, file: keyStatesFileOf(paths.proxy) }),
     // The harness as launch reads it, so the guard sees the flags the session would start with (K6).
-    claudeCode: { keyInReach: ({ options, folder }) => claudeCodeKeyInReach(claudeCodeSetup, { harness: configuration.harnesses['claude-code'] ?? { flags: [], options: {} }, options, ...(folder !== undefined && { folder }) }) },
+    claudeCode: { keyInReach: ({ options, folder, shipFolder }) => claudeCodeKeyInReach(shipFolder === undefined ? claudeCodeSetup : createClaudeCodeSetup({ homeDirectory: join(shipFolder, 'home'), ...(configuration.runtime?.kind !== 'container' && { configDirectory: join(shipFolder, 'home', '.claude') }), managedSettings }), { harness: configuration.harnesses['claude-code'] ?? { flags: [], options: {} }, options, ...(folder !== undefined && { folder }) }) },
     codex: createCodexSetup(),
   });
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
@@ -177,7 +178,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const usage = createUsage({
     'claude-code': createClaudeCodeUsage({
       // In containers each ship's conversations are in its own home (decision 0039).
-      projectsOf: claudeCodeProjectsOf({ projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), ...(shipHomes !== undefined && { homes: shipHomes.homes }) }),
+      projectsOf: claudeCodeProjectsOf({ projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), ...(shipHomes !== undefined ? { homes: shipHomes.homes } : { hostShipHomes: paths.homes }) }),
       madeAt: folderMadeAt,
       run: runCommand,
       neutralFolder: () => mkdtemp(join(tmpdir(), 'aeolus-trierarch-probe-')),

@@ -198,6 +198,7 @@ export function createClaudeCodeHarness(options: {
   setup: Pick<ClaudeCodeSetup, 'completeOnboarding' | 'defaultPermissionMode' | 'isSkipPermissionsAccepted'>;
   /** For sessions in containers: a home of each ship's own under `homes`, in place of the host's (decision 0039), moved to the trash within the runtime's user namespace when the host cannot move it. */
   shipHomes?: { homes: string; managedSettings: string; moveWithinUserNamespace?: MoveWithinUserNamespace };
+  hostShipHomes?: { homes: string; managedSettings: string };
   /** The permission modes the installed Claude Code lists, as detection last found them (#517); undefined before it found any. */
   permissionModes: () => readonly string[] | undefined;
   /** The program to run; `claude` unless a test runs another. */
@@ -221,23 +222,29 @@ export function createClaudeCodeHarness(options: {
     }
     return { env: { ANTHROPIC_BASE_URL: `${url}/anthropic` }, proxyToken: { harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token: newProxyToken() } };
   };
-  const homes =
-    options.shipHomes === undefined
-      ? createHostClaudeCodeHomes({ plugin, projects: options.projects, setup: options.setup })
-      : createShipClaudeCodeHomes({ ...options.shipHomes, pluginRoot: plugin.root, host: options.setup });
-  const identityOf = (ship: ShipFiles) => createPluginIdentity(homes.of(ship).plugin);
-  const marksOf = (ship: ShipFiles) => createLaunchMarks(homes.of(ship).plugin);
-  /** The ship's files by its id and ship's folder, with nothing else of the session. */
+  const hostHomes = createHostClaudeCodeHomes({ plugin, projects: options.projects, setup: options.setup });
+  const shipHomes = options.shipHomes === undefined ? undefined : createShipClaudeCodeHomes({ ...options.shipHomes, pluginRoot: plugin.root, host: options.setup });
+  const hostShipHomes = options.hostShipHomes === undefined ? undefined : createShipClaudeCodeHomes({ ...options.hostShipHomes, isConfigDirectory: true, pluginRoot: plugin.root, host: options.setup });
+  const homesOf = (ship: ShipFiles) => shipHomes ?? (ship.shipFolder === undefined ? undefined : hostShipHomes) ?? hostHomes;
+  const existingHomesOf = async (ship: ShipFiles & { folder: string }) =>
+    hostShipHomes !== undefined && await createPluginIdentity(hostHomes.of(ship).plugin).hasIdentity(ship) ? hostHomes : homesOf(ship);
+  const identityOf = async (ship: ShipFiles & { folder: string }) => createPluginIdentity((await existingHomesOf(ship)).of(ship).plugin);
+  const marksOf = async (ship: ShipFiles & { folder: string }) => createLaunchMarks((await existingHomesOf(ship)).of(ship).plugin);
   const filesOf = (session: { shipId: ShipId; shipFolder?: string }): ShipFiles => ({ shipId: session.shipId, ...(session.shipFolder !== undefined && { shipFolder: session.shipFolder }) });
 
   return {
-    prepareIdentity: ({ shipFolder, ...at }) => identityOf(filesOf({ shipId: at.identity.shipId, ...(shipFolder !== undefined && { shipFolder }) })).prepareIdentity(at),
-    hasIdentity: (session) => identityOf(filesOf(session)).hasIdentity(session),
-    removeIdentity: async (session) => {
-      await identityOf(filesOf(session)).removeIdentity(session);
-      await homes.remove(filesOf(session));
+    prepareIdentity: ({ shipFolder, ...at }) => {
+      const ship = filesOf({ shipId: at.identity.shipId, ...(shipFolder !== undefined && { shipFolder }) });
+      return createPluginIdentity(homesOf(ship).of(ship).plugin).prepareIdentity(at);
     },
-    turnOf: (session) => identityOf(filesOf(session)).turnOf(session),
+    hasIdentity: async (session) => (await identityOf({ ...filesOf(session), folder: session.folder })).hasIdentity(session),
+    removeIdentity: async (session) => {
+      const ship = { ...filesOf(session), folder: session.folder };
+      const homes = await existingHomesOf(ship);
+      await createPluginIdentity(homes.of(ship).plugin).removeIdentity(session);
+      await homes.remove(ship);
+    },
+    turnOf: async (session) => (await identityOf({ ...filesOf(session), folder: session.folder })).turnOf(session),
     startProblem: () => createPluginIdentity(plugin).startProblem(),
     launch: async ({ shipId, folder, shipFolder, harness, options: picked, isFirstStart, launchId, login, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
@@ -246,6 +253,7 @@ export function createClaudeCodeHarness(options: {
       }
       const route = await routeOf(login);
       const ship = filesOf({ shipId, ...(shipFolder !== undefined && { shipFolder }) });
+      const homes = await existingHomesOf({ ...ship, folder });
       const home = homes.of(ship);
       await homes.prepare({ ...ship, folder });
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
@@ -257,13 +265,16 @@ export function createClaudeCodeHarness(options: {
         permissionModes: options.permissionModes(),
         ...(options.command !== undefined && { program: options.command }),
       });
-      const marks = marksOf(ship);
+      const marks = await marksOf({ ...ship, folder });
       await marks.clear(folder);
-      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId, ...route.env }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(shipFolder !== undefined && { shipFolder }) });
+      const isHostShip = homes === hostShipHomes;
+      const shipEnv: Record<string, string> = isHostShip ? { CLAUDE_CONFIG_DIR: join(ship.shipFolder ?? '', 'home', '.claude'), AEOLUS_CREWS: home.plugin.crews, AEOLUS_DATA: home.plugin.data } : {};
+      const commandWords = isHostShip ? [...wordsOf(command), '--plugin-dir', await plugin.root()] : wordsOf(command);
+      await sessions.start({ shipId, folder, command: commandWords, harness, env: { [LAUNCH_VARIABLE]: launchId, ...route.env, ...shipEnv }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(shipFolder !== undefined && { shipFolder }) });
       await sessions.send({ shipId, line: userLine(prompt) });
     },
     handOver: async (session) => {
-      const line = await identityOf(filesOf(session)).handOverLine(session);
+      const line = await (await identityOf({ ...filesOf(session), folder: session.folder })).handOverLine(session);
       if (line === undefined) {
         return 'nothing';
       }
@@ -271,7 +282,7 @@ export function createClaudeCodeHarness(options: {
       return 'handed';
     },
     forceOver: async ({ shipId, folder, shipFolder, isTurnBusy }) => {
-      const line = await identityOf(filesOf({ shipId, ...(shipFolder !== undefined && { shipFolder }) })).forceOverLine({ shipId, folder });
+      const line = await (await identityOf({ ...filesOf({ shipId, ...(shipFolder !== undefined && { shipFolder }) }), folder })).forceOverLine({ shipId, folder });
       if (line === undefined) {
         return 'nothing';
       }
@@ -281,8 +292,8 @@ export function createClaudeCodeHarness(options: {
       await sessions.send({ shipId, line: userLine(wakePromptOf(line)) });
       return 'handed';
     },
-    isHolding: (session) => identityOf(filesOf(session)).isHolding(session),
-    sessionDied: (session) => identityOf(filesOf(session)).sessionDied(session),
+    isHolding: async (session) => (await identityOf({ ...filesOf(session), folder: session.folder })).isHolding(session),
+    sessionDied: async (session) => (await identityOf({ ...filesOf(session), folder: session.folder })).sessionDied(session),
     marksLaunches: () => createLaunchMarks(plugin).isMarking(),
     // Claude Code is offered wherever its plugin is: no build or runtime of it is held back.
     notOfferedReason: () => Promise.resolve(undefined),
@@ -291,7 +302,7 @@ export function createClaudeCodeHarness(options: {
     failureReason: async ({ shipId }) => claudeCodeErrorIn(await sessions.events(shipId)),
     // The marker says what the session did; the last error event names why a start shows none (H13).
     launchSeen: async ({ shipId, folder, shipFolder, launchId, model }) => {
-      const marker = await marksOf(filesOf({ shipId, ...(shipFolder !== undefined && { shipFolder }) })).read({ folder, launchId });
+      const marker = await (await marksOf({ ...filesOf({ shipId, ...(shipFolder !== undefined && { shipFolder }) }), folder })).read({ folder, launchId });
       if (marker?.refused !== undefined) {
         const refused = model ?? marker.refused.model;
         return { kind: 'refused', ...(refused !== undefined && { model: refused }) };

@@ -30,7 +30,7 @@ export function modelProxy(at: { paths: TrierarchPaths; version: string; launch?
 
 /** The sessions on the host (headless H4, H8): one hold per ship. */
 export function hostSessions(at: { paths: TrierarchPaths; version: string; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string }): SessionRuntime & SessionRoots {
-  return createHoldRuntime({ sessions: at.paths.sessions, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [] });
+  return createHoldRuntime({ sessions: at.paths.sessions, modelTokenFile: at.paths.modelToken, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [] });
 }
 
 /** What runs the sessions, where their workspaces go, and, in containers, where each ship's home is kept. */

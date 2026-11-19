@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { z } from 'zod';
@@ -26,6 +26,7 @@ export async function aCrewingMachine(at: { fleet: Fleet; machine: Machine; as?:
       throw new Error(`aeolus-trierarch ${words[0] ?? ''} failed: ${ran.stdout}${ran.stderr}`);
     }
   }
+  writeFileSync(join(machine.trierarchHome, 'model-token'), 'contract-model-token-not-real\n', { mode: 0o600 });
 }
 
 const startSchema = z.object({ args: z.array(z.string()), env: z.record(z.string(), z.string()), pid: z.number() });
@@ -66,6 +67,12 @@ export function sessionOf(machine: Machine, shipName: string) {
       return join(folderOf(), 'main');
     },
     starts: () => linesOf(join(folderOf(), 'fake-starts.jsonl'), startSchema),
+    get claudeConfig(): string {
+      return linesOf(join(folderOf(), 'fake-starts.jsonl'), startSchema)[0]?.env.CLAUDE_CONFIG_DIR ?? join(machine.home, '.claude');
+    },
+    get crews(): string {
+      return linesOf(join(folderOf(), 'fake-starts.jsonl'), startSchema)[0]?.env.AEOLUS_CREWS ?? join(machine.home, '.aeolus', 'crews', 'claude-code');
+    },
     turns: () => linesOf(join(folderOf(), 'fake-turns.jsonl'), turnSchema),
   };
 }

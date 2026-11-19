@@ -99,9 +99,12 @@ function windowsIn(stream: string): SubscriptionWindow[] | undefined {
 }
 
 /** Claude Code's projects folder of each ship: the user's on the host, the one in the ship's own home with homes, for containers (decision 0039). */
-export function claudeCodeProjectsOf(at: { projects: string; homes?: string }): (ship: ShipFiles) => string {
+export function claudeCodeProjectsOf(at: { projects: string; homes?: string; hostShipHomes?: string }): (ship: ShipFiles) => string {
   const { homes } = at;
-  return (ship) => (homes === undefined ? at.projects : join(shipHome(homes, ship), '.claude', 'projects'));
+  return (ship) => {
+    const place = homes ?? (ship.shipFolder === undefined ? undefined : at.hostShipHomes);
+    return place === undefined ? at.projects : join(shipHome(place, ship), '.claude', 'projects');
+  };
 }
 
 export function createClaudeCodeUsage(deps: {

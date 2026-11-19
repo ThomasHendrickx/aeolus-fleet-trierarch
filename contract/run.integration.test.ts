@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine } from './support/machine.js';
+import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // run with the reconciler, as the service runs it: what is assigned is crewed, what ends is ended, a session that ended is started again (docs/trierarch.md, "Lifecycles").
 
@@ -59,8 +60,9 @@ describe('run with the reconciler', () => {
   });
 
   it("overrides a plan default permission mode with the mode the installed Claude Code lists that asks before each action", async () => {
-    mkdirSync(join(machine.home, '.claude'), { recursive: true });
-    writeFileSync(join(machine.home, '.claude', 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
+    const config = isTodaysTrierarch ? join(machine.trierarchHome, 'ships', scout, 'home', '.claude') : join(machine.home, '.claude');
+    mkdirSync(config, { recursive: true });
+    writeFileSync(join(config, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
     const session = sessionOf(machine, 'scout');
 
     await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });

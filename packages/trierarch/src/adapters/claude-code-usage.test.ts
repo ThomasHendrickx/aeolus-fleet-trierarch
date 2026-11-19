@@ -137,6 +137,11 @@ describe("a Claude Code ship's projects folder, where its transcripts are", () =
     expect(claudeCodeProjectsOf({ projects: '/home/me/.claude/projects' })({ shipId, shipFolder: `/ships/${shipId}` })).toBe('/home/me/.claude/projects');
   });
 
+  it('reads host transcripts in the ship home, while a ship crewed before ship folders keeps the user projects', () => {
+    const projectsOf = claudeCodeProjectsOf({ projects: '/home/me/.claude/projects', hostShipHomes: '/homes' });
+    expect([projectsOf({ shipId, shipFolder: `/ships/${shipId}` }), projectsOf({ shipId })]).toEqual([`/ships/${shipId}/home/.claude/projects`, '/home/me/.claude/projects']);
+  });
+
   it("is in the home in its ship's folder in a container, or for a ship crewed before the ship folders in its home under the homes", () => {
     const projectsOf = claudeCodeProjectsOf({ projects: '/home/me/.claude/projects', homes: '/homes' });
 

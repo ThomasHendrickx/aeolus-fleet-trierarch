@@ -242,6 +242,9 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       lease: leaseFrom(() => fleet.whoami()),
       processes: hostSessions({ paths, version: runningVersion() }),
       state: createJsonState(paths.state),
+      modelTokenProblem: async () => configuration.runtime?.kind !== 'container' && configuration.harnesses['claude-code'] !== undefined && !(await createContainerHost({ modelTokenFile: paths.modelToken }).isModelTokenWritten())
+        ? `Claude Code subscription sessions cannot start: the model token ${paths.modelToken} is missing or empty`
+        : undefined,
     });
     return { data: report, text: describeStatus(report, style) };
   };

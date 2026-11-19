@@ -70,6 +70,7 @@ describe('the container runtime check', () => {
     fleet = await aFleet();
     machine = await aMachine();
     await aCrewingMachine({ fleet, machine });
+    rmSync(modelTokenFile());
   });
 
   /** The refusal run and config check both say, every reason on its own line. */

@@ -384,7 +384,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
     const session = sessions.find((each) => each.shipId === entry.shipId);
     // Asked only of an entry whose session would start: a running session keeps the login it started with (K3).
     if (entry.state === 'restarting' || (entry.state === 'running' && session === undefined)) {
-      const problem = await deps.modelLogins.startProblem({ harness: entry.harness, login: sessionLogin(entry, deps), options: entry.options, ...(entry.folder !== undefined && { folder: entry.folder }) });
+      const problem = await deps.modelLogins.startProblem({ harness: entry.harness, login: sessionLogin(entry, deps), options: entry.options, ...(entry.folder !== undefined && { folder: entry.folder }), ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }) });
       if (problem !== undefined) {
         startProblems[entry.shipId] = problem;
       }
@@ -642,7 +642,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   await deps.state.save(state);
   // A login that cannot start it is this computer's state (api keys A5): given back at once, it may be crewed on another. Asked in its folder with its options, whose own settings count (K6).
   const login = sessionLogin({ ...crewing, shipName: ship.name }, deps);
-  const loginProblem = await deps.modelLogins.startProblem({ harness: crewing.harness, login, options: crewing.options, folder });
+  const loginProblem = await deps.modelLogins.startProblem({ harness: crewing.harness, login, options: crewing.options, folder, ...(shipFolder !== undefined && { shipFolder }) });
   if (loginProblem !== undefined) {
     return giveBack(state, { action: { kind: 'giveBack', shipId: crewing.shipId, settingsVersion: crewing.settingsVersion, reason: loginProblem, entry: { ...crewing, shipName: ship.name, folder } }, deps });
   }

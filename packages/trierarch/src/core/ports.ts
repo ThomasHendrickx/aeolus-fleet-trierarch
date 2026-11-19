@@ -304,7 +304,7 @@ export interface SessionRuntime {
  */
 export interface ModelLoginsPort {
   /** Why no session of the harness can start on the login now, with the options picked and in the folder when it has one, such as a key not ready or, on the subscription, a key in reach (K6); none when one can. */
-  startProblem(at: { harness: string; login: Login; options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined>;
+  startProblem(at: { harness: string; login: Login; options: Readonly<Record<string, string>>; folder?: string; shipFolder?: string }): Promise<string | undefined>;
   /** Where the harness's API key stands (K8): a running session on a key that is not ready is handed nothing (K9). */
   keyState(harness: string): Promise<KeyStateAt>;
 }

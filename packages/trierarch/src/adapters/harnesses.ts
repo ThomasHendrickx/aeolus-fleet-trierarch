@@ -87,10 +87,11 @@ export async function createHarnesses(at: {
   sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events' | 'lastEventAt'>;
   /** For sessions in containers: a home of each ship's own (decision 0039); without, sessions run headless on the host (headless H4). */
   shipHomes?: { homes: string; managedSettings: string };
+  hostShipHomes?: { homes: string; managedSettings: string };
   /** Where sessions on an API key reach the model proxy (headless H16); none on a machine with no proxy. */
   proxyUrl?: () => Promise<string | undefined>;
 }): Promise<{ harnesses: Record<string, HarnessPort>; plugins: Record<string, AeolusPlugin> }> {
-  const { configuration, homeDirectory, env, managedSettings, detected, sessions, shipHomes, proxyUrl } = at;
+  const { configuration, homeDirectory, env, managedSettings, detected, sessions, shipHomes, hostShipHomes, proxyUrl } = at;
   const harnesses: Record<string, HarnessPort> = {};
   const plugins: Record<string, AeolusPlugin> = {};
   for (const name of Object.keys(configuration.harnesses)) {
@@ -104,7 +105,7 @@ export async function createHarnesses(at: {
       harnesses[name] = createCopilotHarness({ configuration, plugin, sessions, detectedVersion: () => detected().copilot?.version, isInContainer: shipHomes !== undefined, ...(env.COPILOT_HOME !== undefined && { copilotHome: env.COPILOT_HOME }) });
       continue;
     }
-    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions, setup: createCodexSetup(), ...(proxyUrl !== undefined && { proxyUrl }) }) : createClaudeCodeHarness({ configuration, plugin, sessions, ...(proxyUrl !== undefined && { proxyUrl }), permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }), ...(shipHomes !== undefined && { shipHomes }) });
+    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions, setup: createCodexSetup(), ...(proxyUrl !== undefined && { proxyUrl }) }) : createClaudeCodeHarness({ configuration, plugin, sessions, ...(proxyUrl !== undefined && { proxyUrl }), permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }), ...(shipHomes !== undefined && { shipHomes }), ...(hostShipHomes !== undefined && { hostShipHomes }) });
   }
   return { harnesses, plugins };
 }

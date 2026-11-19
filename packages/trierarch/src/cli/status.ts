@@ -38,6 +38,7 @@ export interface StatusReport {
   readonly orphans: readonly string[];
   /** Why the last pass failed and since when (#1212); none when it succeeded. */
   readonly passFailure?: PassFailure;
+  readonly modelTokenProblem?: string;
 }
 
 export function leaseFrom(whoami: () => Promise<unknown>): () => Promise<Lease> {
@@ -65,6 +66,7 @@ export async function inspectStatus(at: {
   lease: () => Promise<Lease>;
   processes: Pick<SessionRuntime, 'list' | 'stop'>;
   state: StatePort;
+  modelTokenProblem?: () => Promise<string | undefined>;
 }): Promise<StatusReport> {
   const harnesses = Object.keys(at.configuration.harnesses);
   const [service, lease, sessions, state, running, pluginVersions] = await Promise.all([
@@ -75,6 +77,7 @@ export async function inspectStatus(at: {
     at.running(),
     Promise.all(harnesses.map((harness) => at.pluginVersion(harness))),
   ]);
+  const modelTokenProblem = await at.modelTokenProblem?.();
   const plugins = Object.fromEntries(harnesses.map((harness, index) => [harness, pluginVersions[index] ?? null]));
   // Only the service's own process counts: a file left by an earlier process, or by a `run` outside the service, says nothing of it.
   const runningVersion = service.isRunning && running !== undefined && running.pid === service.pid ? running.version : undefined;
@@ -97,6 +100,7 @@ export async function inspectStatus(at: {
     kept: state.kept,
     orphans: state.orphans.map((orphan) => orphan.path),
     ...(state.passFailure !== undefined && { passFailure: state.passFailure }),
+    ...(modelTokenProblem !== undefined && { modelTokenProblem }),
   };
 }
 
@@ -153,6 +157,7 @@ export function describeStatus(report: StatusReport, style: Style = PLAIN): stri
     line('Aeolus Fleet plugin', describePlugins(report.plugins, style)),
     line('Repositories', report.repositories.length === 0 ? 'none' : report.repositories.join(', ')),
     line('Service', describeService(report.service, style)),
+    ...(report.modelTokenProblem === undefined ? [] : [line('Model token', style.tone('bad', report.modelTokenProblem))]),
     line('Fleet', describeFleet(report.fleet, style)),
     line('Caps', `${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships crewed here, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`),
     line('Last pass', report.passFailure === undefined ? style.tone('good', 'succeeded') : style.tone('bad', `failing since ${report.passFailure.since}: ${report.passFailure.reason}`)),
