@@ -507,6 +507,7 @@ describe('the container a session runs in', () => {
     const { words } = await started({ shipFolder });
 
     expect(valuesOf(words, '--volume')).toContain(`${shipFolder}/containers:/home/ubuntu/.local/share/containers/storage`);
+    expect(readFileSync(envFileOf(words), 'utf8')).toContain('AEOLUS_SHIP_CONTAINER_STORAGE=1');
   });
 
   it("mounts the home and the socket folder in the ship's folder of a ship crewed fresh, each made for its owner alone, and nothing under the homes or sockets of the ships crewed before", async () => {
