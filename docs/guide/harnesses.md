@@ -2,7 +2,7 @@
 
 Aeolus crews [ships](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#ship) from more than one [harness](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#harness): Claude Code, Codex, GitHub Copilot and Cursor. They do not all do the same. This page is a reference, not a task. It lists what a ship relies on, and for each harness whether Aeolus supports it, supports it in part, or does not support it, so you can pick a harness before you [commission](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#commission) a ship.
 
-Every cell matches the [trierarch](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#trierarch) and the [plugin](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#plugin) as released with plugin 0.41.0, and was checked against their code and tests at that release.
+Every cell matches the [trierarch](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#trierarch) and the [plugin](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#plugin) as released with plugin 0.42.0, and was checked against their code and tests at that release.
 
 ## How to read the table
 
