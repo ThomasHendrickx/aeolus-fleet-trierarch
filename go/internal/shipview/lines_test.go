@@ -1,0 +1,76 @@
+package shipview
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestLastLinesUseEachHarnessReadingAndKeepUnrecognizedLines(t *testing.T) {
+	for _, example := range []struct{ harness, event, kind, tool string }{
+		{"claude-code", `{"timestamp":"2026-11-20T13:31:27Z","type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}`, "tool", "Bash"},
+		{"codex", `{"timestamp":"2026-11-20T13:31:27Z","type":"item.started","item":{"type":"command_execution"}}`, "tool", "command_execution"},
+		{"copilot", `{"timestamp":"2026-11-20T13:31:27Z","type":"tool.execution_start","data":{"toolName":"shell"}}`, "tool", "shell"},
+	} {
+		t.Run(example.harness, func(t *testing.T) {
+			at, now := aView(t)
+			keep := fmt.Sprintf(`{"entries":{"shp_one":{"shipId":"shp_one","shipName":"one","harness":%q,"crewToken":"fake-token"}}}`, example.harness)
+			writeFact(t, at.State, keep)
+			writeFact(t, filepath.Join(at.Sessions, "shp_one", "events.jsonl"), example.event+"\nraw diagnostic fake-token\n\n")
+			view, err := Ship(at, "one", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(view.Lines) != 3 || view.Lines[0].At != "2026-11-20T13:31:27Z" || view.Lines[0].Kind != example.kind || view.Lines[0].Tool != example.tool || view.Lines[0].Line != example.event || view.Lines[1].Line != "raw diagnostic [masked: crew token]" || view.Lines[1].At != "" || view.Lines[1].Kind != "" || view.Lines[2].Line != "" {
+				t.Fatalf("lines = %+v", view.Lines)
+			}
+		})
+	}
+}
+
+func TestLastLinesKeepExactlyTwoHundredWholeMaskedLinesInOrder(t *testing.T) {
+	for _, count := range []int{0, 199, 200, 201} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			at, now := aView(t)
+			var events strings.Builder
+			for n := 1; n <= count; n++ {
+				fmt.Fprintf(&events, "line %03d SECRET-CREW-TOKEN %s\n", n, strings.Repeat("wide", 1000))
+			}
+			writeFact(t, filepath.Join(at.Sessions, "shp_one", "events.jsonl"), events.String())
+			view, err := Ship(at, "one", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(view.Lines) != min(count, 200) {
+				t.Fatalf("line count = %d, want %d", len(view.Lines), min(count, 200))
+			}
+			for i, line := range view.Lines {
+				want := fmt.Sprintf("line %03d [masked: crew token] %s", max(1, count-199)+i, strings.Repeat("wide", 1000))
+				if line.Line != want {
+					t.Fatalf("line %d was changed, truncated, or unmasked", i)
+				}
+			}
+		})
+	}
+}
+
+func TestUnreadableCredentialsSuppressLinesAndNameTheirSourceInJSON(t *testing.T) {
+	at, now := aView(t)
+	writeFact(t, filepath.Join(at.Sessions, "shp_one", "events.jsonl"), `{"type":"item.started","item":{"type":"command_execution"},"text":"fake-value"}`)
+	for _, path := range []string{at.ModelToken, filepath.Join(at.Sessions, "another", "secret-env.json")} {
+		if strings.Contains(path, "another") {
+			writeFact(t, path, `{}`)
+		}
+		view, err := (Reader{Files: filesOnDisk{denied: path}}).Ship(context.Background(), at, "one", now)
+		if err != nil || len(view.Lines) != 0 || view.Session.Activity == nil || len(view.Unreadable) != 1 || view.Unreadable[0].Path != path || !strings.Contains(view.Unreadable[0].Error, "permission denied") {
+			t.Fatalf("view = %+v, error %v", view, err)
+		}
+		data, _ := json.Marshal(view)
+		if strings.Contains(string(data), "fake-value") {
+			t.Fatal("unmasked content reached JSON")
+		}
+	}
+}
