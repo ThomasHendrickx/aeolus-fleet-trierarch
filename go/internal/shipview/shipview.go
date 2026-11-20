@@ -160,6 +160,10 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 	}
 	data, err := readFile(files, at.State)
 	if err != nil {
+		var fileError *fs.PathError
+		if errors.As(err, &fileError) {
+			err = fileError.Err
+		}
 		return View{}, fmt.Errorf("cannot read the state at %s: %w", at.State, err)
 	}
 	var saved struct {
