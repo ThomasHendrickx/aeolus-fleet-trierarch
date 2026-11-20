@@ -1,6 +1,6 @@
 # Design: tools to check in on and debug the sessions a trierarch keeps (#271)
 
-Status: stage 2, the detailed design. The purpose is approved by Thomas on 20 Nov (card 563c69d7, option 1), with the scope below, and he answered the ten questions of stage 1 on 20 Nov, one card each; they are the decisions below. What follows them is this design's proposal on those decisions, for Thomas to approve, with the screens drawn as text and new questions at the end. Nothing is built.
+Status: stage 2, the detailed design. The purpose is approved by Thomas on 20 Nov (card 563c69d7, option 1), with the scope below, and he answered the ten questions of stage 1 and the six of stage 2 on 20 Nov, one card each; they are the sixteen decisions below. What follows them is this design on those decisions, with the screens drawn as text, which a reviewer checks the build against. One question is open at the end. Nothing is built.
 
 Thomas, verbatim (#271): "It would be handy if the trierarch process had tools that helped with debugging and checking in on sessions." And on 20 Nov: "fits the unit rework we did. Making one of our critical parts of aeolus more dev friendly". The unit rework is the ship folder: one `ships/<shipId>/` per ship, holding its ship folder with `main/` and `sub-repos/<repository>/` (aeolus-fleet#1759, [ship-folder.md](ship-folder.md)).
 
@@ -72,7 +72,7 @@ The trierarch is one Go binary with no Node (the TypeScript package is being rem
 
 ## Decisions
 
-Thomas answered each question of stage 1 on 20 Nov, one card each, in the order they were asked. Each is current state for this design.
+Thomas answered each question on 20 Nov, one card each, in the order they were asked. Each is current state for this design.
 
 - **D1. What it shows of what a session did** (Q1, option 2): the facts (state, turn and since when, the latest activity's kind and tool and how long ago, the processes under the session with how long each runs, where its files are), and the last lines the session wrote, from the hold's `events.jsonl`. They are shown on the computer only: nothing of them leaves it.
 - **D2. Secrets** (Q2, option 2): what the tool shows never reads the trierarch's secret fields (the crew token in the state, the token files beside `ships/`), and in what a session wrote each known secret is masked by its value before a line is shown. Nothing is masked by its shape.
@@ -84,16 +84,22 @@ Thomas answered each question of stage 1 on 20 Nov, one card each, in the order 
 - **D8. One ship without a terminal** (Q8, option 2): a plain command for one ship, `aeolus-trierarch status <ship>`, with `--json`, says the same facts as the live mode's opened ship, from the same code.
 - **D9. The library** (Q9, option 1): Bubble Tea (charmbracelet), with Lip Gloss for layout.
 - **D10. Staying current** (Q10, option 1): the live mode reads the files again on a fixed interval of about one pass.
+- **D11. Where the turn shown comes from** (Q11, option 1): each pass writes the turn it read through the plugin's scripts, with the marker's since, into `seen.json` beside each inbox; the tool shows it with its age.
+- **D12. How old is stale** (Q12, option 2): the banner calls the facts stale when the last pass is older than 1 minute.
+- **D13. How a line is shown** (Q13, option 1): a line of `events.jsonl` is shown as written, masked, after its time and the kind and tool the harness's existing reader gives it; cut to the width in `tui`, whole in `status <ship>`.
+- **D14. How many lines** (Q14, option 1): 200 lines are shown and kept, as many as the pass already reads for activity (`activity.eventLines`).
+- **D15. Plain `status`** (Q15, option 2): `status` with no ship says the last pass's age, for example `Last pass: succeeded, 4s ago`, from `seen.json`.
+- **D16. Where a dead session's end is kept** (Q16, option 1): in `~/.aeolus/trierarch/ended/<shipId>.json`, beside `ships/`, mode 600.
 
 ## The parts in the Go binary
 
-Seven parts. The first four are shared code with no screen; the last three are what a person runs. Each new file the trierarch writes sits beside `ships/`, under `~/.aeolus/trierarch/`, mode 600, as every file of the trierarch's own does (lesson 11).
+Seven parts. The first five are shared code with no screen; the last two are what a person runs. Each new file the trierarch writes sits beside `ships/`, under `~/.aeolus/trierarch/`, mode 600, as every file of the trierarch's own does (lesson 11).
 
 ### 1. The reader: `internal/shipview`
 
 One reader behind `status <ship>` and `tui` (D8), so the two never tell different things.
 
-- `List(at paths.Paths, now time.Time) (Machine, error)`: every crewed ship, one row each, and the trierarch's own standing (part 6).
+- `List(at paths.Paths, now time.Time) (Machine, error)`: every crewed ship, one row each, and the trierarch's own standing (part 5).
 - `Ship(at paths.Paths, ship string, now time.Time) (View, error)`: one ship, found by its name or its id (D4): an exact ship id first, else the entry whose `shipName` is that name. No match is `ErrShipUnknown`, naming the ships crewed here.
 - What a `View` holds, each with where it was read:
 
@@ -102,13 +108,13 @@ One reader behind `status <ship>` and `tui` (D8), so the two never tell differen
   | name, id, harness, state, since, restarts (exits in the restart window), workspace | `state.json`, through a decoder of its own that has no crew token field |
   | its places: the ship's folder, `main/`, each `sub-repos/<repository>/`, its home, its socket, its hold's folder, its `events.jsonl` | the entry's `shipFolder` and `folder`, `paths.ShipHome`, `paths.ShipSockets`, `hold.FilesOf` |
   | the session: running or exited, the hold's pid, the harness's session id | `sessions/<shipId>/`: `hold.pid`, `session-id`, `exit-reason` |
-  | the turn, idle or busy, since when, and when the pass saw it | `seen.json` (part 4; question 11) |
+  | the turn, idle or busy, since when, and when the pass saw it | `seen.json` (part 4; D11) |
   | the latest activity's kind and tool, and when `events.jsonl` last changed | `activity.Of` with the harness's own reader, as the pass reads it |
   | the processes under the session, each with its command and how long it runs | `folderprocess` for a session on the host, `container`'s folder processes for one in a container, each command line masked (part 2) |
   | the inbox: waiting, forced, and when the pass saw it | `seen.json` (part 4) |
-  | the last lines the session wrote | the tail of `events.jsonl`, each line masked (part 2) |
+  | the last 200 lines the session wrote (D14), each with its time, kind and tool as the harness's reader gives them (D13) | the tail of `events.jsonl`, each line masked (part 2) |
   | its last session's end | `ended/<shipId>.json` (part 3) |
-  | the trierarch's standing | the service manager, `state.json`'s `passFailure`, `seen.json`'s `passAt` (part 6) |
+  | the trierarch's standing | the service manager, `state.json`'s `passFailure`, `seen.json`'s `passAt` (part 5) |
 
 - A file it cannot read does not fail the whole view: the fact it holds says unreadable, with the path and the error, and the rest is shown (the unhappy path "files unreadable"). Only `state.json` unreadable fails the read, since without it no ship is known.
 - It reads files only, never a hold's socket (which answers the trierarch alone, lesson 12), never the running service, never the fleet (lesson 19). It writes nothing.
@@ -120,7 +126,7 @@ The one part that reads a secret's value (D2), so it can replace it; it holds th
 
 - `Load(at paths.Paths) (Masker, error)` reads every secret the trierarch holds on this machine: each entry's crew token in `state.json` (every ship's, not only the one shown), the trierarch's own `crew-token`, `model-token`, each file under `keys/`, `sealing-key`, the opened values in `mcp-configuration.json`, and in each `sessions/<shipId>/` the model proxy token, the token in `mcp-config.json` and the values in `secret-env.json`.
 - `Masker.Line(text string) string` replaces each value where it stands as written and where it stands JSON-escaped (a line of `events.jsonl` is JSON), with `[masked: <which secret>]`, such as `[masked: crew token]` or `[masked: claude-code API key]`. It names the kind of secret, never any part of its value.
-- Masking comes before a line is cut to the screen's width, so a cut never leaves part of a secret.
+- Masking comes before a line is cut to the screen's width (`tui` only, D13), so a cut never leaves part of a secret.
 - A secret file it cannot read is a reason to show no line at all: the lines say `lines not shown: cannot read <path> to mask it (<error>)`. Showing a line it could not mask would break D2.
 - What it cannot promise, said in the docs: a secret the session found elsewhere, which the trierarch never held, is not masked (D2 masks known secrets only).
 
@@ -128,33 +134,33 @@ The one part that reads a secret's value (D2), so it can replace it; it holds th
 
 What a dead session left is kept until the ship's next session ends or its folder goes (D3).
 
-- When a pass sees a session exited (the runtime's `Observed.ExitReason`, which `observe` already reads), before its hold's folder is removed, the run pass writes `ended/<shipId>.json`: when it ended, its exit reason, its harness and session id, when it started, its latest activity, and the last lines of its `events.jsonl`, masked with the secrets known then (part 2). Masked when kept, since its session's token files go with the hold's folder and could not be masked by value afterwards.
+- When a pass sees a session exited (the runtime's `Observed.ExitReason`, which `observe` already reads), before its hold's folder is removed, the run pass writes `ended/<shipId>.json`: when it ended, its exit reason, its harness and session id, when it started, its latest activity, and the last 200 lines of its `events.jsonl` (D14), each with its time, kind and tool (D13), masked with the secrets known then (part 2). The file sits beside `ships/`, mode 600 (D16), and its lines are the last 200 (D14). Masked when kept, since its session's token files go with the hold's folder and could not be masked by value afterwards.
 - The next session's start leaves the file as it is; that session's end writes it again, so one end is kept per ship, the last.
 - It goes when the ship's folder goes (release or retire), in the same step that removes `ships/<shipId>/` and the hold's folder.
 - A write that fails is said in the log and fails nothing else: the session is restarted as today.
 
 ### 4. What each pass saw: `seen.json`
 
-The inbox's facts without the fleet (D5), and the time of the last pass the banner needs (D6).
+The inbox's facts without the fleet (D5), the turn (D11), and the time of the last pass that the banner (D6, D12) and plain `status` (D15) need.
 
-- At the end of each pass that succeeded, the run pass writes `seen.json` whole, as `state.json` is written: `passAt`, and per ship it watched the inbox it read (waiting, forced) with when it read it; with question 11 picked, also the turn it read, idle or busy, with the marker's own since.
+- At the end of each pass that succeeded, the run pass writes `seen.json` whole, as `state.json` is written: `passAt`, and per ship it watched the inbox it read (waiting, forced) with when it read it, and the turn it read through the plugin's scripts, idle or busy, with the marker's own since and when it read it (D11).
 - An inbox is watched only while the ship's session runs (#473), so a ship with no running session has no inbox line: the tool says `not watched while no session runs`, never a count of zero.
-- A pass that fails writes no `seen.json`: the last one stays, with its older `passAt`, and the banner says so (part 6).
+- A pass that fails writes no `seen.json`: the last one stays, with its older `passAt`, and the banner says so (part 5).
 
 ### 5. The trierarch's standing
 
-The banner (D6) and the `Trierarch` line of `status <ship>` come from one function of what part 1 read:
+The banner (D6, D12) and the `Trierarch` line of `status <ship>` come from one function of what part 1 read:
 
 - `service not running`: the service manager says it does not run, as `status` reads it today.
 - `last pass failed`: `state.json` holds a `passFailure`, with its reason and since when.
-- `last pass <age> ago`: `passAt` is older than a few pass intervals (question 12).
+- `last pass <age> ago`: `passAt` is older than 1 minute (D12); the banner calls the facts stale.
 - Otherwise current, and no banner.
 
 When more than one holds, the banner says each, the service first.
 
 ### 6. `aeolus-trierarch status <ship>`
 
-The one-ship command (D8): `status` with no word stays as it is; `status <ship>` reads the view of part 1 and prints it as text, or as JSON with `--json`. It exits 0 when the ship is found, 1 with the ships crewed here when it is not. It needs no terminal, so a ship set to investigate reads it.
+The one-ship command (D8): `status` with no word stays as it is, except that its `Last pass` line also says the last pass's age, read from `seen.json`'s `passAt` (D15); `status <ship>` reads the view of part 1 and prints it as text, or as JSON with `--json`. It exits 0 when the ship is found, 1 with the ships crewed here when it is not. It needs no terminal, so a ship set to investigate reads it.
 
 ### 7. `aeolus-trierarch tui`
 
@@ -215,7 +221,7 @@ flowchart TD
   logit --> restart
   exited -- no --> ok
   restart --> ok{"pass succeeded?"}
-  ok -- yes --> seen["write seen.json: passAt,<br/>each watched inbox with when"]
+  ok -- yes --> seen["write seen.json: passAt, each watched<br/>inbox and turn with when"]
   ok -- no --> stays["seen.json stays as it was;<br/>passFailure in state.json, as today"]
   gone(["ship released or retired"]) --> remove["remove ships/&lt;shipId&gt;/, the hold's folder<br/>and ended/&lt;shipId&gt;.json"]
 ```
@@ -227,15 +233,15 @@ Each is one PR, test first, with its docs (docs/trierarch.md, docs/architecture.
 1. **The reader and `status <ship>`, facts only.** Part 1 without lines, inbox or end; part 6.
    Done when: `status <ship>` and `status <ship> --json` say a ship's name, id, harness, state, since, restarts, places, session status, hold pid, latest activity and processes (commands not yet shown), found by its name or id; an unknown ship exits 1 naming the ships crewed here; an unreadable file says which and the rest is shown; the state's crew token is in no output (a test greps for it).
 2. **The masking and the last lines.** Part 2; the lines and process commands in `status <ship>`.
-   Done when: a test session line holding each kind of known secret, as written and JSON-escaped, is shown with `[masked: <which>]`; a secret file the masker cannot read shows no line and says why; masking comes before the cut.
-3. **What each pass saw.** Part 4; the inbox (and, with question 11, the turn) in `status <ship>` with its age.
-   Done when: a pass that succeeded writes `seen.json` whole, a failed pass leaves it; `status <ship>` shows waiting and forced with how long ago they were seen, and `not watched while no session runs` for a ship with no session.
+   Done when: the last 200 lines of a test session are shown, each as written after its time, kind and tool (whole in `status <ship>`); a line holding each kind of known secret, as written and JSON-escaped, is shown with `[masked: <which>]`; a secret file the masker cannot read shows no line and says why; masking comes before the cut.
+3. **What each pass saw.** Part 4; the inbox and the turn in `status <ship>`, each with its age.
+   Done when: a pass that succeeded writes `seen.json` whole, with `passAt`, the inboxes and the turns, and a failed pass leaves it; `status <ship>` shows waiting and forced with how long ago they were seen, and `not watched while no session runs` for a ship with no session.
 4. **A dead session's end.** Part 3; the end in `status <ship>`.
-   Done when: a session that exits leaves `ended/<shipId>.json` with its reason and masked last lines before its hold's folder goes; a new session's start keeps it; the next end replaces it; a release removes it; a failed write is logged and the restart happens.
-5. **The standing.** Part 5; the `Trierarch` line in `status <ship>`.
-   Done when: each of service down, last pass failed and last pass old gives its own words, from files a test writes, and none gives none.
+   Done when: a session that exits leaves `ended/<shipId>.json`, mode 600, with its reason and its last 200 lines masked before its hold's folder goes; a new session's start keeps it; the next end replaces it; a release removes it; a failed write is logged and the restart happens.
+5. **The standing.** Part 5; the `Trierarch` line in `status <ship>`, and the age on `status`'s `Last pass` line (D15).
+   Done when: each of service down, last pass failed and last pass older than 1 minute gives its own words, from files a test writes, and none gives none; a pass 1 minute old gives none; `status` with no ship says `Last pass: succeeded, 4s ago` for a pass 4 seconds old.
 6. **The live mode.** Part 7: the three screens, the banner, the 5 second tick, the keys; Bubble Tea and Lip Gloss added.
-   Done when: each screen in "The screens" below is matched by a test of its model's view; with no terminal it exits 2 with its words; `--help` says `tui` and `status <ship>`.
+   Done when: each screen in "The screens" below is matched by a test of its model's view, a line cut to the width in the live mode and whole in `status <ship>`; with no terminal it exits 2 with its words; `--help` says `tui` and `status <ship>`.
 
 ## The screens
 
@@ -243,13 +249,20 @@ Every screen is drawn with made up ships. Colours follow `internal/style`'s tone
 
 ### `--help`, before and after
 
-The only existing output that changes. `status` with no word, `list` and `logs` say what they say today (question 15 asks whether `status` should say the last pass's age).
+The `--help` text changes, and so does `status` with no word, by one phrase on its `Last pass` line (D15). `list` and `logs` say what they say today.
 
 Before:
 
 ```
   status         how the trierarch stands on this machine
   list           the ships it crews
+```
+
+`status` with no word, before and after:
+
+```
+Before: Last pass: succeeded
+After:  Last pass: succeeded, 4s ago
 ```
 
 After:
@@ -334,7 +347,7 @@ A ship whose session never ended since it was crewed:
 
 ### The banner
 
-Above every screen, only while one of the three holds (part 5):
+Above every screen, only while one of the three holds (part 5). The last is shown only when the last pass is older than 1 minute (D12):
 
 ```
  ! The trierarch's service is not running (aeolus-trierarch start): nothing below is current.
@@ -345,14 +358,14 @@ Above every screen, only while one of the three holds (part 5):
 ```
 
 ```
- ! The last pass was 2m ago: nothing below is current.
+ ! The last pass was 2m ago: what is shown is stale.
 ```
 
 Two at once, the service first:
 
 ```
  ! The trierarch's service is not running (aeolus-trierarch start): nothing below is current.
- ! The last pass was 3h ago.
+ ! The last pass was 3h ago: what is shown is stale.
 ```
 
 ### `status <ship>`
@@ -373,7 +386,7 @@ Last lines:
   13:31:27 tool Bash {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"AEOLUS_TOKEN=[masked: crew token] npm test --workspaces"}}]}}
 ```
 
-Text has no width to cut to, so each line is shown whole, masked.
+Text has no width to cut to, so each line is shown whole, masked (D13). The live mode cuts a line to its width with `…`, after masking, and shows at most 200 lines (D14).
 
 ### `status <ship> --json`
 
@@ -408,22 +421,22 @@ Text has no width to cut to, so each line is shown whole, masked.
   },
   "inbox": { "isWatched": true, "waiting": 2, "forced": 1, "seenAt": "2026-11-20T14:02:27+01:00" },
   "lines": [
-    { "kind": "text", "line": "{\"type\":\"assistant\",...}" },
-    { "kind": "tool", "tool": "Bash", "line": "{\"type\":\"assistant\",...\"command\":\"AEOLUS_TOKEN=[masked: crew token] npm test --workspaces\"...}" }
+    { "at": "2026-11-20T13:31:25+01:00", "kind": "text", "line": "{\"type\":\"assistant\",...}" },
+    { "at": "2026-11-20T13:31:27+01:00", "kind": "tool", "tool": "Bash", "line": "{\"type\":\"assistant\",...\"command\":\"AEOLUS_TOKEN=[masked: crew token] npm test --workspaces\"...}" }
   ],
   "lastEnd": {
     "endedAt": "2026-11-20T13:30:09+01:00",
     "startedAt": "2026-11-20T13:12:40+01:00",
     "exitReason": "exit status 1",
     "sessionId": "5b6c1e0a-2f7d-4b0e-a7a3-61f0c9d2e811",
-    "lines": [ { "kind": "error", "line": "{\"type\":\"result\",\"is_error\":true,...}" } ]
+    "lines": [ { "at": "2026-11-20T13:30:09+01:00", "kind": "error", "line": "{\"type\":\"result\",\"is_error\":true,...}" } ]
   },
   "trierarch": { "service": "running", "lastPassAt": "2026-11-20T14:02:27+01:00", "passFailure": null, "isCurrent": true, "says": [] },
   "unreadable": []
 }
 ```
 
-Times are absolute in JSON, so a reader works out the age itself. `lastEnd` is `null` when none is kept; `inbox` is `{ "isWatched": false }` when no session runs; `unreadable` lists `{ "path", "error" }` for each file the reader could not read.
+Times are absolute in JSON, so a reader works out the age itself. `lines` and `lastEnd.lines` hold at most 200 lines, each whole and masked. `lastEnd` is `null` when none is kept; `inbox` is `{ "isWatched": false }` when no session runs; `unreadable` lists `{ "path", "error" }` for each file the reader could not read.
 
 ### The unhappy paths
 
@@ -465,48 +478,11 @@ tui needs a terminal: read one ship with aeolus-trierarch status <ship> --json
 
 ## Questions
 
-New questions this design raises, for Thomas, each one decision, in the order they should be decided.
+One question is open: a screen needs a choice Thomas has not made.
 
-**Q11. Where does the turn shown come from?**
-1. The pass writes the turn it read through the plugin's scripts, with the marker's since, into `seen.json` beside each inbox, and the tool shows it with its age.
-2. The tool asks the plugin's scripts for each ship's turn itself, at each read.
-3. The tool shows no turn, only the latest activity.
+**Q17. What does plain `status` say of the last pass's age when the last pass failed, or no pass has succeeded yet?**
+D15 gives `Last pass: succeeded, 4s ago`, with the age read from `seen.json`'s `passAt`, which only a succeeded pass writes.
+1. A failed pass says what it says today, with no age (`seen.json` holds no time of a failed pass); before any pass succeeded the line says what it says today, with no age.
+2. A failed pass also says the age of the last pass that succeeded, for example `Last pass: failed, fleet unreachable (last succeeded 3m ago)`.
 
-Pick 1: the pass already reads each running ship's turn through the plugin (lesson 16), so writing it beside the inbox is the same file and the same age; option 2 runs a script per ship every 5 seconds from a tool that only shows, and option 3 drops a fact D1 names.
-
-**Q12. How old is "older than a few pass intervals" for the banner?**
-1. 3 passes, 15 seconds.
-2. 1 minute.
-3. 5 minutes.
-
-Pick 2: a pass is 5 seconds apart but a pass over many ships waits on the fleet for each inbox, so 15 seconds would show the banner on a slow pass that is still current; 5 minutes leaves a stuck service unseen for too long.
-
-**Q13. How is a line of `events.jsonl` shown?**
-1. As written, masked, after its time and the kind and tool the harness's existing reader gives it; cut to the width in the live mode, whole in `status <ship>`.
-2. Each harness's reader also pulls out the line's text (the message, the command), and that is shown instead of the JSON.
-
-Pick 1: it shows what the hold wrote, the same for every harness, with no new reader per harness to keep in step with each harness's format; the kind and tool in front already say what a line is. Option 2 reads more of each harness's content and hides the rest of the line.
-
-**Q14. How many last lines are shown and kept?**
-1. 200, as many as the pass already reads for activity (`activity.eventLines`).
-2. 50.
-3. Every line of the session.
-
-Pick 1: the same number the trierarch already reads each pass, enough to see a long step's start, and a kept end stays a small file; option 3 keeps a whole session's content with no bound.
-
-**Q15. Does `status` with no ship say the last pass's age?**
-1. No: `status` stays as it is; the age is in `status <ship>` and the banner.
-2. Yes: its `Last pass` line also says how long ago the last pass was, from `seen.json`.
-
-Pick 2: the same stale facts D6 shows in the banner are on `status` today as `Last pass: succeeded` while the service passes nothing; it is one more phrase on an existing line. This changes `status`'s output:
-
-```
-Before: Last pass: succeeded
-After:  Last pass: succeeded, 4s ago
-```
-
-**Q16. Where is a dead session's end kept?**
-1. Beside `ships/`, in `~/.aeolus/trierarch/ended/<shipId>.json`, mode 600.
-2. In the ship's folder, `ships/<shipId>/last-end.json`.
-
-Pick 1: what a session wrote can hold a secret the trierarch did not know to mask, and the ship's folder is what a container session mounts and what holds no secret (lesson 11); beside `ships/` it is the trierarch's own file, read by its user only.
+Pick 1: it adds only what D15 names, on the pass that succeeded, and invents no new phrase for a failure.
