@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
@@ -105,6 +105,22 @@ describe('logs', () => {
     } finally {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
       await ended;
+    }
+  });
+
+  it('stops a command still running when the machine is removed', async () => {
+    const pidFile = join(machine.machine, 'command.pid');
+    const program = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+    const command = machine.trierarch([], { as: [process.execPath, '-e', program, pidFile] });
+    await expect.poll(() => existsSync(pidFile)).toBe(true);
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    try {
+      isRemoved = true;
+      await machine.remove();
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* The command already ended. */ }
+      await command;
     }
   });
 
