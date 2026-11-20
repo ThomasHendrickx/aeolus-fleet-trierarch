@@ -109,6 +109,22 @@ describe('logs', () => {
     }
   });
 
+  it('leaves an unrelated process named by a stale hold pid file running', async () => {
+    const child = spawn('sleep', ['60']);
+    const ended = once(child, 'exit');
+    const folder = join(machine.trierarchHome, 'sessions', 'test-ship');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'hold.pid'), String(child.pid));
+    try {
+      isRemoved = true;
+      await machine.remove();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await ended;
+    }
+  });
+
   it('stops a command and its child when the machine is removed', async () => {
     const pidFile = join(machine.machine, 'command.pid');
     const program = "const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); require('node:fs').writeFileSync(process.argv[1], JSON.stringify([process.pid, child.pid])); setInterval(() => {}, 1000)";

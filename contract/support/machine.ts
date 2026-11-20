@@ -127,6 +127,24 @@ async function stopRecorded(recorded: RecordedProcess | undefined): Promise<void
   for (let attempt = 0; attempt < 100 && isRunning(); attempt++) await wait(50);
 }
 
+/** Stops holds whose PID files and command lines identify this machine's sessions. */
+function stopHolds(home: string): void {
+  const sessions = join(home, '.aeolus', 'trierarch', 'sessions');
+  if (!existsSync(sessions)) return;
+  for (const entry of readdirSync(sessions)) {
+    try {
+      const pid = Number(readFileSync(join(sessions, entry, 'hold.pid'), 'utf8'));
+      const recorded = recordProcess(pid);
+      if (recorded === undefined) continue;
+      const words = readFileSync(`/proc/${String(pid)}/cmdline`, 'utf8').split('\0');
+      if (!words.includes('hold') || words[words.indexOf('--sessions') + 1] !== sessions) continue;
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      if (fields[19] === recorded.start) stopProcess(pid, Number(fields[1]));
+    } catch { /* The hold already ended or has no PID file. */ }
+  }
+}
+
 /** Runs a program to its end, never blocking this process: the fleet in it must answer meanwhile. */
 export function runProgram(command: readonly string[], at: { cwd: string; env: Readonly<Record<string, string>>; input?: string; onStarted?: (child: ChildProcess) => void }): Promise<CommandOutcome> {
   const [program = '', ...args] = command;
@@ -597,6 +615,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
           return recorded?.start === start ? [recorded] : [];
         }) : [];
         await Promise.all(services.map(stopRecorded));
+        stopHolds(home);
         await stopRecorded(proxy ?? proxyPid());
         rmSync(root, { recursive: true, force: true });
       }
