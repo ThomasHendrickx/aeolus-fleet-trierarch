@@ -156,9 +156,16 @@ jobs:
         run: node scripts/check-em-dash.ts "$BASE_SHA" "$HEAD_SHA"
 
   integration:
+    # Runs the trierarch's, the plugin's and the contract suite's integration tests against Postgres
+    # and the trierarch built from source, so it runs when changed-paths finds what they read changed.
     name: Integration tests (Postgres in Testcontainers)
+    needs: changed-paths
+    if: ${{ always() && (needs.changed-paths.result != 'success' || needs.changed-paths.outputs.integration == 'true') }}
     runs-on: ubuntu-latest
     steps:
+      - name: Require changed paths result
+        if: ${{ needs.changed-paths.result != 'success' }}
+        run: exit 1
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
@@ -189,11 +196,16 @@ jobs:
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         run: node scripts/check-test-run-leftovers.ts docker
 
-  contract-go-paths:
-    name: Go contract changed paths
+  changed-paths:
+    # Decides whether a pull request runs the contract and the integration jobs: only when a path
+    # the job reads changed. Every push runs both, main and a release branch alike. The jobs skip
+    # by an `if` on the job, never a workflow path filter: a skipped job counts as passed for a
+    # required check, where a skipped workflow leaves it pending.
+    name: Changed paths
     runs-on: ubuntu-latest
     outputs:
-      changed: ${{ steps.paths.outputs.changed }}
+      contract: ${{ steps.paths.outputs.contract }}
+      integration: ${{ steps.paths.outputs.integration }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -201,24 +213,95 @@ jobs:
       - id: paths
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [[ "$EVENT" == pull_request ]]; then
-            BASE=$(git merge-base "$BASE" "$HEAD")
+          set -eu
+          if [[ "$EVENT" != pull_request ]]; then
+            printf 'contract=true\nintegration=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          changed=$(bash scripts/contract-go-paths.sh "$BASE" "$HEAD")
-          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          base=$(git merge-base "$BASE" "$HEAD")
+
+          # What both jobs read: the runner, the Go trierarch they build, the suite and its stand-ins.
+          shared=(
+            # npm ci installs from it, so a dependency change reaches every suite.
+            package.json
+            # It pins the core and the tools the suites run against.
+            package-lock.json
+            # Vitest's projects, set-up files and timeouts.
+            vitest.config.ts
+            # esbuild reads the compiler options when Vitest transforms a test.
+            tsconfig.json
+            # The compiler options tsconfig.json and the trierarch's build extend.
+            tsconfig.base.json
+            # Every project's first global setup.
+            scripts/support/test-folders.global-setup.ts
+            # The run's temporary folders that setup makes.
+            scripts/support/test-folders.ts
+            # The images Testcontainers starts.
+            .github/actions/test-images/action.yml
+            # The jobs' own steps and these lists.
+            .github/workflows/ci.yml
+            # The suite's global setup builds the Go trierarch of the next version.
+            go/
+            # The suite, its fleet, machine and stand-in harnesses.
+            contract/
+            # The suite builds this trierarch with npm run build, which compiles src without its tests.
+            packages/trierarch/src/
+            # A unit test in src is no part of that build.
+            ':(exclude,glob)packages/trierarch/src/**/*.test.ts'
+            # The package the build runs from, with its dependencies.
+            packages/trierarch/package.json
+            # The build's compiler settings and what it includes.
+            packages/trierarch/tsconfig.build.json
+            # The suite runs the stand-in harnesses from here.
+            packages/trierarch/test/support/
+            # The stand-in harnesses run the plugin's scripts, and the trierarch calls them.
+            plugins/aeolus-fleet/scripts/
+            # The trierarch and the suite read each harness's plugin manifest for its version.
+            plugins/aeolus-fleet/.claude-plugin/
+            # Codex's manifest, read the same way.
+            plugins/aeolus-fleet/.codex-plugin/
+            # Copilot's manifest, read the same way.
+            plugins/aeolus-fleet/.github/plugin/
+          )
+
+          # What only the integration job reads: the trierarch's and the plugin's own integration tests.
+          integration=(
+            # The trierarch's integration tests, their fixtures and their stand-ins.
+            packages/trierarch/test/
+            # The plugin's integration test against a real fleet.
+            plugins/aeolus-fleet/test/delivery.integration.test.ts
+            # The environment that test runs the scripts in.
+            plugins/aeolus-fleet/test/script-environment.ts
+            # The set-up file of the plugin's integration project.
+            plugins/aeolus-fleet/test/foreign-harness.setup.ts
+          )
+
+          # Whether a path of the list differs between where the branch left main and its head.
+          changed() {
+            local status=0
+            git diff --quiet "$base" "$HEAD" -- "$@" || status=$?
+            case "$status" in
+              0) printf 'false' ;;
+              1) printf 'true' ;;
+              *) exit "$status" ;;
+            esac
+          }
+          contract=$(changed "${shared[@]}")
+          integration=$(changed "${shared[@]}" "${integration[@]}")
+          printf 'contract=%s\nintegration=%s\n' "$contract" "$integration" >> "$GITHUB_OUTPUT"
 
   contract-go:
     # The contract suite's parts the Go trierarch is built to so far, driven against its binary.
     name: Contract tests on the Go trierarch
-    needs: contract-go-paths
-    if: ${{ always() && (needs.contract-go-paths.result != 'success' || needs.contract-go-paths.outputs.changed == 'true') }}
+    needs: changed-paths
+    if: ${{ always() && (needs.changed-paths.result != 'success' || needs.changed-paths.outputs.contract == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Require changed paths result
-        if: ${{ needs.contract-go-paths.result != 'success' }}
+        if: ${{ needs.changed-paths.result != 'success' }}
         run: exit 1
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
