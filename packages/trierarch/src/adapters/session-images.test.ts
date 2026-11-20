@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
+import { InMemoryFleet, InMemoryMachine, InMemoryState, CollectingLogger, TestClock, aMachineLoad } from '../../test/support/in-memory.js';
+import { createReadLoad } from '../core/read-load.js';
 import { createSessionImages } from './session-images.js';
 
 const repository = 'ghcr.io/thomashendrickx/aeolus-session';
 
-function runtime(at: { used?: readonly string[]; fails?: string; tags?: Readonly<Record<string, readonly string[]>> } = {}) {
+function runtime(at: { failsRemoving?: readonly string[]; hangs?: string; isMissing?: boolean; used?: readonly string[]; fails?: string; tags?: Readonly<Record<string, readonly string[]>> } = {}) {
   const removed: string[] = [];
-  const tags = at.tags ?? { current: [`${repository}:1.0.0`], old: [`${repository}:0.9.0`], held: [`${repository}:0.8.0`] };
-  const images = createSessionImages({ binary: 'podman', version: '1.0.0', run: (_command, { args }) => {
+  const tags: Record<string, string[]> = Object.fromEntries(Object.entries(at.tags ?? { current: [`${repository}:1.0.0`], old: [`${repository}:0.9.0`], held: [`${repository}:0.8.0`] }).map(([image, own]) => [image, [...own]]));
+  const timeouts: (number | undefined)[] = [];
+  const images = createSessionImages({ binary: 'podman', version: '1.0.0', run: (_command, { args, timeoutMs }) => {
     const [operation, action, id] = args;
+    timeouts.push(timeoutMs);
+    if (at.isMissing === true) return Promise.reject(Object.assign(new Error('spawn podman ENOENT'), { code: 'ENOENT' }));
+    if (operation === at.hangs) return Promise.resolve({ status: 1, stdout: '', stderr: '', isTimedOut: true });
+    if (operation === 'rmi' && (tags[action ?? '']?.length ?? 0) > 1) return Promise.resolve({ status: 1, stdout: '', stderr: 'image has several tags' });
+    if (operation === 'rmi' && at.failsRemoving?.includes(action ?? '') === true) return Promise.resolve({ status: 1, stdout: '', stderr: 'image has several tags' });
     if (operation === at.fails) return Promise.resolve({ status: 1, stdout: '', stderr: 'unavailable' });
     if (operation === 'image' && action === 'ls') return Promise.resolve({ status: 0, stdout: Object.keys(tags).join('\n'), stderr: '' });
     if (operation === 'image' && action === 'inspect') return Promise.resolve({ status: 0, stdout: JSON.stringify(tags[id ?? '']), stderr: '' });
@@ -16,10 +24,16 @@ function runtime(at: { used?: readonly string[]; fails?: string; tags?: Readonly
       const ancestor = args.find((arg) => arg.startsWith('ancestor='))?.slice('ancestor='.length);
       return Promise.resolve({ status: 0, stdout: at.used?.includes(ancestor ?? '') === true ? 'container' : '', stderr: '' });
     }
-    if (operation === 'rmi' && action !== undefined) removed.push(action);
+    if (operation === 'rmi' && action !== undefined) {
+      removed.push(action);
+      for (const [image, own] of Object.entries(tags)) {
+        if (image === action) Reflect.deleteProperty(tags, image);
+        else if (own.includes(action)) { own.splice(own.indexOf(action), 1); if (own.length === 0) Reflect.deleteProperty(tags, image); }
+      }
+    }
     return Promise.resolve({ status: 0, stdout: '', stderr: '' });
   } });
-  return { images, removed };
+  return { images, removed, timeouts, tags };
 }
 
 describe('unused session images', () => {
@@ -44,5 +58,51 @@ describe('unused session images', () => {
   it('reports a failed removal without forcing an image out from under a container', async () => {
     const { images } = runtime({ fails: 'rmi' });
     await expect(images.removeUnused()).rejects.toThrow('unavailable');
+  });
+
+  it('removes the other images when one removal fails, then reports it', async () => {
+    const { images, removed } = runtime({ tags: { first: [`${repository}:0.7.0`], second: [`${repository}:0.9.0`] }, failsRemoving: ['first'] });
+    await expect(images.removeUnused()).rejects.toThrow('image has several tags');
+    expect(removed).toEqual(['second']);
+  });
+
+  it('removes an old image that carries several aeolus tags', async () => {
+    const { images, tags } = runtime({ tags: { old: [`${repository}:0.7.0`, `${repository}:0.7.1`] } });
+    await images.removeUnused();
+    expect(tags).toEqual({});
+  });
+
+  it('gives every runtime command a time limit', async () => {
+    const { images, timeouts } = runtime();
+    await images.removeUnused();
+    expect(timeouts.length).toBeGreaterThan(0);
+    expect(timeouts.every((limit) => limit !== undefined && limit > 0)).toBe(true);
+  });
+
+  it('fails when a runtime command runs past its time limit', async () => {
+    const { images } = runtime({ hangs: 'image' });
+    await expect(images.removeUnused()).rejects.toThrow('timed out');
+  });
+
+  it('has nothing to remove, and no failure to retry, when the machine has no runtime', async () => {
+    const { images } = runtime({ isMissing: true });
+    await expect(images.removeUnused()).resolves.toBeUndefined();
+  });
+});
+
+describe('reading the load with an old image of several aeolus tags (#552)', () => {
+  it('stops retrying the image maintenance every minute once the image is gone', async () => {
+    const { images, tags } = runtime({ tags: { old: [`${repository}:0.7.0`, `${repository}:0.7.1`] } });
+    const machine = new InMemoryMachine();
+    machine.current = aMachineLoad();
+    const clock = new TestClock();
+    const logger = new CollectingLogger();
+    const disk = { free: () => Promise.resolve(), largestShips: () => undefined, removeUnusedImages: () => images.removeUnused() };
+    const read = createReadLoad({ machine, fleet: new InMemoryFleet(), state: new InMemoryState(), clock, logger, disk });
+    await read();
+    Object.assign(tags, { later: [`${repository}:0.6.0`] });
+    clock.advance(60_000);
+    await read();
+    expect({ tags, warnings: logger.warnings }).toEqual({ tags: { later: [`${repository}:0.6.0`] }, warnings: [] });
   });
 });

@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { CollectingLogger, TestClock } from '../../test/support/in-memory.js';
 import { createFreeDisk } from './free-disk.js';
 
+const MINUTE_MS = 60_000;
+
 function disk(at: { hasBrokenTrash?: boolean; hasBrokenImages?: boolean; hasBrokenCache?: boolean } = {}) {
   const stored = { trash: ['old-worktree'], images: ['old-image'], cache: ['unused-package'] };
   const logger = new CollectingLogger();
+  const clock = new TestClock();
   const free = createFreeDisk({
     trash: { empty: () => {
       if (at.hasBrokenTrash === true) return Promise.reject(new Error('trash unavailable'));
@@ -23,9 +26,10 @@ function disk(at: { hasBrokenTrash?: boolean; hasBrokenImages?: boolean; hasBrok
       if (request.isUrgent) { stored.trash.push(...stored.cache); stored.cache = []; }
       return Promise.resolve();
     } },
-    clock: new TestClock(), logger,
+    clock, logger,
   });
-  return { free, stored, logger };
+  const leaveBehind = (): void => { stored.images = ['old-image']; stored.cache = ['unused-package']; };
+  return { free, stored, logger, clock, leaveBehind };
 }
 
 describe('freeing disk before the alert', () => {
@@ -57,5 +61,23 @@ describe('freeing disk before the alert', () => {
     const machine = disk({ hasBrokenTrash: true });
     await machine.free();
     expect(machine.logger.warnings).toContain('Could not free disk: trash unavailable');
+  });
+
+  it('leaves new unused images and evictable cache alone while the disk stays low within the hour', async () => {
+    const machine = disk();
+    await machine.free();
+    machine.leaveBehind();
+    machine.clock.advance(MINUTE_MS);
+    await machine.free();
+    expect(machine.stored).toEqual({ trash: [], images: ['old-image'], cache: ['unused-package'] });
+  });
+
+  it('removes new unused images and evictable cache again an hour later', async () => {
+    const machine = disk();
+    await machine.free();
+    machine.leaveBehind();
+    machine.clock.advance(60 * MINUTE_MS);
+    await machine.free();
+    expect(machine.stored).toEqual({ trash: [], images: [], cache: [] });
   });
 });
