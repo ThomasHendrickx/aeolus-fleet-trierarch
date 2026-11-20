@@ -5,7 +5,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 
-import { onTestFinished } from 'vitest';
+import { onTestFinished, TestRunner } from 'vitest';
 
 import { descendantsOf, PROCESS_RECORD_VARIABLE, recordTestProcess, stopDescendants, stopProcess } from '../../scripts/support/test-process.js';
 import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
@@ -154,6 +154,11 @@ function stopHolds(home: string): void {
   }
 }
 
+/** Ends what a test started once it finishes; outside a test, such as a script making a machine, its caller ends it. */
+function whenTestFinishes(end: () => unknown): void {
+  if (TestRunner.getCurrentTest() !== undefined) onTestFinished(async () => { await end(); });
+}
+
 /** Runs a program to its end, never blocking this process: the fleet in it must answer meanwhile. */
 export function runProgram(command: readonly string[], at: { cwd: string; env: Readonly<Record<string, string>>; input?: string; onStarted?: (child: ChildProcess) => void; shouldRegisterCleanup?: boolean }): Promise<CommandOutcome> {
   const [program = '', ...args] = command;
@@ -162,7 +167,7 @@ export function runProgram(command: readonly string[], at: { cwd: string; env: R
     recordTestProcess(child.pid);
     at.onStarted?.(child);
     if (at.shouldRegisterCleanup !== false) {
-      onTestFinished(() => {
+      whenTestFinishes(() => {
         if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
       });
     }
@@ -540,7 +545,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   // In the run's short folder: the ship sockets under the machine's home are within the system's limit only for a short path.
   const root = aShortFolder();
   let remove: () => Promise<void> = () => { rmSync(root, { recursive: true, force: true }); return Promise.resolve(); };
-  onTestFinished(() => remove());
+  whenTestFinishes(() => remove());
   const home = join(root, 'h');
   const machine = join(root, 'machine');
   const bin = join(machine, 'bin');
