@@ -317,6 +317,34 @@ exec /usr/bin/id "$@"
 `;
 }
 
+/** Records the exact proxy PID as this machine launches it. */
+function shStandIn(at: { machine: string; home: string }): string {
+  const proxy = join(at.home, '.aeolus', 'trierarch', 'proxy');
+  const recorded = join(at.machine, 'proxy-started-pids');
+  return `#!/bin/bash
+if [ "$1" = -c ] && [ "$2" = '"$@" < /dev/null > /dev/null 2>&1 &' ]; then
+  shift 3
+  is_proxy=false; is_folder=false; previous=
+  for word; do
+    [ "$word" = proxy ] && is_proxy=true
+    [ "$previous" = --folder ] && [ "$word" = '${proxy}' ] && is_folder=true
+    previous="$word"
+  done
+  if $is_proxy && $is_folder; then
+    "$@" < /dev/null > /dev/null 2>&1 &
+    pid=$!
+    if IFS= read -r stat < "/proc/$pid/stat"; then
+      stat="\${stat##*) }"
+      set -- $stat
+      [ "$2" = "$$" ] && printf '%s %s\\n' "$pid" "\${20}" >> '${recorded}'
+    fi
+    exit 0
+  fi
+fi
+exec /bin/sh "$@"
+`;
+}
+
 /**
  * `systemctl --user` for the trierarch's unit, as systemd runs it: restart
  * and start run the unit's ExecStart with its Environment, detached, in a
@@ -356,7 +384,7 @@ stop() {
 }
 start() {
   [ -f "$file" ] || { echo "Unit $unit not found." >&2; exit 5; }
-  local line words=() environment=(HOME='${at.home}' USER="$USER" LANG=C.UTF-8 HTTPS_PROXY='${NO_NETWORK_PROXY}'${at.nodeOptions === undefined ? '' : ` NODE_OPTIONS='${at.nodeOptions}'`})
+  local line words=() environment=(HOME='${at.home}' PATH='${join(at.machine, 'bin')}:${join(at.machine, 'tools')}' USER="$USER" LANG=C.UTF-8 HTTPS_PROXY='${NO_NETWORK_PROXY}'${at.nodeOptions === undefined ? '' : ` NODE_OPTIONS='${at.nodeOptions}'`})
   while IFS= read -r line; do
     case "$line" in
       ExecStart=*) eval "words=(\${line#ExecStart=})" ;;
@@ -487,6 +515,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   const pluginData = join(home, '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   const codexPluginData = join(home, '.codex', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   script(join(bin, 'claude'), claudeStandIn({ machine, home, pluginData }));
+  script(join(bin, 'sh'), shStandIn({ machine, home }));
   script(join(bin, 'systemctl'), systemctlStandIn({ machine, home, ...(at.shouldDiagnoseHolds === true && { nodeOptions: `--import="${fileURLToPath(new URL('./hold-diagnostics.ts', import.meta.url))}"` }) }));
   script(join(bin, 'journalctl'), journalctlStandIn({ machine }));
   script(join(bin, 'ssh'), sshStandIn());
@@ -616,7 +645,13 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
         }) : [];
         await Promise.all(services.map(stopRecorded));
         stopHolds(home);
-        await stopRecorded(proxy ?? proxyPid());
+        const proxyRecords = join(machine, 'proxy-started-pids');
+        const proxies = existsSync(proxyRecords) ? readFileSync(proxyRecords, 'utf8').trim().split('\n').flatMap((line) => {
+          const [pid = '', start = ''] = line.split(' ');
+          const recorded = recordProcess(Number(pid));
+          return recorded?.start === start ? [recorded] : [];
+        }) : [];
+        await Promise.all([...proxies, proxy, proxyPid()].map(stopRecorded));
         rmSync(root, { recursive: true, force: true });
       }
     })();
