@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -197,7 +197,7 @@ function start(script: string, options: { args?: string[]; env?: Record<string, 
   const kill = () => {
     if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
   };
-  return { done, kill };
+  return { done, kill, pid: child.pid };
 }
 
 /** A hook as Claude Code runs it: the payload on stdin, the plugin's variables and the project folder set, no AEOLUS_ ones. */
@@ -360,4 +360,16 @@ describe('the plugin on a real fleet: a delivery the fleet refuses is dropped, a
     await expectTheNextMessageReachesTheModel();
     expect(await store()).not.toContain(refused);
   });
+});
+
+// Run in a separate Vitest process by the process cleanup contract.
+it.skipIf(process.env.PROCESS_CLEANUP_PLUGIN !== '1')('plugin process cleanup fixture', async () => {
+  const running = start('../test/fixtures/process-cleanup/sleep.sh');
+  expect(running.pid).toBeDefined();
+  writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify([process.pid, running.pid]));
+  if (process.env.PROCESS_CLEANUP_ENDING === 'timeout') {
+    await new Promise((resolve) => setTimeout(resolve, 120_000));
+  } else {
+    throw new Error('the fixture test failed');
+  }
 });
