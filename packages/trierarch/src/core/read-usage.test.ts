@@ -150,6 +150,27 @@ describe("the harnesses' usage, as the trierarch reads it (#353)", () => {
     expect((await trierarch.readUsage()).subscriptions[0]?.windows[0]?.usedPercent).toBe(3);
   });
 
+  it('rereads a used-up Codex window after 30 minutes without ship work, including after an unsuccessful read (#563)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.usage.subscriptions.set('codex', [{ ...SEVEN_DAYS, usedPercent: 100 }]);
+    await trierarch.readUsage();
+    trierarch.usage.unreadableSubscriptions.add('codex');
+    trierarch.clock.advance(30 * MINUTE_MS - 1);
+    await trierarch.readUsage();
+    const before = trierarch.usage.subscriptionTries.get('codex');
+    trierarch.clock.advance(1);
+    await trierarch.readUsage();
+    trierarch.usage.unreadableSubscriptions.delete('codex');
+    trierarch.usage.subscriptions.set('codex', [{ ...SEVEN_DAYS, usedPercent: 10 }]);
+    trierarch.clock.advance(30 * MINUTE_MS - 1);
+    const within = await trierarch.readUsage();
+    trierarch.clock.advance(1);
+    const after = await trierarch.readUsage();
+
+    expect(before).toBe(1);
+    expect([within, after].map((usage) => usage.subscriptions[0]?.windows[0]?.usedPercent)).toEqual([100, 10]);
+  });
+
   it("reads a harness's subscription again once a window's reset time passed, though no session did work and none runs (#117)", async () => {
     const trierarch = aTrierarch();
     trierarch.usage.subscriptions.set('claude-code', [FIVE_HOURS]);
