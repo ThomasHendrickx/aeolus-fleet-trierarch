@@ -123,6 +123,18 @@ describe('the model proxy process (headless H16)', () => {
     await expect(stateAt(url)).resolves.toEqual({ version: VERSION });
   });
 
+  // Linux gives a port-0 listener or an outbound connection a port from 32768 (ip_local_port_range), macOS from 49152:
+  // a port in that range, freed while the proxy is gone, can be taken before it listens again.
+  it('listens below the ephemeral port ranges, so no outbound connection or other listener is given its port while it is gone', async () => {
+    const runtime = aRuntime();
+
+    await runtime.keep({ isNeeded: true });
+
+    const port = Number(new URL((await runtime.url()) ?? 'http://127.0.0.1:0').port);
+    expect(port).toBeGreaterThanOrEqual(1024);
+    expect(port).toBeLessThan(32_768);
+  });
+
   it('leaves a running proxy of its version alone', async () => {
     const runtime = aRuntime();
     await runtime.keep({ isNeeded: true });

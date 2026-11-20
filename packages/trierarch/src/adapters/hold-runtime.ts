@@ -181,17 +181,26 @@ export function createHoldRuntime(options: {
     if (!(await isGuardDone())) {
       // The hold can start no more harnesses. Recover the crashed guard's work before removing temp.
       const groups = (await readFile(files.harnessSessions, 'utf8').catch(() => '')).split('\n').map(Number).filter((pid) => Number.isInteger(pid) && pid > 1);
+      // macOS answers EPERM for a group whose processes have all exited but are not reaped yet, where Linux
+      // answers success: such a group is still running until it is reaped, and there is nothing left to signal.
       const isRunning = (): boolean => groups.some((pid) => {
         try {
           process.kill(-pid, 0);
           return true;
         } catch (error) {
           if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return false;
+          if (error instanceof Error && 'code' in error && error.code === 'EPERM') return true;
           throw error;
         }
       });
       const signalGroups = (signal: NodeJS.Signals): void => {
-        for (const group of groups) signalHold(-group, signal);
+        for (const group of groups) {
+          try {
+            process.kill(-group, signal);
+          } catch (error) {
+            if (!(error instanceof Error && 'code' in error && (error.code === 'ESRCH' || error.code === 'EPERM'))) throw error;
+          }
+        }
       };
       signalGroups('SIGTERM');
       const grace = Date.now() + STOP_WAIT_MS;

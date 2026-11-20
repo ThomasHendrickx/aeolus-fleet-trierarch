@@ -367,6 +367,50 @@ it('starts after its guard crashes during the current boot, stopping the old ses
   }
 });
 
+// macOS answers a signal to a process group whose members have all exited but are not yet reaped with EPERM
+// (XNU killpg1: zombies are filtered out, and no member found is EPERM), where Linux answers success.
+it('starts after its guard crashes when macOS answers EPERM for the old session group that holds only unreaped processes', { timeout: 20_000 }, async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  const previous = join(sessions, shipId);
+  await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'trap "" TERM; while :; do echo old > "$TMPDIR/writing"; sleep 0.1; done'], harness: 'claude-code' });
+  await expect.poll(() => existsSync(join(temp, 'writing'))).toBe(true);
+  const guard = await guardOf(runtime, shipId);
+  const groups = readFileSync(join(previous, 'harness-sessions'), 'utf8').trim().split('\n').map(Number);
+  process.kill(guard, 'SIGKILL');
+  await expect.poll(() => isAlive(guard)).toBe(false);
+  const kill = process.kill.bind(process);
+  const unreaped = (): Error => Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+  const answered = new Set<string>();
+  const killed = new Set<number>();
+  const signal = vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
+    const group = -pid;
+    if (groups.includes(group)) {
+      // Its first SIGTERM, and its first probe once SIGKILL was sent, meet a group of only unreaped processes.
+      const moment = name === 'SIGTERM' ? 'term' : name === 0 && killed.has(group) ? 'probe' : undefined;
+      if (moment !== undefined && !answered.has(`${String(group)} ${moment}`)) {
+        answered.add(`${String(group)} ${moment}`);
+        throw unreaped();
+      }
+      if (name === 'SIGKILL') killed.add(group);
+    }
+    return kill(pid, name);
+  });
+  try {
+    await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    await expect.poll(() => starts().length).toBe(1);
+    expect(readdirSync(temp)).toEqual([]);
+  } finally {
+    signal.mockRestore();
+    rmSync(join(previous, 'guard-active'), { force: true });
+    for (const group of groups) {
+      try { process.kill(-group, 'SIGKILL'); } catch { /* The test session already ended. */ }
+    }
+  }
+});
+
 it('starts after a same-boot guard leaves a marker without an identity', { timeout: 15_000 }, async () => {
   const runtime = aRuntime();
   const shipId = newId('ship');
