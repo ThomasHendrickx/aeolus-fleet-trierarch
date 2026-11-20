@@ -154,6 +154,9 @@ let folder: string;
 let home: string;
 
 beforeEach(async () => {
+  if (process.env.PROCESS_CLEANUP_SETUP === '1') {
+    onTestFinished(() => writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify(fleet.server.listening)));
+  }
   const databaseUrl = await createMigratedDatabase();
   database = createPrismaClient(databaseUrl);
   useCases = createUseCases({ prisma: database });
@@ -163,6 +166,7 @@ beforeEach(async () => {
   secret = secretOf(scout.secret);
   fleet = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false });
   fleetUrl = await fleet.listen({ host: '127.0.0.1', port: 0 });
+  if (process.env.PROCESS_CLEANUP_SETUP === '1') throw new Error('the fixture setup failed');
   door = await startLossyDoor(fleetUrl);
   data = mkdtempSync(join(tmpdir(), 'aeolus-data-'));
   home = mkdtempSync(join(tmpdir(), 'aeolus-home-'));

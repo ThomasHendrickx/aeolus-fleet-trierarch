@@ -68,3 +68,29 @@ it.each(['failure', 'timeout'])('leaves no plugin command or fleet worker after 
     rmSync(folder, { recursive: true, force: true });
   }
 }, 180_000);
+
+
+it('closes the plugin fleet when setup fails before the door starts', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'plugin-setup-cleanup-'));
+  const stateFile = join(folder, 'state');
+  const config = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'plugin-vitest.config.ts');
+  const child = spawn(process.execPath, [VITEST, 'run', '--config', config, '-t', 'plugin process cleanup fixture'], {
+    cwd: ROOT,
+    env: { ...process.env, PROCESS_CLEANUP_POSTGRES_URL: inject('postgresUrl'), PROCESS_CLEANUP_PIDS: stateFile, PROCESS_CLEANUP_PLUGIN: '1', PROCESS_CLEANUP_SETUP: '1', NO_COLOR: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+  const exited = await new Promise<number | null>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+  try {
+    expect(exited, output).toBe(1);
+    expect(existsSync(stateFile), output).toBe(true);
+    expect(readFileSync(stateFile, 'utf8'), output).toBe('false');
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}, 180_000);
