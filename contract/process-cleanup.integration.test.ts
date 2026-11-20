@@ -55,7 +55,7 @@ it.each(['failure', 'timeout'])('leaves no plugin command or fleet worker after 
   const config = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'plugin-vitest.config.ts');
   const child = spawn(process.execPath, [VITEST, 'run', '--config', config, '-t', 'plugin process cleanup fixture'], {
     cwd: ROOT,
-    env: { ...process.env, PROCESS_CLEANUP_POSTGRES_URL: inject('postgresUrl'), PROCESS_CLEANUP_PIDS: pidsFile, PROCESS_CLEANUP_ENDING: ending, PROCESS_CLEANUP_PLUGIN: '1', NO_COLOR: '1' },
+    env: { ...process.env, PROCESS_CLEANUP_POSTGRES_URL: inject('postgresUrl'), PROCESS_CLEANUP_PIDS: pidsFile, PROCESS_CLEANUP_ENDING: ending, PROCESS_CLEANUP_PLUGIN: '1', PROCESS_CLEANUP_CHILD: join(folder, 'child'), NO_COLOR: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
@@ -65,10 +65,10 @@ it.each(['failure', 'timeout'])('leaves no plugin command or fleet worker after 
     child.on('error', reject);
     child.on('close', resolve);
   });
-  const pids = existsSync(pidsFile) ? z.tuple([processSchema, processSchema]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
+  const pids = existsSync(pidsFile) ? z.tuple([processSchema, processSchema, processSchema]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
   try {
     expect(exited, output).toBe(1);
-    expect(pids, output).toHaveLength(2);
+    expect(pids, output).toHaveLength(3);
     expect(pids.filter(isRunning), output).toEqual([]);
   } finally {
     for (const recorded of pids) if (isRunning(recorded)) process.kill(recorded.pid, 'SIGKILL');

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -396,7 +396,10 @@ describe('the plugin on a real fleet: a delivery the fleet refuses is dropped, a
 it.skipIf(process.env.PROCESS_CLEANUP_PLUGIN !== '1')('plugin process cleanup fixture', async () => {
   const running = start('../test/fixtures/process-cleanup/sleep.sh');
   expect(running.pid).toBeDefined();
-  const recorded = [process.pid, running.pid].map((pid) => {
+  const childFile = process.env.PROCESS_CLEANUP_CHILD ?? '';
+  await expect.poll(() => existsSync(childFile)).toBe(true);
+  const descendant = Number(readFileSync(childFile, 'utf8'));
+  const recorded = [process.pid, running.pid, descendant].map((pid) => {
     const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
     return { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
   });
