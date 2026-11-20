@@ -1,8 +1,8 @@
 # Sessions on an API key
 
-Design for [#1085](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1085), for Aeolus 0.33.0. The purpose and Thomas's answers as current state, the detailed decisions and the flow.
+Design for [#1085](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1085), built in [#265](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/265). The purpose, decisions and flow describe the shipped behaviour.
 
-It builds on the headless design (aeolus-fleet `docs/design/headless/headless.md`, approved 25 Oct): its hold (H8), clean environment (H10), launch window from events (H13), key file (H15), model proxy (H16) and usage with a key (H17). Its H6 and H15 now say what K2 says; this design is the detail behind them, and its slice S5 builds both.
+It builds on the headless design (aeolus-fleet `docs/design/headless/headless.md`, approved 25 Oct): its hold (H8), clean environment (H10), launch window from events (H13), key file (H15), model proxy (H16) and usage with a key (H17). Its H6 and H15 now say what K2 says; this design is the detail behind them, and the implementation builds both.
 
 ## 1. Purpose (agreed by Thomas)
 
@@ -24,7 +24,7 @@ Not the purpose:
 | K3 | **A change takes effect at the ship's next session start.** A running session keeps the login it started with |
 | K4 | **The console's computer card and ship page show "API key" and the ship's cost,** a slice in aeolus-fleet, its mockup to Thomas first |
 | A5 | **A ship whose key is not ready before its crew is final gives its crew request back with the cause,** so it can be crewed on another computer. Once the crew is final, it waits here (K9) |
-| A6 | **What wakes a session whose turn failed on the key is #1286's design,** the same for keys and subscriptions; until then the next delivery wakes it |
+| A6 | **A confirmed delivery is not handed again when its turn fails on the key.** Once the key is ready, the next delivery wakes the session. A delivery still held when a turn dies is handed again |
 
 ## 3. Lessons checked against
 
@@ -88,13 +88,11 @@ Unhappy paths the diagram does not show:
 - **The key is removed while sessions run** (`login --remove-key`). The state is `none`; the proxy refuses their tokens; they get no hand-over and stay on the key until a new key is written. They never move to the subscription. To move one now: change its login (K11) and release it; it is crewed again on the new login.
 - **The configuration moves a ship while its key is not ready.** Its running session keeps the key and waits (K3, K9); its report shows `next`. Released or restarted, it starts on the new login.
 - **The proxy is down.** Model requests fail and the harness retries; the trierarch starts the proxy again within a pass, as the headless design says. The key's state does not change: a missing proxy is not the vendor's answer.
-- **The turn that met the failure.** Its delivery was confirmed by the hook before the vendor refused (0040), and its text is in the session's conversation. Once the key is ready again, the next delivery wakes the session (A6).
+- **The turn that met the failure.** If its delivery was confirmed by the hook before the vendor refused (0040), its text is in the session's conversation; once the key is ready, the next delivery wakes the session. A delivery still held when the turn dies is handed again (A6).
 - **A checked key is refused on the check.** `login --api-key` writes nothing and says the vendor's cause; the state stays as it was.
 - **Two harnesses, one bad key.** States are per harness: an Anthropic key out of credit holds back Claude Code ships on the key only; Codex ships and every subscription ship go on.
 - **Probes.** The model probes and the subscription window probe (trierarch.md, Detected options, usage) run on the harness's default login; the window probe runs only when some ship of that harness runs on the subscription. On a key each probe costs a turn (H17).
 
-## 6. Slices
+## 6. Implementation
 
-- **S5 (trierarch, the headless design's slice, now with this design):** K5 to K11. The proxy, the key file, `login`, the per-session login, the key states and their waits, the report fields. Tests: a computer with one ship on the key and one on the subscription runs both, each session's environment holds only its own login; a subscription start with an `apiKeyHelper` in Claude Code's settings is not started, with its cause; a key session's environment and container hold no key; a token of a stopped session is refused; a 401 makes the state `refused` and hands nothing; a 402 makes it `outOfCredit`, the check every 15 minutes brings it back and the ships start without a restart counted; removing a key moves no session to the subscription; a change of login reaches only the next start; the report states the login per ship, `next`, and the cost per login, never the key.
-- **`common` (aeolus-fleet):** the optional report fields of K8.
-- **Console (aeolus-fleet):** K12, after Thomas approves the mockup.
+The trierarch implements K5 to K11, `common` carries the report fields of K8, and the console implements K12. See [#265](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/265) for the merged slices.
