@@ -15,7 +15,7 @@ function isRunning(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
-it.each(['failure', 'timeout'])('leaves no fleet, service or proxy process after a test %s', async (ending) => {
+it.each(['success', 'failure', 'timeout'])('leaves no fleet, service or proxy process after a test %s', async (ending) => {
   const folder = mkdtempSync(join(tmpdir(), 'process-cleanup-'));
   const pidsFile = join(folder, 'pids');
   const child = spawn(process.execPath, [VITEST, 'run', '--config', CONFIG], {
@@ -32,7 +32,7 @@ it.each(['failure', 'timeout'])('leaves no fleet, service or proxy process after
   });
   const pids = existsSync(pidsFile) ? z.tuple([z.number(), z.number(), z.number()]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
   try {
-    expect(exited, output).toBe(1);
+    expect(exited, output).toBe(ending === 'success' ? 0 : 1);
     expect(pids, output).toHaveLength(3);
     expect(pids.filter(isRunning), output).toEqual([]);
   } finally {

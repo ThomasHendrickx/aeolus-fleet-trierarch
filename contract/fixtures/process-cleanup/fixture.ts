@@ -24,7 +24,7 @@ it('ends with the test resources still in use', async () => {
   writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify([process.pid, service, proxy]));
   if (process.env.PROCESS_CLEANUP_ENDING === 'timeout') {
     await wait(120_000);
-  } else {
+  } else if (process.env.PROCESS_CLEANUP_ENDING === 'failure') {
     throw new Error('the fixture test failed');
   }
 });
