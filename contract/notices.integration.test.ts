@@ -79,7 +79,9 @@ function withoutLastFailure(text: string): string {
 
 /** The ship's session ended, as a crash ends it. */
 function crash(shipName: string): void {
-  process.kill(sessionOf(machine, shipName).starts().at(-1)?.pid ?? 0, 'SIGKILL');
+  const pid = sessionOf(machine, shipName).starts().at(-1)?.pid;
+  if (pid === undefined) throw new Error(`no session was started for ${shipName}`);
+  process.kill(pid, 'SIGKILL');
 }
 
 function crashedAfterSix(shipId: ShipId, at: { tail: string; lastStart?: string }): string {

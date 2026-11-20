@@ -69,7 +69,9 @@ describe('a session on its subscription', () => {
     aKeyHelperInUserSettings();
 
     // The session the trierarch started for this test ends, by its own pid, as a crash ends it: that end is the one restart counted.
-    process.kill(session.starts()[0]?.pid ?? 0, 'SIGKILL');
+    const pid = session.starts()[0]?.pid;
+    if (pid === undefined) throw new Error('the session did not start');
+    process.kill(pid, 'SIGKILL');
     await expect.poll(() => listedEntryOf(machine, scout), { timeout: CREWED_WITHIN_MS }).toMatchObject({ state: 'restarting', restarts: 1 });
     await wait(PASSES_MS);
 
