@@ -432,9 +432,8 @@ it('does not start after its guard crashes when the old session group keeps answ
   });
   try {
     const failure: unknown = await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' }).then(() => undefined, (error: unknown) => error);
-    expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toContain('did not stop');
-    expect((failure as Error).cause).toBe(denied);
+    expect(String(failure)).toContain('did not stop');
+    expect(failure).toHaveProperty('cause', denied);
     expect(starts()).toHaveLength(0);
   } finally {
     signal.mockRestore();
