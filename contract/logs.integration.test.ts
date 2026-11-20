@@ -151,7 +151,8 @@ describe('logs', () => {
       await machine.remove();
       for (const { pid, start } of processes) {
         const stat = existsSync(`/proc/${String(pid)}/stat`) ? readFileSync(`/proc/${String(pid)}/stat`, 'utf8') : '';
-        expect(stat === '' || stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] !== start).toBe(true);
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        expect(stat === '' || fields[0] === 'Z' || fields[19] !== start).toBe(true);
       }
     } finally {
       if (processes.length === 0 && existsSync(join(state, 'started'))) {

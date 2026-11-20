@@ -105,8 +105,9 @@ function recordProcess(pid: number | undefined): RecordedProcess | undefined {
   if (pid === undefined || !Number.isInteger(pid) || pid <= 1) return undefined;
   try {
     const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
-    const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
-    return start === undefined ? undefined : { pid, start };
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const start = fields[19];
+    return fields[0] === 'Z' || start === undefined ? undefined : { pid, start };
   } catch { return undefined; }
 }
 
@@ -557,9 +558,6 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
         } catch { return undefined; }
       };
       const started = join(machine, 'systemd', 'started');
-      const pid = servicePid();
-      const candidate = recordProcess(pid);
-      const service = candidate !== undefined && existsSync(started) && readFileSync(started, 'utf8').split('\n').includes(`${String(candidate.pid)} ${candidate.start}`) ? candidate : undefined;
       const proxy = proxyPid();
       try {
         await Promise.all([...running].map((command) => command.interrupt()));
@@ -574,7 +572,12 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
         }));
         await trierarch(['uninstall']);
       } finally {
-        await stopRecorded(service);
+        const services = existsSync(started) ? readFileSync(started, 'utf8').trim().split('\n').flatMap((line) => {
+          const [pid = '', start = ''] = line.split(' ');
+          const recorded = recordProcess(Number(pid));
+          return recorded?.start === start ? [recorded] : [];
+        }) : [];
+        await Promise.all(services.map(stopRecorded));
         await stopRecorded(proxy ?? proxyPid());
         rmSync(root, { recursive: true, force: true });
       }
