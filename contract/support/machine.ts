@@ -98,6 +98,8 @@ const GIT_ENV = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GI
 export const CLAUDE_CODE_VERSION = '2.1.306';
 /** How long the stand-in systemd waits for a stopped trierarch to end. */
 const STOP_WAIT_SECONDS = 10;
+/** How long teardown gives uninstall before stopping its command. */
+const UNINSTALL_WAIT_MS = 15_000;
 
 /** A recorded PID and its start time, so a reused PID is never signalled. */
 interface RecordedProcess { readonly pid: number; readonly start: string }
@@ -569,7 +571,20 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
           if (child.pid !== undefined) stopProcess(child.pid, process.pid);
           await ended;
         }));
-        await trierarch(['uninstall']);
+        const uninstall = trierarch(['uninstall']);
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          const didFinish = await Promise.race([
+            uninstall.then(() => true),
+            new Promise<false>((resolve) => { timer = setTimeout(() => { resolve(false); }, UNINSTALL_WAIT_MS); }),
+          ]);
+          if (!didFinish) {
+            for (const child of programs) if (child.pid !== undefined) stopProcess(child.pid, process.pid);
+            await uninstall;
+          }
+        } finally {
+          clearTimeout(timer);
+        }
       } finally {
         const services = existsSync(started) ? readFileSync(started, 'utf8').trim().split('\n').flatMap((line) => {
           const [pid = '', start = ''] = line.split(' ');
