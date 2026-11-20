@@ -40,7 +40,7 @@ it.each(['success', 'failure', 'timeout'])('leaves no fleet, service or proxy pr
   const pids = existsSync(pidsFile) ? z.array(processSchema).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
   try {
     expect(exited, output).toBe(ending === 'success' ? 0 : 1);
-    expect(pids.length, output).toBeGreaterThanOrEqual(3);
+    expect(pids.length, output).toBeGreaterThanOrEqual(4);
     expect(pids.filter(isRunning), output).toEqual([]);
   } finally {
     for (const recorded of pids) if (isRunning(recorded)) process.kill(recorded.pid, 'SIGKILL');
@@ -103,7 +103,7 @@ it('closes the plugin fleet when setup fails before the door starts', async () =
 }, 180_000);
 
 
-it.each(['ignore', 'exit', 'interrupt'])('stops a machine command and its child in %s mode', async (ending) => {
+it.each(['ignore', 'exit', 'interrupt', 'external'])('stops a machine command and its child in %s mode', async (ending) => {
   const folder = mkdtempSync(join(tmpdir(), 'command-cleanup-'));
   const pidsFile = join(folder, 'pids');
   const config = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'command-vitest.config.ts');
