@@ -114,12 +114,17 @@ describe('logs', () => {
     const command = machine.trierarch([], { as: [process.execPath, '-e', program, pidFile] });
     await expect.poll(() => existsSync(pidFile)).toBe(true);
     const pid = Number(readFileSync(pidFile, 'utf8'));
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
     try {
       isRemoved = true;
       await machine.remove();
       expect(() => process.kill(pid, 0)).toThrow();
     } finally {
-      try { process.kill(pid, 'SIGKILL'); } catch { /* The command already ended. */ }
+      try {
+        const current = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+        if (current.slice(current.lastIndexOf(')') + 2).split(' ')[19] === start) process.kill(pid, 'SIGKILL');
+      } catch { /* The command already ended. */ }
       await command;
     }
   });

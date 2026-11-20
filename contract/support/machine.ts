@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -124,10 +124,11 @@ async function stopRecorded(recorded: RecordedProcess | undefined): Promise<void
 }
 
 /** Runs a program to its end, never blocking this process: the fleet in it must answer meanwhile. */
-export function runProgram(command: readonly string[], at: { cwd: string; env: Readonly<Record<string, string>>; input?: string }): Promise<CommandOutcome> {
+export function runProgram(command: readonly string[], at: { cwd: string; env: Readonly<Record<string, string>>; input?: string; onStarted?: (child: ChildProcess) => void }): Promise<CommandOutcome> {
   const [program = '', ...args] = command;
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { cwd: at.cwd, env: at.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    at.onStarted?.(child);
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
@@ -511,8 +512,9 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
     copyFileSync(program, installed);
     chmodSync(installed, 0o755);
   }
+  const programs = new Set<ChildProcess>();
   const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> } = {}) =>
-    runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }) });
+    runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }), onStarted: (child) => { programs.add(child); child.once('close', () => programs.delete(child)); } });
   const running = new Set<RunningCommand>();
   const start = (words: readonly string[]): RunningCommand => {
     const [program = '', ...args] = [...underTest, ...words];
@@ -558,6 +560,15 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
       const proxy = proxyPid();
       try {
         await Promise.all([...running].map((command) => command.interrupt()));
+        await Promise.all([...programs].map(async (child) => {
+          const isGoing = (): boolean => child.pid !== undefined && child.exitCode === null && child.signalCode === null;
+          if (!isGoing()) return;
+          const ended = new Promise<void>((resolve) => { child.once('exit', () => { resolve(); }); });
+          child.kill('SIGTERM');
+          await Promise.race([ended, wait(1_000)]);
+          if (isGoing()) child.kill('SIGKILL');
+          await ended;
+        }));
         await trierarch(['uninstall']);
       } finally {
         await stopRecorded(service);
