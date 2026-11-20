@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 
 /** Stops only the process and descendants started by this test, by their individual PIDs. */
 export function stopProcess(pid: number, parent: number): void {
@@ -42,4 +42,35 @@ export function stopDescendants(recorded: readonly { pid: number; start: string 
       if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === start) process.kill(pid, 'SIGKILL');
     } catch { /* The descendant already ended. */ }
   }
+}
+
+/** Names the file a test run records each process it starts in, one `<pid> <start time>` line each, for the leftovers check to read. */
+export const PROCESS_RECORD_VARIABLE = 'AEOLUS_TEST_PROCESS_RECORD';
+
+/** A process as /proc names it: its PID and its start time, so a reused PID is never taken for it. */
+export interface RecordedProcess { readonly pid: number; readonly start: string }
+
+/** The start time of the live process, none when it ended or is a zombie. */
+export function startOf(pid: number): string | undefined {
+  try {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return fields[0] === 'Z' ? undefined : fields[19];
+  } catch { return undefined; }
+}
+
+/** Records the live process in the run's record, when the run names one, and says it as recorded. */
+export function recordTestProcess(pid: number | undefined): RecordedProcess | undefined {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 1) return undefined;
+  const start = startOf(pid);
+  if (start === undefined) return undefined;
+  const record = process.env[PROCESS_RECORD_VARIABLE];
+  if (record !== undefined && record !== '') appendFileSync(record, `${String(pid)} ${start}\n`);
+  return { pid, start };
+}
+
+/** Kills the recorded process only while its PID still names it. */
+export function killRecorded(recorded: RecordedProcess | undefined): void {
+  if (recorded === undefined || startOf(recorded.pid) !== recorded.start) return;
+  try { process.kill(recorded.pid, 'SIGKILL'); } catch { /* It ended meanwhile. */ }
 }
