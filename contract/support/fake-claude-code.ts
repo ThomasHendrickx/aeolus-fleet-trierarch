@@ -28,7 +28,7 @@
  * and body (`fake-socket-calls.jsonl`).
  */
 import { spawnSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
@@ -41,7 +41,14 @@ const sessionId = resumeAt === -1 ? `fake-${String(process.pid)}` : (args[resume
 const refusedModel = process.env.FAKE_CLAUDE_REFUSES_MODEL;
 const NOT_LOGGED_IN = 'Not logged in · Please run /login';
 
-appendFileSync('fake-starts.jsonl', `${JSON.stringify({ args, env: process.env, pid: process.pid })}\n`);
+/** This process's start time as /proc names it, so a test ends this very process by its PID; none without /proc. */
+const startTime = ((): string | undefined => {
+  try {
+    const stat = readFileSync('/proc/self/stat', 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+  } catch { return undefined; }
+})();
+appendFileSync('fake-starts.jsonl', `${JSON.stringify({ args, env: process.env, pid: process.pid, start: startTime })}\n`);
 
 const emit = (event: Record<string, unknown>): void => {
   process.stdout.write(`${JSON.stringify({ ...event, session_id: sessionId })}\n`);

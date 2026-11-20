@@ -6,7 +6,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { aCrewingMachine, sessionOf, listedEntryOf, REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, crash, sessionOf, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
@@ -69,9 +69,7 @@ describe('a session on its subscription', () => {
     aKeyHelperInUserSettings();
 
     // The session the trierarch started for this test ends, by its own pid, as a crash ends it: that end is the one restart counted.
-    const pid = session.starts()[0]?.pid;
-    if (pid === undefined) throw new Error('the session did not start');
-    process.kill(pid, 'SIGKILL');
+    crash(session.starts()[0]);
     await expect.poll(() => listedEntryOf(machine, scout), { timeout: CREWED_WITHIN_MS }).toMatchObject({ state: 'restarting', restarts: 1 });
     await wait(PASSES_MS);
 

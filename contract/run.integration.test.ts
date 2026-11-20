@@ -6,7 +6,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, crash, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine } from './support/machine.js';
 
@@ -107,9 +107,7 @@ describe('run with the reconciler', () => {
     await aRunningScout();
 
     // The session the trierarch started for this test ends, by its own pid, as a crash ends it.
-    const pid = session.starts()[0]?.pid;
-    if (pid === undefined) throw new Error('the session did not start');
-    process.kill(pid, 'SIGKILL');
+    crash(session.starts()[0]);
 
     await expect.poll(() => session.starts().length, { timeout: CREWED_WITHIN_MS }).toBe(2);
     await expect.poll(() => listedEntryOf(machine, scout), { timeout: CREWED_WITHIN_MS }).toMatchObject({ state: 'running', restarts: 1 });
