@@ -14,7 +14,8 @@ it('fails with a command running', async () => {
     void runProgram([...machine.underTest, 'follow', 'ignore'], { cwd: machine.home, env: { HOME: machine.home, PATH: `${join(machine.machine, 'bin')}:${join(machine.machine, 'tools')}` } });
   }
   const pidFile = join(machine.home, 'command.pid');
-  await expect.poll(() => existsSync(pidFile)).toBe(true);
+  // A cold start of the command's node under a busy run takes longer than a poll's default second.
+  await expect.poll(() => existsSync(pidFile), { timeout: 20_000 }).toBe(true);
   const pids = z.tuple([z.number(), z.number()]).parse(JSON.parse(readFileSync(pidFile, 'utf8')));
   const recorded = [process.pid, ...pids].map((value) => {
     const stat = readFileSync(`/proc/${String(value)}/stat`, 'utf8');
