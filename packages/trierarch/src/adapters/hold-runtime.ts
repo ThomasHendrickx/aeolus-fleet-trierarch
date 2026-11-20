@@ -183,13 +183,18 @@ export function createHoldRuntime(options: {
       const groups = (await readFile(files.harnessSessions, 'utf8').catch(() => '')).split('\n').map(Number).filter((pid) => Number.isInteger(pid) && pid > 1);
       // macOS answers EPERM for a group whose processes have all exited but are not reaped yet, where Linux
       // answers success: such a group is still running until it is reaped, and there is nothing left to signal.
+      // A group that never stops answering EPERM may be a real refusal: the last one is the cause of the failure.
+      let refusal: Error | undefined;
       const isRunning = (): boolean => groups.some((pid) => {
         try {
           process.kill(-pid, 0);
           return true;
         } catch (error) {
           if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return false;
-          if (error instanceof Error && 'code' in error && error.code === 'EPERM') return true;
+          if (error instanceof Error && 'code' in error && error.code === 'EPERM') {
+            refusal = error;
+            return true;
+          }
           throw error;
         }
       });
@@ -208,7 +213,7 @@ export function createHoldRuntime(options: {
       if (isRunning()) signalGroups('SIGKILL');
       const stopped = Date.now() + STOP_WAIT_MS;
       while (isRunning()) {
-        if (Date.now() >= stopped) throw new Error(`the processes of ${shipId} did not stop`);
+        if (Date.now() >= stopped) throw new Error(`the processes of ${shipId} did not stop`, { cause: refusal });
         await wait(START_POLL_MS);
       }
     }
