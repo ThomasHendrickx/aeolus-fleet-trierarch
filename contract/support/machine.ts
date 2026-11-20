@@ -155,11 +155,16 @@ function stopHolds(home: string): void {
 }
 
 /** Runs a program to its end, never blocking this process: the fleet in it must answer meanwhile. */
-export function runProgram(command: readonly string[], at: { cwd: string; env: Readonly<Record<string, string>>; input?: string; onStarted?: (child: ChildProcess) => void }): Promise<CommandOutcome> {
+export function runProgram(command: readonly string[], at: { cwd: string; env: Readonly<Record<string, string>>; input?: string; onStarted?: (child: ChildProcess) => void; shouldRegisterCleanup?: boolean }): Promise<CommandOutcome> {
   const [program = '', ...args] = command;
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { cwd: at.cwd, env: at.env, stdio: ['pipe', 'pipe', 'pipe'] });
     at.onStarted?.(child);
+    if (at.shouldRegisterCleanup !== false) {
+      onTestFinished(() => {
+        if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
+      });
+    }
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
@@ -580,8 +585,8 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
     chmodSync(installed, 0o755);
   }
   const programs = new Set<ChildProcess>();
-  const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> } = {}) =>
-    runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }), onStarted: (child) => { programs.add(child); child.once('close', () => programs.delete(child)); } });
+  const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>>; shouldRegisterCleanup?: boolean } = {}) =>
+    runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }), ...(at.shouldRegisterCleanup === false && { shouldRegisterCleanup: false }), onStarted: (child) => { programs.add(child); child.once('close', () => programs.delete(child)); } });
   const running = new Set<{ stop(): Promise<number> }>();
   const start = (words: readonly string[]): RunningCommand => {
     const [program = '', ...args] = [...underTest, ...words];
@@ -639,7 +644,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
           if (child.pid !== undefined) stopProcess(child.pid, process.pid);
           await ended;
         }));
-        const uninstall = trierarch(['uninstall']);
+        const uninstall = trierarch(['uninstall'], { shouldRegisterCleanup: false });
         let timer: NodeJS.Timeout | undefined;
         try {
           const didFinish = await Promise.race([
