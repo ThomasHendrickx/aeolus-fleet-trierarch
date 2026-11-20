@@ -40,11 +40,14 @@ On the computer, as the trierarch's user:
 ```sh
 aeolus-trierarch list
 aeolus-trierarch status
+aeolus-trierarch status design-tri-271c
+aeolus-trierarch status design-tri-271c --json
 aeolus-trierarch logs --follow
 ```
 
 - `list` shows each ship on this computer: its state, harness, workspace, since when it is in that state, and its restarts within the last hour.
 - `status` counts the ships by state, shows the caps in use, and says whether the trierarch's last pass succeeded or how it fails, such as when it cannot reach the fleet.
+- `status <ship>` finds one ship by name or id and shows its local session facts. It works without the fleet or the service. `--json` also includes the session status, hold pid and session id, and all its paths; process commands and session lines are not shown. An unreadable source is named while the rest stays visible. An unknown ship exits 1 and names the ships crewed here. See [Reading one ship](../trierarch.md#reading-one-ship-on-this-machine).
 - `logs` shows each thing the trierarch does, and after a failure, what it does next.
 
 In the [console](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#console), each ship's crew request card shows the same state and the computer it is on. A ship with a crew request shows on **Needs crew** while it does not run, with why. The **Trierarchs** page shows each computer, what it offers, and why it offers anything less.

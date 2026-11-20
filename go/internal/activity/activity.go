@@ -7,6 +7,7 @@ package activity
 
 import (
 	"bufio"
+	"io/fs"
 	"os"
 	"time"
 )
@@ -44,9 +45,16 @@ func Of(events string, read func(event string) (Reading, bool)) (Activity, bool)
 		return Activity{}, false
 	}
 	defer file.Close()
+	latest, ok, err := OfFile(file, read)
+	return latest, ok && err == nil
+}
+
+// OfFile reads the latest activity from an open events file and reports read failures.
+// The caller owns the file and closes it.
+func OfFile(file fs.File, read func(event string) (Reading, bool)) (Activity, bool, error) {
 	info, err := file.Stat()
 	if err != nil {
-		return Activity{}, false
+		return Activity{}, false, err
 	}
 	var last []string
 	lines := bufio.NewScanner(file)
@@ -60,9 +68,12 @@ func Of(events string, read func(event string) (Reading, bool)) (Activity, bool)
 		}
 		last = append(last, lines.Text())
 	}
+	if err := lines.Err(); err != nil {
+		return Activity{}, false, err
+	}
 	reading, ok := Latest(last, read)
 	if !ok {
-		return Activity{}, false
+		return Activity{}, false, nil
 	}
-	return Activity{At: info.ModTime(), Kind: reading.Kind, Tool: reading.Tool}, true
+	return Activity{At: info.ModTime(), Kind: reading.Kind, Tool: reading.Tool}, true, nil
 }

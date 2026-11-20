@@ -40,7 +40,7 @@ Everything of the trierarch lives under `~/.aeolus/trierarch/`.
 | The clones of the trusted repositories, one folder per repository, each made before its first workspace | `~/.aeolus/trierarch/repositories/<name>/` | The trierarch |
 | With the container runtime, the machine's long-lived model token (`claude setup-token`), mode 600, handed to each container (decision 0039); never in the configuration | `~/.aeolus/trierarch/model-token` | The operator |
 | Each harness's API key, one file per harness (`claude-code`, `codex`), mode 600 in a folder of mode 700, written only once the vendor took it; never in the configuration, a report, a log or the fleet (api keys K5, K7) | `~/.aeolus/trierarch/keys/<harness>` | `aeolus-trierarch login <harness> --api-key` |
-| State: entries saved as crewing, runtime state per ship, what argo was told the machine is low on. No secrets and no declared state (the fleet holds that); written atomically | `~/.aeolus/trierarch/state.json` | The trierarch |
+| State, mode 600: entries saved as crewing, runtime state and crew token per ship, what argo was told the machine is low on. Declared state lives in the fleet; written atomically. The ship view uses its own decoder with no crew token field | `~/.aeolus/trierarch/state.json` | The trierarch |
 | What detection found per harness: its version, when it was detected and its models last confirmed, and its options (#365) | `~/.aeolus/trierarch/detected.json` | The trierarch: `init`, a start after a harness updated, `aeolus-trierarch detect` |
 | The running trierarch's pid and version, so `status` tells the running version from the installed one | `~/.aeolus/trierarch/running.json` | The trierarch, as it starts |
 | Logs | `~/.aeolus/trierarch/logs/` on macOS; the user journal on Linux (`journalctl --user -u aeolus-trierarch`) | The trierarch's service |
@@ -100,6 +100,8 @@ sequenceDiagram
 ```
 
 The secret lives only in the trierarch's memory, between getting the starting prompt and registering.
+
+`status <ship>` reads these files through `internal/shipview`: the state for identity, state, restart times and workspace paths; the configuration's runtime for host or container; `hold.pid`, `session-id` and `exit-reason` for the session; and the hold's `events.jsonl` through the harness activity reader. It reads host working folders through `folderprocess` or a container's process table through `container`, requesting only pids and elapsed times. It opens no hold socket or credential file and writes nothing. Unreadable sources stay attached to their facts, with path and error; only the state prevents the whole read. See [Reading one ship](trierarch.md#reading-one-ship-on-this-machine).
 
 ### A session dies, and the machine restarts
 
