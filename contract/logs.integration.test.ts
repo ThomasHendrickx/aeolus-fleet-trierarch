@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -70,6 +72,23 @@ async function withFollower(following: RunningCommand, check: () => Promise<void
 }
 
 describe('logs', () => {
+  it('leaves an unrelated process named by a stale proxy pid file running', async () => {
+    const child = spawn('sleep', ['60']);
+    const ended = once(child, 'exit');
+    const folder = join(machine.trierarchHome, 'proxy');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'proxy.pid'), String(child.pid));
+    try {
+      isRemoved = true;
+      await machine.remove();
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await ended;
+    }
+  });
+
   it('stops a follower when its assertion fails', async () => {
     written(['ready']);
     const following = machine.start(['logs', '--follow']);
