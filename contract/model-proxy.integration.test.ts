@@ -51,6 +51,14 @@ async function aRunningScout(): Promise<void> {
 }
 
 describe('the model proxy', () => {
+  it('records the proxy pid when it starts', async () => {
+    const pidFile = join(machine.trierarchHome, 'proxy', 'proxy.pid');
+    const recorded = join(machine.machine, 'proxy-started-pids');
+    await expect.poll(() => existsSync(pidFile), { timeout: CREWED_WITHIN_MS }).toBe(true);
+    const pid = readFileSync(pidFile, 'utf8').trim();
+    await expect.poll(() => existsSync(recorded) ? readFileSync(recorded, 'utf8').split('\n').some((line) => line.startsWith(`${pid} `)) : false).toBe(true);
+  });
+
   it('leaves none of its model proxy processes running when the machine is removed', async () => {
     const pidFile = join(machine.trierarchHome, 'proxy', 'proxy.pid');
     await expect.poll(() => existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : 0, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(1);
