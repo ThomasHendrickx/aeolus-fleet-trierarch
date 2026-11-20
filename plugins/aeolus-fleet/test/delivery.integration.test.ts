@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { ShipId } from '@aeolus-fleet/common';
 import type { FastifyInstance } from 'fastify';
-import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type ShipCaller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
 
@@ -155,31 +155,34 @@ let home: string;
 
 beforeEach(async () => {
   if (process.env.PROCESS_CLEANUP_SETUP === '1') {
-    onTestFinished(() => writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify(fleet.server.listening)));
+    onTestFinished(() => { writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify(fleet.server.listening)); });
   }
   const databaseUrl = await createMigratedDatabase();
   database = createPrismaClient(databaseUrl);
+  const client = database;
+  onTestFinished(() => client.$disconnect());
   useCases = createUseCases({ prisma: database });
   argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
   const scout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
   shipId = scout.shipId;
   secret = secretOf(scout.secret);
   fleet = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false });
+  const server = fleet;
+  onTestFinished(async () => { await server.close(); });
   fleetUrl = await fleet.listen({ host: '127.0.0.1', port: 0 });
   if (process.env.PROCESS_CLEANUP_SETUP === '1') throw new Error('the fixture setup failed');
   door = await startLossyDoor(fleetUrl);
+  const openedDoor = door;
+  onTestFinished(() => openedDoor.close());
   data = mkdtempSync(join(tmpdir(), 'aeolus-data-'));
+  const dataFolder = data;
+  onTestFinished(() => { rmSync(dataFolder, { recursive: true, force: true }); });
   home = mkdtempSync(join(tmpdir(), 'aeolus-home-'));
+  const homeFolder = home;
+  onTestFinished(() => { rmSync(homeFolder, { recursive: true, force: true }); });
   folder = mkdtempSync(join(tmpdir(), 'aeolus-folder-'));
-});
-
-afterEach(async () => {
-  await door.close();
-  await fleet.close();
-  await database.$disconnect();
-  rmSync(data, { recursive: true, force: true });
-  rmSync(home, { recursive: true, force: true });
-  rmSync(folder, { recursive: true, force: true });
+  const sessionFolder = folder;
+  onTestFinished(() => { rmSync(sessionFolder, { recursive: true, force: true }); });
 });
 
 /** Stops only the process and descendants started by this test, by their individual PIDs. */
