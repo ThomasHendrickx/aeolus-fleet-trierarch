@@ -53,8 +53,9 @@ describe('the session image retry step', () => {
 
   it('is used by the Containerfile for every step that reaches the network', () => {
     const text = readFileSync(containerfile, 'utf8');
-    expect(text).toContain('/usr/local/bin/aeolus-retry apt-get update');
-    expect(text).toContain('aeolus-retry apt-get install');
-    expect(text).toMatch(/aeolus-retry bash -c 'curl[^']*nodesource/);
+    expect(text).toMatch(/aeolus-retry \d+ \d+ apt-get update/);
+    expect(text).toMatch(/aeolus-retry \d+ \d+ apt-get install/);
+    expect(text).toMatch(/aeolus-retry \d+ \d+ bash -c 'set -o pipefail; curl[^']*nodesource/);
+    expect(text).toMatch(/aeolus-retry \d+ \d+ npm install/);
   });
 });
