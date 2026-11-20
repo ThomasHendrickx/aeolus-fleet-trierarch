@@ -7,7 +7,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 
 import { onTestFinished } from 'vitest';
 
-import { stopProcess } from '../../scripts/support/test-process.js';
+import { descendantsOf, stopDescendants, stopProcess } from '../../scripts/support/test-process.js';
 import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
 /**
@@ -539,11 +539,12 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
       },
       stdout: () => stdout,
       interrupt: async () => {
+        const descendants = child.pid === undefined ? [] : descendantsOf(child.pid);
         if (child.exitCode === null && child.signalCode === null) child.kill('SIGINT');
         const status = await Promise.race([ended, wait(1_000).then(() => undefined)]);
-        if (status !== undefined) return status;
-        if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
-        return ended;
+        if (status === undefined && child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
+        stopDescendants(descendants);
+        return status ?? ended;
       },
     };
     running.add(command);
