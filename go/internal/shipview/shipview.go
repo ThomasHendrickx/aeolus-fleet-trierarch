@@ -90,6 +90,8 @@ type Process struct {
 
 // Unreadable names a fact's source that could not be read.
 type Unreadable struct {
+	// Fact identifies the affected fact for a screen; JSON keeps the approved path and error shape.
+	Fact  string `json:"-"`
 	Path  string `json:"path"`
 	Error string `json:"error"`
 }
@@ -188,7 +190,18 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 		return View{}, unknownShip{ship, names}
 	}
 	held := hold.FilesOf(at.Sessions, one.ShipID)
-	view := View{ShipID: one.ShipID, ShipName: one.ShipName, Harness: one.Harness, State: one.State, Since: localTime(one.Since, now.Location()), Unreadable: []Unreadable{}, Session: Session{Status: "exited", Processes: []Process{}}, Places: Places{ShipFolder: one.Folder, SubRepositories: map[string]string{}, Home: paths.ShipHome(at.Homes, one.ShipID, one.ShipFolder), Socket: filepath.Join(paths.ShipSockets(at.Sockets, one.ShipID, one.ShipFolder), paths.SocketFile), Hold: held.Folder, Events: held.Events}}
+	view := View{
+		ShipID: one.ShipID, ShipName: one.ShipName, Harness: one.Harness,
+		State: one.State, Since: localTime(one.Since, now.Location()),
+		Unreadable: []Unreadable{},
+		Session:    Session{Status: "exited", Processes: []Process{}},
+		Places: Places{
+			ShipFolder: one.Folder, SubRepositories: map[string]string{},
+			Home:   paths.ShipHome(at.Homes, one.ShipID, one.ShipFolder),
+			Socket: filepath.Join(paths.ShipSockets(at.Sockets, one.ShipID, one.ShipFolder), paths.SocketFile),
+			Hold:   held.Folder, Events: held.Events,
+		},
+	}
 	for _, exit := range one.Exits {
 		if ended, err := time.Parse(time.RFC3339, exit); err == nil && now.Sub(ended) >= 0 && now.Sub(ended) < time.Hour {
 			view.Restarts++
@@ -204,7 +217,7 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 	}
 	read := func(path string) string {
 		text, err := readFile(files, path)
-		view.record(path, err)
+		view.record("session", path, err)
 		return strings.TrimSpace(string(text))
 	}
 	var configuration struct {
@@ -214,16 +227,16 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 		} `json:"runtime"`
 	}
 	configurationText, err := readFile(files, at.Config)
-	view.record(at.Config, err)
+	view.record("configuration", at.Config, err)
 	if err == nil {
-		view.record(at.Config, json.Unmarshal(configurationText, &configuration))
+		view.record("configuration", at.Config, json.Unmarshal(configurationText, &configuration))
 	}
 	view.IsContainer = configuration.Runtime.Kind == "container"
 	pidText := read(held.PID)
 	if pidText != "" {
 		pid, err := strconv.Atoi(pidText)
 		if err != nil || pid <= 0 {
-			view.Unreadable = append(view.Unreadable, Unreadable{held.PID, "invalid hold pid"})
+			view.Unreadable = append(view.Unreadable, Unreadable{Fact: "session", Path: held.PID, Error: "invalid hold pid"})
 		} else {
 			view.Session.HoldPID = pid
 		}
@@ -236,11 +249,11 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 	readers := map[string]func([]string) (activity.Reading, bool){"claude-code": claudecode.ActivityIn, "codex": codex.ActivityIn, "copilot": copilot.ActivityIn}
 	if reader := readers[one.Harness]; reader != nil {
 		file, err := files.Open(held.Events)
-		view.record(held.Events, err)
+		view.record("activity", held.Events, err)
 		if err == nil {
 			latest, ok, err := activity.OfFile(file, func(line string) (activity.Reading, bool) { return reader([]string{line}) })
 			_ = file.Close()
-			view.record(held.Events, err)
+			view.record("activity", held.Events, err)
 			if ok && err == nil {
 				view.Session.Activity = &Activity{latest.Kind, latest.Tool, latest.At.In(now.Location()).Format(time.RFC3339)}
 			}
@@ -253,7 +266,7 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 		}
 		found, err := processes.Processes(ctx, ProcessRequest{ShipID: one.ShipID, Folder: one.Folder, HoldPID: view.Session.HoldPID, IsContainer: view.IsContainer, ContainerBinary: configuration.Runtime.Binary, At: now})
 		if err != nil {
-			view.record(one.Folder, err)
+			view.record("processes", one.Folder, err)
 		} else {
 			view.Session.Processes = found
 		}
@@ -270,7 +283,7 @@ func readFile(files Files, path string) ([]byte, error) {
 	return io.ReadAll(file)
 }
 
-func (v *View) record(path string, err error) {
+func (v *View) record(fact, path string, err error) {
 	if err == nil || errors.Is(err, fs.ErrNotExist) {
 		return
 	}
@@ -279,7 +292,7 @@ func (v *View) record(path string, err error) {
 		path = fileError.Path
 		err = fileError.Err
 	}
-	v.Unreadable = append(v.Unreadable, Unreadable{path, err.Error()})
+	v.Unreadable = append(v.Unreadable, Unreadable{Fact: fact, Path: path, Error: err.Error()})
 }
 
 type machineProcesses struct{}

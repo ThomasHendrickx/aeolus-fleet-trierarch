@@ -91,6 +91,12 @@ What it finds is kept in `~/.aeolus/trierarch/detected.json`, apart from the ope
 
 Each pass, for every session it runs whose harness wrote an event that shows activity, the trierarch writes that activity with `fleet.reportActivity` (`crew:run`), all sessions in one call (at most 100 each): the kind of the session's latest event (`text`, `tool`, `result` or `error`), the tool of a tool call, and when the session's `events.jsonl` last changed. No content of an event is sent. Each harness adapter reads its own events in one place. It states an interval of 30 seconds with every write; the fleet reads a ship's activity as unknown once its write is older than twice that, so a trierarch that is down shows unknown, never stopped work. A session that shows no activity yet, and one that exited, is not written. A failed write is logged and tried again by the next pass.
 
+### Reading one ship on this machine
+
+`aeolus-trierarch status <ship>` finds a crewed ship by its exact id first, then its name, and shows its harness, state, since when, restarts within the last hour, latest activity, processes and places. The process facts are pids and how long they run; commands and session lines are not shown. `--json` includes the session's running or exited status, hold pid, harness session id, absolute activity and process times, and every place: ship folder, main and sub-repositories, home, fleet socket, hold folder and events file.
+
+The reader uses local files and the host or container process table, never the fleet, the running service or a hold socket. Its state decoder has no crew token field, and it reads no credential file. A file it cannot read is named with its error while the other facts stay visible; an unreadable state fails the command. An unknown ship exits 1 and names the ships crewed here. Reading changes no file and sends no session content off the computer.
+
 ### What a trierarch reports
 
 Its report, sent on start and again whenever it changes: its state (`working` while a session runs, `idle` with none), a one-line note such as "4 of 6 running, 1 crashed" (the sessions that run of `caps.ships`, and the crashed ones when there are any), and `details`, read from its local configuration and what runs. Each harness's `flags` are the flags its configuration gives it, and its `riskyFlags` those of them its adapter calls risky, so a reader needs no harness knowledge: `--dangerously-skip-permissions` for Claude Code and `--dangerously-bypass-approvals-and-sandbox` for Codex. The console marks them:

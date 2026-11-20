@@ -18,6 +18,10 @@ func shipStatus(at paths.Paths, machine Machine, ship string) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
+	return answer{data: view, text: describeShip(view, now)}, nil
+}
+
+func describeShip(view shipview.View, now time.Time) string {
 	place := "on the host"
 	if view.IsContainer {
 		place = "in a container"
@@ -40,6 +44,15 @@ func shipStatus(at paths.Paths, machine Machine, ship string) (answer, error) {
 	if len(processes) > 0 {
 		processText = strings.Join(processes, "; ")
 	}
+	for _, unreadable := range view.Unreadable {
+		value := fmt.Sprintf("unreadable: %s: %s", unreadable.Path, unreadable.Error)
+		if unreadable.Fact == "processes" {
+			processText = value
+		}
+		if unreadable.Fact == "activity" {
+			activity = value
+		}
+	}
 	text := []string{
 		fmt.Sprintf("Ship: %s (%s), %s, %s", view.ShipName, view.ShipID, view.Harness, place),
 		fmt.Sprintf("State: %s since %s, %d restarts", view.State, view.Since, view.Restarts),
@@ -47,9 +60,12 @@ func shipStatus(at paths.Paths, machine Machine, ship string) (answer, error) {
 		fmt.Sprintf("Places: ship folder %s, hold %s", view.Places.ShipFolder, view.Places.Hold),
 	}
 	for _, unreadable := range view.Unreadable {
+		if unreadable.Fact == "activity" || unreadable.Fact == "processes" {
+			continue
+		}
 		text = append(text, fmt.Sprintf("Unreadable: %s: %s", unreadable.Path, unreadable.Error))
 	}
-	return answer{data: view, text: strings.Join(text, "\n")}, nil
+	return strings.Join(text, "\n")
 }
 
 func age(elapsed time.Duration) string {
