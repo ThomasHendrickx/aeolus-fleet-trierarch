@@ -6,7 +6,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { aMachine, type Machine, type RunningCommand } from './support/machine.js';
+import { aMachine, runProgram, type Machine, type RunningCommand } from './support/machine.js';
 
 // `aeolus-trierarch logs`: the last lines of the trierarch's log, which on Linux is the journal of its systemd user unit (docs/trierarch.md, "Logs"), and with --follow each line written after (#177).
 
@@ -126,6 +126,46 @@ describe('logs', () => {
         if (current.slice(current.lastIndexOf(')') + 2).split(' ')[19] === start) process.kill(pid, 'SIGKILL');
       } catch { /* The command already ended. */ }
       await command;
+    }
+  });
+
+  it('stops every service process it started when a restart leaves the old one running', async () => {
+    const state = join(machine.machine, 'systemd');
+    const units = join(machine.home, '.config', 'systemd', 'user');
+    mkdirSync(units, { recursive: true });
+    const program = `process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)`;
+    writeFileSync(join(units, 'aeolus-trierarch.service'), `[Service]\nExecStart=${process.execPath} -e "${program}"\n`);
+    const systemctl = join(machine.machine, 'bin', 'systemctl');
+    const env = { HOME: machine.home, USER: 'test', PATH: `${join(machine.machine, 'bin')}:${join(machine.machine, 'tools')}` };
+    let processes: { pid: number; start: string }[] = [];
+    try {
+      expect((await runProgram([systemctl, '--user', 'start'], { cwd: machine.home, env })).status).toBe(0);
+      await wait(200);
+      expect((await runProgram([systemctl, '--user', 'restart'], { cwd: machine.home, env })).status).toBe(0);
+      processes = readFileSync(join(state, 'started'), 'utf8').trim().split('\n').map((line) => {
+        const [pid = '', start = ''] = line.split(' ');
+        return { pid: Number(pid), start };
+      });
+      expect(processes).toHaveLength(2);
+      isRemoved = true;
+      await machine.remove();
+      for (const { pid, start } of processes) {
+        const stat = existsSync(`/proc/${String(pid)}/stat`) ? readFileSync(`/proc/${String(pid)}/stat`, 'utf8') : '';
+        expect(stat === '' || stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] !== start).toBe(true);
+      }
+    } finally {
+      if (processes.length === 0 && existsSync(join(state, 'started'))) {
+        processes = readFileSync(join(state, 'started'), 'utf8').trim().split('\n').map((line) => {
+          const [pid = '', start = ''] = line.split(' ');
+          return { pid: Number(pid), start };
+        });
+      }
+      for (const { pid, start } of processes) {
+        try {
+          const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === start) process.kill(pid, 'SIGKILL');
+        } catch { /* The service already ended. */ }
+      }
     }
   });
 
