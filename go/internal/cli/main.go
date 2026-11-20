@@ -414,6 +414,11 @@ func Main(args []string, machine Machine) (string, int) {
 			return login(at, machine, command)
 		}
 	}
+	if len(command.words) == 2 && command.words[0] == "status" {
+		commands[strings.Join(command.words, " ")] = func() (answer, error) {
+			return shipStatus(at, machine, command.words[1])
+		}
+	}
 	do, isKnown := commands[strings.Join(command.words, " ")]
 	if !isKnown {
 		return usage, 2
