@@ -179,6 +179,33 @@ describe('logs', () => {
     }
   });
 
+  it('finishes teardown when the service manager does not answer', async () => {
+    const units = join(machine.home, '.config', 'systemd', 'user');
+    const pidFile = join(machine.machine, 'hung.pid');
+    const marker = join(machine.machine, 'hung');
+    mkdirSync(units, { recursive: true });
+    writeFileSync(join(units, 'aeolus-trierarch.service'), '[Service]\nExecStart=/bin/true\n');
+    writeFileSync(join(machine.machine, 'bin', 'systemctl'), `#!/bin/bash\nif [ ! -e '${marker}' ]; then touch '${marker}'; echo $$ > '${pidFile}'; exec sleep 120; fi\nexit 0\n`);
+    isRemoved = true;
+    const removing = machine.remove();
+    let recorded: { pid: number; start: string | undefined } | undefined;
+    try {
+      await expect.poll(() => existsSync(pidFile)).toBe(true);
+      const pid = Number(readFileSync(pidFile, 'utf8'));
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      recorded = { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+      expect(await Promise.race([removing.then(() => true), wait(20_000).then(() => false)])).toBe(true);
+    } finally {
+      if (recorded !== undefined) {
+        try {
+          const stat = readFileSync(`/proc/${String(recorded.pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === recorded.start) process.kill(recorded.pid, 'SIGKILL');
+        } catch { /* The service manager already ended. */ }
+      }
+      await removing;
+    }
+  });
+
   it('stops a follower when its assertion fails', async () => {
     written(['ready']);
     const following = machine.start(['logs', '--follow']);
