@@ -127,6 +127,15 @@ async function stopRecorded(recorded: RecordedProcess | undefined): Promise<void
   for (let attempt = 0; attempt < 100 && isRunning(); attempt++) await wait(50);
 }
 
+/** Stops a recorded process and its descendants only while its PID still names it. */
+function stopRecordedTree(recorded: RecordedProcess): void {
+  try {
+    const stat = readFileSync(`/proc/${String(recorded.pid)}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    if (fields[19] === recorded.start) stopProcess(recorded.pid, Number(fields[1]));
+  } catch { /* The process already ended. */ }
+}
+
 /** Stops holds whose PID files and command lines identify this machine's sessions. */
 function stopHolds(home: string): void {
   const sessions = join(home, '.aeolus', 'trierarch', 'sessions');
@@ -317,26 +326,33 @@ exec /usr/bin/id "$@"
 `;
 }
 
-/** Records the exact proxy PID as this machine launches it. */
+/** Records the exact proxy and hold PIDs as this machine launches them. */
 function shStandIn(at: { machine: string; home: string }): string {
   const proxy = join(at.home, '.aeolus', 'trierarch', 'proxy');
-  const recorded = join(at.machine, 'proxy-started-pids');
+  const sessions = join(at.home, '.aeolus', 'trierarch', 'sessions');
+  const proxyRecords = join(at.machine, 'proxy-started-pids');
+  const holdRecords = join(at.machine, 'hold-started-pids');
   return `#!/bin/bash
 if [ "$1" = -c ] && [ "$2" = '"$@" < /dev/null > /dev/null 2>&1 &' ]; then
-  is_proxy=false; is_folder=false; previous=
+  is_proxy=false; is_folder=false; is_hold=false; is_sessions=false; previous=
   for word; do
     [ "$word" = proxy ] && is_proxy=true
+    [ "$word" = hold ] && is_hold=true
     [ "$previous" = --folder ] && [ "$word" = '${proxy}' ] && is_folder=true
+    [ "$previous" = --sessions ] && [ "$word" = '${sessions}' ] && is_sessions=true
     previous="$word"
   done
-  if $is_proxy && $is_folder; then
+  recorded=
+  if $is_proxy && $is_folder; then recorded='${proxyRecords}'; fi
+  if $is_hold && $is_sessions; then recorded='${holdRecords}'; fi
+  if [ -n "$recorded" ]; then
     shift 3
     "$@" < /dev/null > /dev/null 2>&1 &
     pid=$!
     if IFS= read -r stat < "/proc/$pid/stat"; then
       stat="\${stat##*) }"
       set -- $stat
-      [ "$2" = "$$" ] && printf '%s %s\\n' "$pid" "\${20}" >> '${recorded}'
+      [ "$2" = "$$" ] && printf '%s %s\\n' "$pid" "\${20}" >> "$recorded"
     fi
     exit 0
   fi
@@ -644,6 +660,13 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
           return recorded?.start === start ? [recorded] : [];
         }) : [];
         await Promise.all(services.map(stopRecorded));
+        const holdRecords = join(machine, 'hold-started-pids');
+        const holds = existsSync(holdRecords) ? readFileSync(holdRecords, 'utf8').trim().split('\n').flatMap((line) => {
+          const [pid = '', start = ''] = line.split(' ');
+          const recorded = recordProcess(Number(pid));
+          return recorded?.start === start ? [recorded] : [];
+        }) : [];
+        for (const hold of holds) stopRecordedTree(hold);
         stopHolds(home);
         const proxyRecords = join(machine, 'proxy-started-pids');
         const proxies = existsSync(proxyRecords) ? readFileSync(proxyRecords, 'utf8').trim().split('\n').flatMap((line) => {
