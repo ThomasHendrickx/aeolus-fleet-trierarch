@@ -103,7 +103,7 @@ it('closes the plugin fleet when setup fails before the door starts', async () =
 }, 180_000);
 
 
-it.each(['ignore', 'exit'])('stops a machine command and its child when it would %s on interrupt', async (ending) => {
+it.each(['ignore', 'exit', 'interrupt'])('stops a machine command and its child in %s mode', async (ending) => {
   const folder = mkdtempSync(join(tmpdir(), 'command-cleanup-'));
   const pidsFile = join(folder, 'pids');
   const config = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'command-vitest.config.ts');
