@@ -7,6 +7,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 
 import { onTestFinished } from 'vitest';
 
+import { stopProcess } from '../../scripts/support/test-process.js';
 import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
 /**
@@ -565,9 +566,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
           const isGoing = (): boolean => child.pid !== undefined && child.exitCode === null && child.signalCode === null;
           if (!isGoing()) return;
           const ended = new Promise<void>((resolve) => { child.once('exit', () => { resolve(); }); });
-          child.kill('SIGTERM');
-          await Promise.race([ended, wait(1_000)]);
-          if (isGoing()) child.kill('SIGKILL');
+          if (child.pid !== undefined) stopProcess(child.pid, process.pid);
           await ended;
         }));
         await trierarch(['uninstall']);

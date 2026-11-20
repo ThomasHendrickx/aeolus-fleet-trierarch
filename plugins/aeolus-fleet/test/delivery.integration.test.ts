@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type ShipCaller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
 
+import { stopProcess } from '../../../scripts/support/test-process.js';
 import { scriptEnvironment } from './script-environment.js';
 
 // The aeolus-fleet plugin's scripts against a real fleet (#819): the watcher and the
@@ -184,25 +185,6 @@ beforeEach(async () => {
   const sessionFolder = folder;
   onTestFinished(() => { rmSync(sessionFolder, { recursive: true, force: true }); });
 });
-
-/** Stops only the process and descendants started by this test, by their individual PIDs. */
-function stopProcess(pid: number, parent: number): void {
-  try {
-    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
-    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    if (Number(fields[1]) !== parent) return;
-    const started = fields[19];
-    process.kill(pid, 'SIGSTOP');
-    const children = (() => {
-      try { return readFileSync(`/proc/${String(pid)}/task/${String(pid)}/children`, 'utf8').trim(); } catch { return ''; }
-    })();
-    for (const child of children.split(' ').filter(Boolean).map(Number)) stopProcess(child, pid);
-    const current = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
-    if (current.slice(current.lastIndexOf(')') + 2).split(' ')[19] === started) process.kill(pid, 'SIGKILL');
-  } catch {
-    // The process ended while it was being stopped.
-  }
-}
 
 /** Runs a script until it ends, or stops its recorded process tree at test teardown. */
 function start(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}) {
