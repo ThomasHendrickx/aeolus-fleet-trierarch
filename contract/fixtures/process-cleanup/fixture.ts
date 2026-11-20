@@ -21,7 +21,11 @@ it('ends with the test resources still in use', async () => {
   const proxy = Number(readFileSync(proxyFile, 'utf8'));
   expect(service).toBeGreaterThan(1);
   expect(proxy).toBeGreaterThan(1);
-  writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify([process.pid, service, proxy]));
+  const recorded = [process.pid, service, proxy].map((pid) => {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    return { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+  });
+  writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify(recorded));
   if (process.env.PROCESS_CLEANUP_ENDING === 'timeout') {
     await wait(120_000);
   } else if (process.env.PROCESS_CLEANUP_ENDING === 'failure') {

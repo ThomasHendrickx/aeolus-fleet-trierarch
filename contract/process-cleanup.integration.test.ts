@@ -11,8 +11,15 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const VITEST = join(ROOT, 'node_modules', 'vitest', 'vitest.mjs');
 const CONFIG = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'vitest.config.ts');
 
-function isRunning(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+const processSchema = z.object({ pid: z.number().int().positive(), start: z.string() });
+type RecordedProcess = z.infer<typeof processSchema>;
+
+function isRunning(recorded: RecordedProcess): boolean {
+  try {
+    const stat = readFileSync(`/proc/${String(recorded.pid)}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return fields[0] !== 'Z' && fields[19] === recorded.start;
+  } catch { return false; }
 }
 
 it.each(['success', 'failure', 'timeout'])('leaves no fleet, service or proxy process after a test %s', async (ending) => {
@@ -30,13 +37,13 @@ it.each(['success', 'failure', 'timeout'])('leaves no fleet, service or proxy pr
     child.on('error', reject);
     child.on('close', resolve);
   });
-  const pids = existsSync(pidsFile) ? z.tuple([z.number(), z.number(), z.number()]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
+  const pids = existsSync(pidsFile) ? z.tuple([processSchema, processSchema, processSchema]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
   try {
     expect(exited, output).toBe(ending === 'success' ? 0 : 1);
     expect(pids, output).toHaveLength(3);
     expect(pids.filter(isRunning), output).toEqual([]);
   } finally {
-    for (const pid of pids) if (isRunning(pid)) process.kill(pid, 'SIGKILL');
+    for (const recorded of pids) if (isRunning(recorded)) process.kill(recorded.pid, 'SIGKILL');
     rmSync(folder, { recursive: true, force: true });
   }
 }, 180_000);
@@ -58,13 +65,13 @@ it.each(['failure', 'timeout'])('leaves no plugin command or fleet worker after 
     child.on('error', reject);
     child.on('close', resolve);
   });
-  const pids = existsSync(pidsFile) ? z.tuple([z.number(), z.number()]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
+  const pids = existsSync(pidsFile) ? z.tuple([processSchema, processSchema]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
   try {
     expect(exited, output).toBe(1);
     expect(pids, output).toHaveLength(2);
     expect(pids.filter(isRunning), output).toEqual([]);
   } finally {
-    for (const pid of pids) if (isRunning(pid)) process.kill(pid, 'SIGKILL');
+    for (const recorded of pids) if (isRunning(recorded)) process.kill(recorded.pid, 'SIGKILL');
     rmSync(folder, { recursive: true, force: true });
   }
 }, 180_000);

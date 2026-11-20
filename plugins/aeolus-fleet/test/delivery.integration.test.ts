@@ -396,7 +396,11 @@ describe('the plugin on a real fleet: a delivery the fleet refuses is dropped, a
 it.skipIf(process.env.PROCESS_CLEANUP_PLUGIN !== '1')('plugin process cleanup fixture', async () => {
   const running = start('../test/fixtures/process-cleanup/sleep.sh');
   expect(running.pid).toBeDefined();
-  writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify([process.pid, running.pid]));
+  const recorded = [process.pid, running.pid].map((pid) => {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    return { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+  });
+  writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify(recorded));
   if (process.env.PROCESS_CLEANUP_ENDING === 'timeout') {
     await new Promise((resolve) => setTimeout(resolve, 120_000));
   } else {
