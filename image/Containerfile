@@ -1,0 +1,69 @@
+# The session image (decision 0039): one trierarch session per container, with
+# the harness, the aeolus-fleet plugin of this image's version, Playwright's
+# browser dependencies and a nested rootless Podman for a repository's tests.
+#
+# Built from the repository root, with the version set on the packages and the
+# plugin first (npm run set-version), so the plugin carries the image's version:
+#   podman build --file image/Containerfile --build-arg VERSION=<version> .
+FROM docker.io/library/ubuntu:24.04
+
+ARG VERSION
+ARG NODE_MAJOR=26
+ARG CLAUDE_CODE_VERSION=latest
+ARG PLAYWRIGHT_VERSION=1.63.0
+
+LABEL org.opencontainers.image.title="aeolus-session" \
+      org.opencontainers.image.description="An Aeolus trierarch session: Claude Code, the aeolus-fleet plugin and a nested rootless Podman" \
+      org.opencontainers.image.source="https://github.com/ThomasHendrickx/aeolus-fleet-trierarch" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${VERSION}"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Every step that reaches the network goes through aeolus-retry: up to 6 runs,
+# pausing 5, 10, 20 and 40 seconds between them, so an outage of a few minutes
+# of the package servers does not fail the build (issue 559).
+COPY image/retry.sh /usr/local/bin/aeolus-retry
+RUN chmod +x /usr/local/bin/aeolus-retry \
+ && /usr/local/bin/aeolus-retry 6 5 apt-get update \
+ && aeolus-retry 6 5 apt-get install --yes --no-install-recommends \
+      ca-certificates curl gh git gnupg jq less openssh-client tini \
+      podman uidmap fuse-overlayfs slirp4netns passt \
+ && aeolus-retry 6 5 bash -c 'set -o pipefail; curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash -' \
+ && aeolus-retry 6 5 apt-get install --yes --no-install-recommends nodejs \
+ && aeolus-retry 6 5 npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
+ && aeolus-retry 6 5 npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+ && npm cache clean --force \
+ && rm -rf /var/lib/apt/lists/* /root/.npm
+
+# The nested rootless Podman: the session user (ubuntu, uid 1000) gets the
+# ids the outer container maps above its own; the id maps need setuid helpers.
+# Without systemd: cgroups, events and sysctls are left to the outer runtime,
+# and storage goes through fuse-overlayfs, since overlay cannot stack on overlay.
+RUN chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap \
+ && echo 'ubuntu:1001:64535' > /etc/subuid \
+ && echo 'ubuntu:1001:64535' > /etc/subgid
+COPY image/containers.conf /etc/containers/containers.conf
+COPY image/storage.conf /etc/containers/storage.conf
+COPY image/session-init.sh /usr/local/bin/aeolus-session-init
+
+# The aeolus-fleet plugin of this version, from its marketplace in the image.
+COPY .claude-plugin/marketplace.json /opt/aeolus-fleet/.claude-plugin/marketplace.json
+COPY plugins/aeolus-fleet /opt/aeolus-fleet/plugins/aeolus-fleet
+
+USER ubuntu
+WORKDIR /home/ubuntu
+RUN claude plugin marketplace add /opt/aeolus-fleet \
+ && claude plugin install aeolus-fleet@aeolus-fleet
+
+# The trierarch mounts a home of the ship's own over /home/ubuntu, so the
+# plugin's install and the settings that enable it live outside the home; the
+# init links them into whatever home the container has at every start.
+USER root
+RUN mkdir -p /opt/aeolus-session \
+ && mv /home/ubuntu/.claude/plugins /opt/aeolus-session/plugins \
+ && mv /home/ubuntu/.claude/settings.json /opt/aeolus-session/settings.json
+USER ubuntu
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/aeolus-session-init"]
+CMD ["sleep", "infinity"]

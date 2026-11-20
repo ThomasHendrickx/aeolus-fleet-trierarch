@@ -26,7 +26,7 @@ describe('the npm-only check', () => {
     expect(packageManagerProblems(repository.path)).toEqual([]);
   });
 
-  it.each(['pnpm-lock.yaml', 'yarn.lock', 'packages/trierarch/yarn.lock'])('refuses a tracked %s', (lockfile) => {
+  it.each(['pnpm-lock.yaml', 'yarn.lock', 'contract/yarn.lock'])('refuses a tracked %s', (lockfile) => {
     repository.write('package.json', manifest({ packageManager: 'npm@11.19.1' }));
     repository.write(lockfile, '');
     repository.commit('chore: another lockfile');

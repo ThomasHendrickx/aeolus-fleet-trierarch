@@ -11,11 +11,11 @@ import { createTemporaryRepository, type TemporaryRepository } from './support/t
 const config = `export default {
   test: {
     projects: [
-      { test: { name: 'trierarch:unit', root: 'packages/trierarch', include: ['src/**/*.test.ts'] } },
+      { test: { name: 'trierarch:unit', root: 'contract', include: ['core/**/*.test.ts'] } },
       {
         test: {
           name: 'trierarch:integration',
-          root: 'packages/trierarch',
+          root: 'contract',
           include: ['test/**/*.integration.test.ts'],
         },
       },
@@ -29,8 +29,8 @@ let repository: TemporaryRepository;
 beforeEach(() => {
   repository = createTemporaryRepository();
   repository.write('vitest.config.js', config);
-  repository.write('packages/trierarch/src/core/ping.test.ts', 'test\n');
-  repository.write('packages/trierarch/test/api.integration.test.ts', 'test\n');
+  repository.write('contract/core/ping.test.ts', 'test\n');
+  repository.write('contract/test/api.integration.test.ts', 'test\n');
 });
 
 afterEach(() => {
@@ -45,8 +45,8 @@ describe('the test project check', () => {
   });
 
   it.each([
-    'packages/trierarch/test/api.test.ts',
-    'packages/trierarch/src/adapters/tmux.test.tsx',
+    'contract/test/api.test.ts',
+    'contract/adapters/tmux.test.tsx',
     'scripts/set-version.test.ts',
   ])('refuses %s, which no project runs', async (file) => {
     repository.write(file, 'test\n');
@@ -59,7 +59,7 @@ describe('the test project check', () => {
 
   it('looks only at files git tracks', async () => {
     repository.commit('test: covered');
-    repository.write('packages/trierarch/src/scratch.test.ts', 'test\n');
+    repository.write('contract/scratch.test.ts', 'test\n');
 
     await expect(testProjectProblems(repository.path)).resolves.toEqual([]);
   });

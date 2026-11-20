@@ -9,7 +9,6 @@ import { z } from 'zod';
 import { aCrewingMachine, sessionOf, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
-import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // A session on its subscription never starts with a key in reach (docs/trierarch.md, "API keys", K6 and K2): what Claude Code reads itself would give it a key, so the request is given back while its crew is not final, and the ship waits once it is.
 
@@ -40,9 +39,7 @@ afterEach(async ({ task }) => {
 
 /** Claude Code's user settings, as it reads them. */
 function userSettings(): string {
-  return isTodaysTrierarch
-    ? join(machine.trierarchHome, 'ships', scout, 'home', '.claude', 'settings.json')
-    : join(machine.home, '.claude', 'settings.json');
+  return join(machine.home, '.claude', 'settings.json');
 }
 
 /** Gives Claude Code's user settings an `apiKeyHelper`, keeping what init wrote there. */

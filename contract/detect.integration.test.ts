@@ -8,7 +8,6 @@ import { z } from 'zod';
 import { aCrewingMachine, setupLineOf, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine, type OtherHarness } from './support/machine.js';
-import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // What a trierarch detects each harness offers, kept in detected.json and given by `aeolus-trierarch detect` (docs/trierarch.md, "Detected options").
 
@@ -113,17 +112,16 @@ describe('init', () => {
     expect([detected()['claude-code']?.confirmedAt, detected().codex?.confirmedAt]).toEqual([expect.stringMatching(A_TIME), expect.stringMatching(A_TIME)]);
   });
 
-  it("says each harness's line: the Node trierarch what it offers, the Go trierarch its version, sign-in, plugin and permission mode in the closing checks", async () => {
+  it("says each harness's version, sign-in, plugin and permission mode in the closing checks", async () => {
     fleet = await aFleet();
     machine = await aMachine();
 
     // The Go trierarch's closing screen lists the setup choices (aeolus-fleet docs/design/computer-setup/after.md, A4); its checks under --json keep each harness's line.
-    const init = await machine.trierarch(isTodaysTrierarch ? setupLineOf(fleet) : [...setupLineOf(fleet), '--json'], { input: fleet.trierarchShip.secret });
+    const init = await machine.trierarch([...setupLineOf(fleet), '--json'], { input: fleet.trierarchShip.secret });
 
     expect(init.status, init.stdout + init.stderr).toBe(0);
-    const nodeLine = new RegExp(`claude-code ${CLAUDE_CODE_VERSION}: model claude-sonnet-5, claude-opus-5; effort low, medium, high; models confirmed \\d{4}-\\d{2}-\\d{2}T`);
     const closingCheck = new RegExp(`"detail": "${escaped(CLAUDE_CODE_VERSION)}, signed in, aeolus-fleet plugin \\S+, (asks before each command|runs without permission questions)"`);
-    expect(init.stdout).toMatch(isTodaysTrierarch ? nodeLine : closingCheck);
+    expect(init.stdout).toMatch(closingCheck);
   });
 });
 
@@ -299,7 +297,7 @@ describe('config check', () => {
     expect(lines).toContain(`  first start: ${claude}`);
     expect(lines).toContain(`  restart: ${claude} --continue (adapter)`);
     const codex = 'codex exec -m gpt-5.6-terra (configuration) --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) ';
-    // The ChatGPT apps are off in the Go trierarch's sessions (#329); today's npm trierarch, kept for existing machines, starts Codex without it.
+    // The ChatGPT apps are off in the Go trierarch's sessions (#329); sessions start Codex with apps disabled.
     const noApps = '(?:--config=features\\.apps=false \\(adapter\\) )?';
     expect(lines.find((line) => line.startsWith('  first start: codex'))).toMatch(new RegExp(`^  first start: ${escaped(codex)}${noApps}-- "<first prompt>\\\\n\\\\nNo human reads this terminal\\.`));
     expect(lines.find((line) => line.startsWith('  restart: codex'))).toMatch(new RegExp(`^  restart: codex exec resume --last -m gpt-5.6-terra \\(configuration\\) --json`));

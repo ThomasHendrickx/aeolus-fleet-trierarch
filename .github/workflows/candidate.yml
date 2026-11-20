@@ -1,9 +1,4 @@
-# Builds a candidate of the trierarch's release train (decision 0049):
-# @aeolus-fleet/trierarch at the version it will be released as, packed with npm
-# pack and uploaded with its integrity.json as the Actions artifact
-# <version>-<short sha>. It publishes and tags nothing (decision 0011): staging
-# tries the candidate before the release. The session image and the aeolus
-# plugin are the release's alone.
+# Builds the versioned aeolus-fleet plugin candidate for the staging gate.
 name: Candidate
 
 on:
@@ -74,21 +69,21 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: npm run set-version -- "$VERSION"
 
-      - run: npm run build
-
-      # integrity.json: each tarball's name, version, file and sha512 integrity, which npm's dist.integrity equals once published.
-      - name: Pack the trierarch
+      - name: Pack the aeolus-fleet plugin
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           mkdir "$RUNNER_TEMP/candidate"
-          npm pack --json --workspace @aeolus-fleet/trierarch \
-            --pack-destination "$RUNNER_TEMP/candidate" \
-            | node -e '
-              const packed = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-              const manifest = packed.map(({ name, version, filename, integrity }) => ({ name, version, filename, integrity }));
-              process.stdout.write(JSON.stringify(manifest, null, 2) + "\n");
-            ' > "$RUNNER_TEMP/candidate/integrity.json"
-          ls -l "$RUNNER_TEMP/candidate"
-          cat "$RUNNER_TEMP/candidate/integrity.json"
+          tar --exclude=test -czf "$RUNNER_TEMP/candidate/aeolus-fleet-plugin-$VERSION.tgz" plugins/aeolus-fleet .claude-plugin .agents/plugins
+          node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { readFileSync, writeFileSync } from "node:fs";
+            const version = process.env.VERSION;
+            const filename = `aeolus-fleet-plugin-${version}.tgz`;
+            const folder = `${process.env.RUNNER_TEMP}/candidate`;
+            const integrity = `sha512-${createHash("sha512").update(readFileSync(`${folder}/${filename}`)).digest("base64")}`;
+            writeFileSync(`${folder}/integrity.json`, JSON.stringify([{ name: "aeolus-fleet-plugin", version, filename, integrity }], null, 2) + "\n");
+          '
 
       - name: Name the candidate
         id: name

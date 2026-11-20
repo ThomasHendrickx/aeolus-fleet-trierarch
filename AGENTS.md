@@ -2,7 +2,7 @@
 
 ## What it is
 
-`@aeolus-fleet/trierarch`: a process on each machine, crewing the ships of an Aeolus fleet assigned to it, keeping their Claude Code and Codex sessions running and waking them. With it: the aeolus-fleet plugin (`plugins/aeolus-fleet`), with which a Claude Code or Codex session crews a ship; its marketplaces for both harnesses (`.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`); and the session image (`packages/trierarch/image`). Aeolus's promises: aeolus-fleet's [blueprint](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/blueprint.md).
+`aeolus-trierarch`: a Go binary on each machine, crewing the ships of an Aeolus fleet assigned to it, keeping their Claude Code and Codex sessions running and waking them. With it: the aeolus-fleet plugin (`plugins/aeolus-fleet`), with which a Claude Code or Codex session crews a ship; its marketplaces for both harnesses (`.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`); and the session image (`image`). Aeolus's promises: aeolus-fleet's [blueprint](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/blueprint.md).
 
 ## Source of truth
 
@@ -24,7 +24,7 @@ If the docs do not answer a behaviour question, stop and ask. Never decide produ
 
 ## Architecture rules
 
-- Ports and adapters. `packages/trierarch/src/core` holds domain, use cases and ports, with no framework, adapter or core imports; it reads no clock and never throws. The lint rule enforces it; never disable it.
+- Ports and adapters: the Go implementation lives in `go/`.
 - Core only through `/api/v1` and `@aeolus-fleet/common`: the calls listed for the trierarch and the aeolus-fleet plugin in aeolus-fleet's [docs/compatibility.md](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/compatibility.md).
 - The trierarch reaches the plugin only through the plugin's own scripts (`aeolus-identity.sh`, `aeolus-push.sh`), never a copy of what they do.
 - `MINIMUM_CORE_VERSION` is raised in the same PR that needs a newer core.
@@ -35,7 +35,7 @@ Load the matching skills from `.claude/skills/` (Codex: `.agents/skills/`) befor
 
 - `software-development`: every code change.
 - `test-driven-development` and `aeolus-fleet-trierarch`: every code change. Strict red, green, refactor (decision 0014).
-- `domain-modelling`: anything under `packages/trierarch/src/core` or `packages/trierarch/src/adapters`.
+- `domain-modelling`: server domain logic and adapters.
 - `typescript`: every `.ts` change.
 - `go`: every `.go` change.
 - `performance`: designing or building an API, a query, a list or a page that reads data.

@@ -8,8 +8,8 @@ let base: string;
 
 beforeEach(() => {
   repository = createTemporaryRepository();
-  repository.write('packages/trierarch/src/core/rules.ts', 'export const fleet = 1;\n');
-  repository.write('packages/trierarch/src/core/rules.test.ts', 'test 1\n');
+  repository.write('go/core/rules.ts', 'export const fleet = 1;\n');
+  repository.write('go/core/rules.test.ts', 'test 1\n');
   base = repository.commit('feat(trierarch): fleet');
 });
 
@@ -22,12 +22,12 @@ function violations(head: string): string[] {
 }
 
 function red(subject = 'test(trierarch): fleet name rule (red)'): string {
-  repository.write('packages/trierarch/src/core/rules.test.ts', `test ${subject}\n`);
+  repository.write('go/core/rules.test.ts', `test ${subject}\n`);
   return repository.commit(subject);
 }
 
 function green(subject = 'feat(trierarch): fleet name rule'): string {
-  repository.write('packages/trierarch/src/core/rules.ts', `export const fleet = '${subject}';\n`);
+  repository.write('go/core/rules.ts', `export const fleet = '${subject}';\n`);
   return repository.commit(subject);
 }
 
@@ -52,7 +52,7 @@ describe('the TDD evidence check', () => {
     const head = green('feat(trierarch): untested');
 
     expect(violations(head)).toEqual([
-      `${head.slice(0, 12)} "feat(trierarch): untested" changes production code (packages/trierarch/src/core/rules.ts), but the commit before it is not a (red) commit that only adds, changes or deletes tests`,
+      `${head.slice(0, 12)} "feat(trierarch): untested" changes production code (go/core/rules.ts), but the commit before it is not a (red) commit that only adds, changes or deletes tests`,
     ]);
   });
 
@@ -74,8 +74,8 @@ describe('the TDD evidence check', () => {
   });
 
   it('refuses the code after a (red) commit that also changes production code', () => {
-    repository.write('packages/trierarch/src/core/rules.test.ts', 'test red\n');
-    repository.write('packages/trierarch/src/core/supply.ts', 'export const supply = 1;\n');
+    repository.write('go/core/rules.test.ts', 'test red\n');
+    repository.write('go/core/supply.ts', 'export const supply = 1;\n');
     repository.commit('test(trierarch): fleet name rule (red)');
     const head = green();
 
@@ -83,7 +83,7 @@ describe('the TDD evidence check', () => {
   });
 
   it('refuses a (red) commit that changes anything but tests', () => {
-    repository.write('packages/trierarch/src/core/rules.test.ts', 'test red\n');
+    repository.write('go/core/rules.test.ts', 'test red\n');
     repository.write('docs/notes.md', 'notes\n');
     repository.commit('test(trierarch): fleet name rule (red)');
     const head = green();
@@ -99,7 +99,7 @@ describe('the TDD evidence check', () => {
   });
 
   it('passes a (red) commit that deletes a test', () => {
-    repository.remove('packages/trierarch/src/core/rules.test.ts');
+    repository.remove('go/core/rules.test.ts');
     repository.commit('test(trierarch): drop a test (red)');
     const head = green();
 
@@ -129,7 +129,7 @@ describe('the TDD evidence check', () => {
   );
 
   it('refuses a feat commit that only deletes production code without a (red) commit', () => {
-    repository.remove('packages/trierarch/src/core/rules.ts');
+    repository.remove('go/core/rules.ts');
     const head = repository.commit('feat(trierarch): remove fleet');
 
     expect(violations(head)).toHaveLength(1);
@@ -158,7 +158,7 @@ describe('the TDD evidence check', () => {
   });
 
   it('takes test support in a test folder and end-to-end tests as tests', () => {
-    repository.write('packages/trierarch/test/support/in-memory.ts', 'fake\n');
+    repository.write('go/test/support/in-memory.ts', 'fake\n');
     repository.write('e2e/plugin-session.e2e.test.ts', 'test\n');
     repository.commit('test(trierarch): an in-memory fake (red)');
     const head = green();
@@ -179,26 +179,26 @@ describe('the TDD evidence check', () => {
     repository.write('go/trierarch/crew/crew_test.go', 'package crew\n');
     repository.commit('test(trierarch): crew a ship (red)');
     repository.write('go/trierarch/crew/crew.go', 'package crew\n');
-    repository.write('packages/trierarch/src/core/rules.ts', "export const fleet = 'crew';\n");
+    repository.write('go/core/rules.ts', "export const fleet = 'crew';\n");
     const head = repository.commit('feat(trierarch): crew a ship');
 
     expect(violations(head)).toEqual([]);
   });
 
   it('judges every file in src, adapters included', () => {
-    repository.write('packages/trierarch/src/adapters/rest-fleet.ts', 'export const door = 1;\n');
+    repository.write('go/adapters/rest-fleet.ts', 'export const door = 1;\n');
     const head = repository.commit('feat(trierarch): a door');
 
     expect(violations(head)).toEqual([
-      expect.stringContaining('changes production code (packages/trierarch/src/adapters/rest-fleet.ts)'),
+      expect.stringContaining('changes production code (go/adapters/rest-fleet.ts)'),
     ]);
   });
 
   it('does not judge tests, docs, scripts, config or Markdown in src', () => {
-    repository.write('packages/trierarch/src/core/rules.test.ts', 'test only\n');
+    repository.write('go/core/rules.test.ts', 'test only\n');
     repository.commit('test(trierarch): more cases');
-    repository.write('packages/trierarch/src/core/README.md', '# Network\n');
-    repository.write('packages/trierarch/tsconfig.build.json', 'config\n');
+    repository.write('go/core/README.md', '# Network\n');
+    repository.write('tsconfig.json', 'config\n');
     repository.write('scripts/set-version.ts', 'script\n');
     repository.write('docs/blueprint.md', 'blueprint\n');
     const head = repository.commit('docs: many things');
@@ -217,7 +217,7 @@ describe('the TDD evidence check', () => {
     red();
     green();
     repository.git(['switch', '--quiet', 'main']);
-    repository.write('packages/trierarch/src/core/supply.ts', 'export const supply = 1;\n');
+    repository.write('go/core/supply.ts', 'export const supply = 1;\n');
     const movedBase = repository.commit('feat(trierarch): supply, merged on main meanwhile');
     repository.git(['switch', '--quiet', 'slice']);
     repository.git(['merge', '--quiet', '--no-edit', 'main']);
@@ -229,9 +229,9 @@ describe('the TDD evidence check', () => {
   });
 
   it('reads renames with their previous path', () => {
-    repository.git(['mv', 'packages/trierarch/src/core/rules.test.ts', 'packages/trierarch/src/core/rules-name.test.ts']);
+    repository.git(['mv', 'go/core/rules.test.ts', 'go/core/rules-name.test.ts']);
     repository.commit('test(trierarch): rename the test (red)');
-    repository.git(['mv', 'packages/trierarch/src/core/rules.ts', 'packages/trierarch/src/core/rules-name.ts']);
+    repository.git(['mv', 'go/core/rules.ts', 'go/core/rules-name.ts']);
     const head = repository.commit('refactor(trierarch): rename the module');
 
     const commits = readCommits(repository.path, { base, head });
@@ -239,15 +239,15 @@ describe('the TDD evidence check', () => {
       [
         {
           status: 'R100',
-          previousPath: 'packages/trierarch/src/core/rules.test.ts',
-          path: 'packages/trierarch/src/core/rules-name.test.ts',
+          previousPath: 'go/core/rules.test.ts',
+          path: 'go/core/rules-name.test.ts',
         },
       ],
       [
         {
           status: 'R100',
-          previousPath: 'packages/trierarch/src/core/rules.ts',
-          path: 'packages/trierarch/src/core/rules-name.ts',
+          previousPath: 'go/core/rules.ts',
+          path: 'go/core/rules-name.ts',
         },
       ],
     ]);
@@ -257,10 +257,10 @@ describe('the TDD evidence check', () => {
 
 describe('what counts as a test and as production code', () => {
   it.each([
-    'packages/trierarch/src/core/rules.test.ts',
-    'packages/trierarch/src/adapters/tmux.test.ts',
-    'packages/trierarch/test/support/in-memory.ts',
-    'packages/trierarch/test/trierarch.integration.test.ts',
+    'go/core/rules.test.ts',
+    'go/adapters/tmux.test.ts',
+    'go/test/support/in-memory.ts',
+    'go/test/trierarch.integration.test.ts',
     'e2e/support/free-port.ts',
     'go/trierarch/crew/crew_test.go',
     'crew_test.go',
@@ -270,15 +270,15 @@ describe('what counts as a test and as production code', () => {
   });
 
   it.each([
-    'packages/trierarch/src/core/rules.ts',
-    'packages/trierarch/src/adapters/tmux.ts',
-    'packages/trierarch/src/cli/main.ts',
-    'packages/trierarch/src/index.ts',
+    'go/core/rules.ts',
+    'go/adapters/tmux.ts',
+    'go/cli/main.ts',
+    'go/index.ts',
   ])('%s is production code', (path) => {
     expect(isProductionFile(path)).toBe(true);
   });
 
-  it.each(['packages/trierarch/src/core/README.md', 'scripts/set-version.ts', 'packages/trierarch/tsconfig.build.json'])(
+  it.each(['go/core/README.md', 'scripts/set-version.ts', 'tsconfig.json'])(
     '%s is not judged',
     (path) => {
       expect(isProductionFile(path)).toBe(false);

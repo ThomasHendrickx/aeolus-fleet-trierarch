@@ -71,19 +71,6 @@ export default defineConfig({
       {
         extends: true,
         test: {
-          name: 'trierarch:unit',
-          // Real git, container and process operations need scheduling room under concurrent load.
-          testTimeout: 60_000,
-          root: 'packages/trierarch',
-          include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
-          exclude: [...configDefaults.exclude, '**/*.integration.test.ts'],
-          // Removes the containers and test images an earlier run left, and this run's after it (#345).
-          globalSetup: ['test/support/test-run.global-setup.ts'],
-        },
-      },
-      {
-        extends: true,
-        test: {
           // The aeolus Claude Code plugin's bash scripts, run against a stub fleet.
           name: 'plugin:unit',
           root: 'plugins/aeolus-fleet',
@@ -91,18 +78,6 @@ export default defineConfig({
           exclude: [...configDefaults.exclude, '**/*.integration.test.ts'],
           setupFiles: ['test/foreign-harness.setup.ts'],
           testTimeout: 30_000,
-        },
-      },
-      {
-        extends: true,
-        test: {
-          // The trierarch against a real fleet server, in the shared container.
-          name: 'trierarch:integration',
-          root: 'packages/trierarch',
-          include: ['test/**/*.integration.test.ts'],
-          globalSetup: [postgresGlobalSetup],
-          testTimeout: 30_000,
-          hookTimeout: 180_000,
         },
       },
       {

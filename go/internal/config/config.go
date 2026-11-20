@@ -1,9 +1,5 @@
-// Package config is the trierarch's configuration, `~/.aeolus/trierarch/config.json`
-// (docs/architecture.md, "Files on the machine"), in the shape common's schema
-// gives it with what the trierarch adds. The Go trierarch has no common to
-// import: it embeds the JSON Schema today's trierarch writes
-// (config.schema.json, written again with `npm run go:schema`), and a test
-// holds these types to it.
+// Package config is the trierarch's configuration, `~/.aeolus/trierarch/config.json`.
+// It embeds config.schema.json; a test holds the Go types to that schema.
 package config
 
 import (
