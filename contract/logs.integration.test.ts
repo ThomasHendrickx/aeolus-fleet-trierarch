@@ -89,6 +89,25 @@ describe('logs', () => {
     }
   });
 
+  it('leaves an unrelated process named by a stale service pid file running', async () => {
+    const child = spawn('sleep', ['60']);
+    const ended = once(child, 'exit');
+    const state = join(machine.machine, 'systemd');
+    const units = join(machine.home, '.config', 'systemd', 'user');
+    mkdirSync(state, { recursive: true });
+    mkdirSync(units, { recursive: true });
+    writeFileSync(join(state, 'pid'), String(child.pid));
+    writeFileSync(join(units, 'aeolus-trierarch.service'), '[Service]\nExecStart=/bin/true\n');
+    try {
+      isRemoved = true;
+      await machine.remove();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await ended;
+    }
+  });
+
   it('stops a follower when its assertion fails', async () => {
     written(['ready']);
     const following = machine.start(['logs', '--follow']);
