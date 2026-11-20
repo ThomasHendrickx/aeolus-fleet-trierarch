@@ -1973,6 +1973,21 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
       expect(trierarch.state.current().notOffered).toBeUndefined();
     });
 
+    it('offers Codex again and reports a lower reading after an early reset without ship work (#563)', async () => {
+      const trierarch = aTrierarch(WITH_CODEX);
+      trierarch.usage.subscriptions.set('codex', [windowOf({ windowMinutes: WEEK, usedPercent: 100, resetsAt: '2026-10-12T08:00:00.000Z' })]);
+      await trierarch.pass();
+      expect(trierarch.state.current().notOffered?.[0]?.harness).toBe('codex');
+      trierarch.usage.subscriptions.set('codex', [windowOf({ windowMinutes: WEEK, usedPercent: 10, resetsAt: '2026-10-13T08:00:00.000Z' })]);
+      trierarch.clock.advance(30 * MINUTE_MS);
+
+      await trierarch.pass();
+      await trierarch.reportSelf();
+
+      expect(trierarch.state.current().notOffered).toBeUndefined();
+      expect(trierarch.fleet.selfReports.at(-1)?.details.usage?.subscriptions.find(({ harness }) => harness === 'codex')?.windows[0]?.usedPercent).toBe(10);
+    });
+
     it('is offered while no window is used up', async () => {
       const trierarch = aTrierarch(WITH_CODEX);
       trierarch.usage.subscriptions.set('codex', [windowOf({ windowMinutes: FIVE_HOURS, usedPercent: 99, resetsAt: RESET }), windowOf({ windowMinutes: WEEK, usedPercent: 40, resetsAt: '2026-10-12T08:00:00.000Z' })]);
