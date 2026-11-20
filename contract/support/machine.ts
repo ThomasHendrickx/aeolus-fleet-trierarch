@@ -323,7 +323,6 @@ function shStandIn(at: { machine: string; home: string }): string {
   const recorded = join(at.machine, 'proxy-started-pids');
   return `#!/bin/bash
 if [ "$1" = -c ] && [ "$2" = '"$@" < /dev/null > /dev/null 2>&1 &' ]; then
-  shift 3
   is_proxy=false; is_folder=false; previous=
   for word; do
     [ "$word" = proxy ] && is_proxy=true
@@ -331,6 +330,7 @@ if [ "$1" = -c ] && [ "$2" = '"$@" < /dev/null > /dev/null 2>&1 &' ]; then
     previous="$word"
   done
   if $is_proxy && $is_folder; then
+    shift 3
     "$@" < /dev/null > /dev/null 2>&1 &
     pid=$!
     if IFS= read -r stat < "/proc/$pid/stat"; then
