@@ -89,7 +89,7 @@ func TestShipStatusShowsLocalFactsByNameOrIDWithoutCredentials(t *testing.T) {
 						t.Fatalf("places = %v", got.Places)
 					}
 				} else {
-					want := "Ship: design-tri-271c (shp_one), claude-code, on the host\nState: running since 2026-11-20T13:30:12+01:00, 0 restarts\nSession: exited, hold pid 999999999, session session-one\nActivity: tool Bash, 12s ago\nProcesses: none\nPlaces: ship folder " + filepath.Join(at.Ships, "shp_one", "repositories") + ", hold " + filepath.Join(at.Sessions, "shp_one")
+					want := "Ship: design-tri-271c (shp_one), claude-code, on the host\nState: running since 2026-11-20T13:30:12+01:00, 0 restarts\nActivity: tool Bash, 12s ago\nProcesses: none\nPlaces: ship folder " + filepath.Join(at.Ships, "shp_one", "repositories") + ", hold " + filepath.Join(at.Sessions, "shp_one")
 					if out != want {
 						t.Fatalf("status = %s\nwant %s", out, want)
 					}
