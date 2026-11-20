@@ -103,14 +103,14 @@ it('closes the plugin fleet when setup fails before the door starts', async () =
 }, 180_000);
 
 
-it('stops a machine command that ignores an interrupt after a test fails', async () => {
+it.each(['ignores', 'exits'])('stops a machine command and its child when it %s on interrupt', async (ending) => {
   const folder = mkdtempSync(join(tmpdir(), 'command-cleanup-'));
   const pidsFile = join(folder, 'pids');
   const config = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'command-vitest.config.ts');
   const program = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'ignores-interrupt.sh');
   const child = spawn(process.execPath, [VITEST, 'run', '--config', config], {
     cwd: ROOT,
-    env: { ...process.env, AEOLUS_TRIERARCH_UNDER_TEST: program, PROCESS_CLEANUP_PIDS: pidsFile, NO_COLOR: '1' },
+    env: { ...process.env, AEOLUS_TRIERARCH_UNDER_TEST: program, PROCESS_CLEANUP_PIDS: pidsFile, PROCESS_CLEANUP_ENDING: ending, NO_COLOR: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
