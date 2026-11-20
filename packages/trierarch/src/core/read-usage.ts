@@ -52,7 +52,9 @@ const totalOf = (models: readonly ModelTokens[]): number => models.reduce((sum, 
  * made, and estimates their cost from the price table. A harness's
  * subscription is read at start, then again only once 30 minutes passed and
  * the harness's ships did work since: Claude Code's read is a turn of its own.
- * A read that fails keeps what was read before.
+ * A used-up Codex window is also read every 30 minutes without ship work,
+ * since a newer session log can show an early reset. A failed read keeps the
+ * previous reading.
  * A window whose reset time passed since it was read is read again at the next
  * pass, with no session running (at most every 5 minutes). Until a reading
  * shows it started again, such a window is reported as reset (0 % used), never
@@ -97,7 +99,9 @@ export function createReadUsage(deps: { usage: UsagePort; state: StatePort; cloc
   const readSubscription = async (harness: string, now: Date): Promise<void> => {
     const tokens = tokensByHarness.get(harness) ?? 0;
     const last = subscriptions.get(harness);
-    if (last !== undefined && !(isPastReset(last, now) && now.getTime() - (triedAt.get(harness) ?? 0) >= TOKENS_READ_INTERVAL_MS) && (now.getTime() - last.at.getTime() < SUBSCRIPTION_READ_INTERVAL_MS || tokens === last.tokens)) {
+    const elapsedSinceTry = now.getTime() - (triedAt.get(harness) ?? 0);
+    const isUsedUpCodex = harness === 'codex' && last?.windows?.some(({ usedPercent, resetsAt }) => usedPercent >= 100 && resetsAt.getTime() > now.getTime()) === true;
+    if (last !== undefined && !(isPastReset(last, now) && elapsedSinceTry >= TOKENS_READ_INTERVAL_MS) && !(isUsedUpCodex && elapsedSinceTry >= SUBSCRIPTION_READ_INTERVAL_MS) && (now.getTime() - last.at.getTime() < SUBSCRIPTION_READ_INTERVAL_MS || tokens === last.tokens)) {
       return;
     }
     triedAt.set(harness, now.getTime());
