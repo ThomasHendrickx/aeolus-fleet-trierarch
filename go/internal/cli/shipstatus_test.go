@@ -165,7 +165,7 @@ func TestShipStatusJSONMatchesTheApprovedFactsShape(t *testing.T) {
 	}
 }
 
-func TestShipStatusShowsRunningProcessesWithoutTheirCommands(t *testing.T) {
+func TestShipStatusShowsRunningProcessesWithMaskedCommands(t *testing.T) {
 	machine, at := aShipStatus(t)
 	folder := filepath.Join(at.Ships, "shp_one", "repositories")
 	if err := os.MkdirAll(folder, 0700); err != nil {
@@ -193,7 +193,7 @@ func TestShipStatusShowsRunningProcessesWithoutTheirCommands(t *testing.T) {
 	}
 	for _, flags := range [][]string{{}, {"--json"}} {
 		out, code := Main(append([]string{"status", "shp_one"}, flags...), machine)
-		if code != 0 || !strings.Contains(out, strconv.Itoa(child.Process.Pid)) || strings.Contains(out, "SECRET-CREW-TOKEN") {
+		if code != 0 || !strings.Contains(out, strconv.Itoa(child.Process.Pid)) || strings.Contains(out, "SECRET-CREW-TOKEN") || !strings.Contains(out, "[masked: crew token]") {
 			t.Fatalf("process facts = %d, %s", code, out)
 		}
 		if len(flags) > 0 {
@@ -203,13 +203,14 @@ func TestShipStatusShowsRunningProcessesWithoutTheirCommands(t *testing.T) {
 					Processes []struct {
 						PID       int
 						StartedAt string
+						Command   string
 					}
 				}
 			}
 			if err := json.Unmarshal([]byte(out), &view); err != nil {
 				t.Fatal(err)
 			}
-			if view.Session.Status != "running" || len(view.Session.Processes) != 1 || view.Session.Processes[0].PID != child.Process.Pid || view.Session.Processes[0].StartedAt == "" {
+			if view.Session.Status != "running" || len(view.Session.Processes) != 1 || view.Session.Processes[0].PID != child.Process.Pid || view.Session.Processes[0].StartedAt == "" || !strings.Contains(view.Session.Processes[0].Command, "[masked: crew token]") {
 				t.Fatalf("process facts = %+v", view)
 			}
 		} else if !strings.Contains(out, "Processes: "+strconv.Itoa(child.Process.Pid)+" for ") {
