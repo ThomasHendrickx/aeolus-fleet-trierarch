@@ -58,6 +58,15 @@ func aView(t *testing.T) (paths.Paths, time.Time) {
 	return at, now
 }
 
+func TestTheReaderReportsAnUnreadableStateWithoutRepeatingItsPath(t *testing.T) {
+	at, now := aView(t)
+	_, err := (Reader{Files: filesOnDisk{denied: at.State}}).Ship(context.Background(), at, "one", now)
+	want := "cannot read the state at " + at.State + ": permission denied"
+	if err == nil || err.Error() != want || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("unreadable state error = %v, want %s wrapping permission denied", err, want)
+	}
+}
+
 func TestTheReaderShowsRunningSessionsAndTheirProcesses(t *testing.T) {
 	at, now := aView(t)
 	hold := filepath.Join(at.Sessions, "shp_one")
