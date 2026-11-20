@@ -3,7 +3,6 @@ package copilot
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"testing"
 )
@@ -25,11 +24,10 @@ func TestAStartIsCopilotWithTheFlagsJSONOutputEveryToolNoQuestionToolAndThePromp
 	}
 }
 
-// logs are events captured from Copilot CLI 1.0.105, kept with today's trierarch's tests.
+// logs are events captured from Copilot CLI 1.0.105, kept in testdata.
 func logs(t *testing.T, name string) string {
 	t.Helper()
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "..", "packages", "trierarch", "test", "logs", name)
+	return filepath.Join("testdata", name)
 }
 
 func TestWhyAStartFailedIsTheErrorCopilotWroteOnStderr(t *testing.T) {

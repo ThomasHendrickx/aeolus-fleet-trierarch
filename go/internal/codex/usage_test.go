@@ -24,7 +24,7 @@ var day = filepath.Join("2026", "10", "15")
 
 func capturedTokens(t *testing.T) string {
 	t.Helper()
-	text, err := os.ReadFile(filepath.Join("..", "..", "..", "packages", "trierarch", "test", "logs", "codex-tokens.jsonl"))
+	text, err := os.ReadFile(filepath.Join("testdata", "codex-tokens.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}

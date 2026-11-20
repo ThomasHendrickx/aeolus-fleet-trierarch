@@ -24,7 +24,7 @@ const usageProject = "-home-thomas--aeolus-trierarch-worktrees-aeolus-fleet-scou
 
 func capturedLog(t *testing.T, name string) []byte {
 	t.Helper()
-	text, err := os.ReadFile(filepath.Join("..", "..", "..", "packages", "trierarch", "test", "logs", name))
+	text, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}

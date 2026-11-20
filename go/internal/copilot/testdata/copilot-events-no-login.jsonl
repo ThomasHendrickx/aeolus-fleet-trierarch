@@ -1,0 +1,10 @@
+{"type":"session.mcp_server_status_changed","data":{"serverName":"github-mcp-server","status":"pending"},"ephemeral":true,"id":"0ce8fca9-77c7-4fa8-9ac8-fd2d5aeb5f6d","timestamp":"2026-10-29T18:49:54.046Z","parentId":"16b0ce9a-036e-4c20-b84f-04c2620ff7a4"}
+{"type":"session.mcp_server_status_changed","data":{"serverName":"github-mcp-server","status":"connected","configSource":"builtin"},"ephemeral":true,"id":"372891a0-eeb7-4048-8108-a57ae28248c2","timestamp":"2026-10-29T18:49:54.538Z","parentId":"16b0ce9a-036e-4c20-b84f-04c2620ff7a4"}
+{"type":"session.mcp_server_tools_loaded","data":{"serverName":"github-mcp-server","toolCount":5},"ephemeral":true,"id":"79db2158-fe03-40d4-925e-4b629329a159","timestamp":"2026-10-29T18:49:54.831Z","parentId":"16b0ce9a-036e-4c20-b84f-04c2620ff7a4"}
+{"type":"aeolus.stderr","line":"Error: Authentication failed (Request ID: E292:132E5:18CFA4D:1A2BF0B:6AE39552)"}
+{"type":"aeolus.stderr","line":"Your GitHub token may be invalid, expired, or lacking the required permissions."}
+{"type":"aeolus.stderr","line":"To resolve this, try the following:"}
+{"type":"aeolus.stderr","line":"  \u2022 Start 'copilot' and run the '/login' command to re-authenticate"}
+{"type":"aeolus.stderr","line":"  \u2022 If using a Fine-Grained PAT, ensure it has the 'Copilot Requests' permission enabled"}
+{"type":"aeolus.stderr","line":"  \u2022 If using COPILOT_GITHUB_TOKEN, GH_TOKEN or GITHUB_TOKEN environment variable, verify the token is valid and not expired"}
+{"type":"aeolus.stderr","line":"  \u2022 Run 'gh auth status' to check your current authentication status"}
