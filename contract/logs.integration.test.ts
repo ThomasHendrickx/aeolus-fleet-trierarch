@@ -186,6 +186,13 @@ describe('logs', () => {
     mkdirSync(units, { recursive: true });
     writeFileSync(join(units, 'aeolus-trierarch.service'), '[Service]\nExecStart=/bin/true\n');
     writeFileSync(join(machine.machine, 'bin', 'systemctl'), `#!/bin/bash\nif [ ! -e '${marker}' ]; then touch '${marker}'; echo $$ > '${pidFile}'; exec sleep 120; fi\nexit 0\n`);
+    const sessions = join(machine.trierarchHome, 'sessions');
+    const holdFolder = join(sessions, 'test-ship');
+    mkdirSync(holdFolder, { recursive: true });
+    const hold = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'hold', '--sessions', sessions], { stdio: 'ignore' });
+    const holdEnded = once(hold, 'exit');
+    if (hold.pid === undefined) throw new Error('the test hold did not start');
+    writeFileSync(join(holdFolder, 'hold.pid'), String(hold.pid));
     isRemoved = true;
     const removing = machine.remove();
     let recorded: { pid: number; start: string | undefined } | undefined;
@@ -195,7 +202,10 @@ describe('logs', () => {
       const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
       recorded = { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
       expect(await Promise.race([removing.then(() => true), wait(20_000).then(() => false)])).toBe(true);
+      await expect.poll(() => hold.signalCode).toBe('SIGKILL');
     } finally {
+      if (hold.exitCode === null && hold.signalCode === null) hold.kill('SIGKILL');
+      await holdEnded;
       if (recorded !== undefined) {
         try {
           const stat = readFileSync(`/proc/${String(recorded.pid)}/stat`, 'utf8');
