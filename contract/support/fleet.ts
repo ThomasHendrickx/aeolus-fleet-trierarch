@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type PrismaClient, type ShipCaller, type UseCases } from '@aeolus-fleet/core/testing';
 
+import { recordTestProcess } from '../../scripts/support/test-process.js';
+
 /**
  * A fleet in this process on its own database, as the trierarch reaches one
  * over `/api/v1`: argo commissions the machine's trierarch ship and the ships
@@ -107,6 +109,8 @@ export async function aFleet(): Promise<Fleet> {
     return closing;
   };
   onTestFinished(close);
+  // The fleet runs in this test's own process: the run records it, so a worker that outlives the run fails the leftovers check.
+  recordTestProcess(process.pid);
   const url = await server.listen({ host: '127.0.0.1', port: 0 });
   const useCases = createUseCases({ prisma: database });
   const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));

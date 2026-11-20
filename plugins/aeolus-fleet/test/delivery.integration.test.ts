@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type ShipCaller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
 
-import { stopProcess } from '../../../scripts/support/test-process.js';
+import { recordTestProcess, stopProcess } from '../../../scripts/support/test-process.js';
 import { scriptEnvironment } from './script-environment.js';
 
 // The aeolus-fleet plugin's scripts against a real fleet (#819): the watcher and the
@@ -192,6 +192,7 @@ function start(script: string, options: { args?: string[]; env?: Record<string, 
     detached: true,
     env: scriptEnvironment({ HOME: home, AEOLUS_HARNESS: 'claude-code', AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', ...options.env }),
   });
+  recordTestProcess(child.pid);
   child.stdin.end(options.stdin ?? '');
   let stdout = '';
   child.stdout.on('data', (chunk: Buffer) => {

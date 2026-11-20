@@ -7,7 +7,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 
 import { onTestFinished } from 'vitest';
 
-import { descendantsOf, stopDescendants, stopProcess } from '../../scripts/support/test-process.js';
+import { descendantsOf, PROCESS_RECORD_VARIABLE, recordTestProcess, stopDescendants, stopProcess } from '../../scripts/support/test-process.js';
 import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
 /**
@@ -159,6 +159,7 @@ export function runProgram(command: readonly string[], at: { cwd: string; env: R
   const [program = '', ...args] = command;
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { cwd: at.cwd, env: at.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    recordTestProcess(child.pid);
     at.onStarted?.(child);
     if (at.shouldRegisterCleanup !== false) {
       onTestFinished(() => {
@@ -199,6 +200,15 @@ function linkSystemPrograms(tools: string): void {
       }
     }
   }
+}
+
+/**
+ * The shell line that adds a process to the run's record, none when the run keeps none. The stand-ins run in a clean
+ * environment, so the record's path is written into them rather than passed on.
+ */
+function runRecordLine(pid: string, start: string): string {
+  const record = process.env[PROCESS_RECORD_VARIABLE] ?? '';
+  return record === '' ? '' : `printf '%s %s\\n' ${pid} ${start} >> '${record}'`;
 }
 
 function script(path: string, text: string): void {
@@ -357,7 +367,10 @@ if [ "$1" = -c ] && [ "$2" = '"$@" < /dev/null > /dev/null 2>&1 &' ]; then
     if IFS= read -r stat < "/proc/$pid/stat"; then
       stat="\${stat##*) }"
       set -- $stat
-      [ "$2" = "$$" ] && printf '%s %s\\n' "$pid" "\${20}" >> "$recorded"
+      if [ "$2" = "$$" ]; then
+        printf '%s %s\\n' "$pid" "\${20}" >> "$recorded"
+        ${runRecordLine('"$pid"', '"${20}"')}
+      fi
     fi
     exit 0
   fi
@@ -416,7 +429,9 @@ start() {
   env -i "\${environment[@]}" setsid "\${words[@]}" < /dev/null >> "$state/trierarch.log" 2>&1 &
   local running=$!
   echo "$running" > "$state/pid"
-  printf '%s %s\n' "$running" "$(start_time "$running")" >> "$state/started"
+  local started; started="$(start_time "$running")"
+  printf '%s %s\n' "$running" "$started" >> "$state/started"
+  ${runRecordLine('"$running"', '"$started"')}
 }
 case "$command" in
   daemon-reload|enable) ;;
@@ -591,6 +606,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   const start = (words: readonly string[]): RunningCommand => {
     const [program = '', ...args] = [...underTest, ...words];
     const child = spawn(program, args, { cwd: home, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    recordTestProcess(child.pid);
     let stdout = '';
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
