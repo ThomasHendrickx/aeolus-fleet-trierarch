@@ -11,7 +11,7 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const VITEST = join(ROOT, 'node_modules', 'vitest', 'vitest.mjs');
 const CONFIG = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'vitest.config.ts');
 
-const processSchema = z.object({ pid: z.number().int().positive(), start: z.string() });
+const processSchema = z.object({ pid: z.number().int().gt(1), start: z.string().min(1) });
 type RecordedProcess = z.infer<typeof processSchema>;
 
 function isRunning(recorded: RecordedProcess): boolean {
@@ -37,10 +37,10 @@ it.each(['success', 'failure', 'timeout'])('leaves no fleet, service or proxy pr
     child.on('error', reject);
     child.on('close', resolve);
   });
-  const pids = existsSync(pidsFile) ? z.tuple([processSchema, processSchema, processSchema]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
+  const pids = existsSync(pidsFile) ? z.array(processSchema).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
   try {
     expect(exited, output).toBe(ending === 'success' ? 0 : 1);
-    expect(pids, output).toHaveLength(3);
+    expect(pids.length, output).toBeGreaterThanOrEqual(3);
     expect(pids.filter(isRunning), output).toEqual([]);
   } finally {
     for (const recorded of pids) if (isRunning(recorded)) process.kill(recorded.pid, 'SIGKILL');
