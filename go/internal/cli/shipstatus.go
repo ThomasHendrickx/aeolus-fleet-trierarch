@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,9 +15,6 @@ func shipStatus(at paths.Paths, machine Machine, ship string) (answer, error) {
 		now = machine.Now()
 	}
 	view, err := shipview.Ship(at, ship, now)
-	if errors.Is(err, shipview.ErrShipUnknown) {
-		return answer{}, fmt.Errorf("%s", strings.TrimSuffix(err.Error(), " "+shipview.ErrShipUnknown.Error()))
-	}
 	if err != nil {
 		return answer{}, err
 	}
@@ -47,7 +43,6 @@ func shipStatus(at paths.Paths, machine Machine, ship string) (answer, error) {
 	text := []string{
 		fmt.Sprintf("Ship: %s (%s), %s, %s", view.ShipName, view.ShipID, view.Harness, place),
 		fmt.Sprintf("State: %s since %s, %d restarts", view.State, view.Since, view.Restarts),
-		fmt.Sprintf("Session: %s, hold pid %d, session %s", view.Session.Status, view.Session.HoldPID, view.Session.SessionID),
 		"Activity: " + activity, "Processes: " + processText,
 		fmt.Sprintf("Places: ship folder %s, hold %s", view.Places.ShipFolder, view.Places.Hold),
 	}

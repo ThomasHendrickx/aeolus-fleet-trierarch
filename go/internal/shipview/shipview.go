@@ -2,11 +2,17 @@
 package shipview
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -106,9 +112,51 @@ type entry struct {
 	} `json:"workspace"`
 }
 
-// Ship finds an exact id first, then a name, using only files on this machine.
+// Files opens the local files a view reads. It never opens a socket.
+type Files interface {
+	Open(path string) (fs.File, error)
+}
+
+// ProcessReader reads only process facts from the host or a container.
+type ProcessReader interface {
+	Processes(context.Context, ProcessRequest) ([]Process, error)
+}
+
+// ProcessRequest identifies the running session whose processes are read.
+type ProcessRequest struct {
+	ShipID          string
+	Folder          string
+	HoldPID         int
+	IsContainer     bool
+	ContainerBinary string
+	At              time.Time
+}
+
+// Reader reads facts from files and the machine's process table.
+// Its zero value uses the local machine. Neither port exposes credentials.
+type Reader struct {
+	Files     Files
+	Processes ProcessReader
+}
+
+type disk struct{}
+
+func (disk) Open(path string) (fs.File, error) { return os.Open(path) }
+
+// Ship finds an exact id first, then a name, using only this machine.
 func Ship(at paths.Paths, ship string, now time.Time) (View, error) {
-	data, err := os.ReadFile(at.State)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return (Reader{}).Ship(ctx, at, ship, now)
+}
+
+// Ship reads a ship's local facts. A failed fact leaves the other facts available.
+func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.Time) (View, error) {
+	files := r.Files
+	if files == nil {
+		files = disk{}
+	}
+	data, err := readFile(files, at.State)
 	if err != nil {
 		return View{}, fmt.Errorf("cannot read the state at %s: %w", at.State, err)
 	}
@@ -139,8 +187,13 @@ func Ship(at paths.Paths, ship string, now time.Time) (View, error) {
 		slices.Sort(names)
 		return View{}, unknownShip{ship, names}
 	}
-	files := hold.FilesOf(at.Sessions, one.ShipID)
-	view := View{ShipID: one.ShipID, ShipName: one.ShipName, Harness: one.Harness, State: one.State, Since: localTime(one.Since), Restarts: len(one.Exits), Unreadable: []Unreadable{}, Session: Session{Status: "exited", Processes: []Process{}}, Places: Places{ShipFolder: one.Folder, SubRepositories: map[string]string{}, Home: paths.ShipHome(at.Homes, one.ShipID, one.ShipFolder), Socket: filepath.Join(paths.ShipSockets(at.Sockets, one.ShipID, one.ShipFolder), paths.SocketFile), Hold: files.Folder, Events: files.Events}}
+	held := hold.FilesOf(at.Sessions, one.ShipID)
+	view := View{ShipID: one.ShipID, ShipName: one.ShipName, Harness: one.Harness, State: one.State, Since: localTime(one.Since, now.Location()), Unreadable: []Unreadable{}, Session: Session{Status: "exited", Processes: []Process{}}, Places: Places{ShipFolder: one.Folder, SubRepositories: map[string]string{}, Home: paths.ShipHome(at.Homes, one.ShipID, one.ShipFolder), Socket: filepath.Join(paths.ShipSockets(at.Sockets, one.ShipID, one.ShipFolder), paths.SocketFile), Hold: held.Folder, Events: held.Events}}
+	for _, exit := range one.Exits {
+		if ended, err := time.Parse(time.RFC3339, exit); err == nil && now.Sub(ended) >= 0 && now.Sub(ended) < time.Hour {
+			view.Restarts++
+		}
+	}
 	if one.Workspace.Kind == "repositories" {
 		view.Places.Main = filepath.Join(one.Folder, workspace.MainFolder)
 		for _, sub := range one.Workspace.SubRepositories {
@@ -150,41 +203,114 @@ func Ship(at paths.Paths, ship string, now time.Time) (View, error) {
 		view.Places.Main = one.Folder
 	}
 	read := func(path string) string {
-		text, err := os.ReadFile(path)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			view.Unreadable = append(view.Unreadable, Unreadable{path, err.Error()})
-		}
+		text, err := readFile(files, path)
+		view.record(path, err)
 		return strings.TrimSpace(string(text))
 	}
-	pidText := read(files.PID)
+	var configuration struct {
+		Runtime struct {
+			Kind   string `json:"kind"`
+			Binary string `json:"binary"`
+		} `json:"runtime"`
+	}
+	configurationText, err := readFile(files, at.Config)
+	view.record(at.Config, err)
+	if err == nil {
+		view.record(at.Config, json.Unmarshal(configurationText, &configuration))
+	}
+	view.IsContainer = configuration.Runtime.Kind == "container"
+	pidText := read(held.PID)
 	if pidText != "" {
 		pid, err := strconv.Atoi(pidText)
 		if err != nil || pid <= 0 {
-			view.Unreadable = append(view.Unreadable, Unreadable{files.PID, "invalid hold pid"})
+			view.Unreadable = append(view.Unreadable, Unreadable{held.PID, "invalid hold pid"})
 		} else {
 			view.Session.HoldPID = pid
 		}
 	}
-	view.Session.SessionID = read(files.SessionID)
-	reason := read(files.ExitReason)
+	view.Session.SessionID = read(held.SessionID)
+	reason := read(held.ExitReason)
 	if reason == "" && view.Session.HoldPID > 0 && processproof.Runs(view.Session.HoldPID, "hold", one.ShipID, "--sessions", at.Sessions) {
 		view.Session.Status = "running"
 	}
 	readers := map[string]func([]string) (activity.Reading, bool){"claude-code": claudecode.ActivityIn, "codex": codex.ActivityIn, "copilot": copilot.ActivityIn}
 	if reader := readers[one.Harness]; reader != nil {
-		if _, err := os.Stat(files.Events); err != nil && !errors.Is(err, os.ErrNotExist) {
-			view.Unreadable = append(view.Unreadable, Unreadable{files.Events, err.Error()})
-		} else if latest, ok := activity.Of(files.Events, func(line string) (activity.Reading, bool) { return reader([]string{line}) }); ok {
-			view.Session.Activity = &Activity{latest.Kind, latest.Tool, latest.At.Local().Format(time.RFC3339)}
+		file, err := files.Open(held.Events)
+		view.record(held.Events, err)
+		if err == nil {
+			latest, ok, err := activity.OfFile(file, func(line string) (activity.Reading, bool) { return reader([]string{line}) })
+			_ = file.Close()
+			view.record(held.Events, err)
+			if ok && err == nil {
+				view.Session.Activity = &Activity{latest.Kind, latest.Tool, latest.At.In(now.Location()).Format(time.RFC3339)}
+			}
 		}
 	}
-	_ = now
+	if view.Session.Status == "running" {
+		processes := r.Processes
+		if processes == nil {
+			processes = machineProcesses{}
+		}
+		found, err := processes.Processes(ctx, ProcessRequest{ShipID: one.ShipID, Folder: one.Folder, HoldPID: view.Session.HoldPID, IsContainer: view.IsContainer, ContainerBinary: configuration.Runtime.Binary, At: now})
+		if err != nil {
+			view.record(one.Folder, err)
+		} else {
+			view.Session.Processes = found
+		}
+	}
 	return view, nil
 }
 
-func localTime(text string) string {
+func readFile(files Files, path string) ([]byte, error) {
+	file, err := files.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(file)
+}
+
+func (v *View) record(path string, err error) {
+	if err == nil || errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	var fileError *fs.PathError
+	if errors.As(err, &fileError) {
+		path = fileError.Path
+		err = fileError.Err
+	}
+	v.Unreadable = append(v.Unreadable, Unreadable{path, err.Error()})
+}
+
+type machineProcesses struct{}
+
+func (machineProcesses) Processes(ctx context.Context, request ProcessRequest) ([]Process, error) {
+	var found []folderprocess.Process
+	var err error
+	if request.IsContainer {
+		found, err = (container.Runtime{Binary: request.ContainerBinary}).Processes(ctx, request.ShipID, request.At)
+	} else {
+		if runtime.GOOS == "linux" {
+			path := filepath.Join("/proc", strconv.Itoa(request.HoldPID), "cwd")
+			if _, err := os.Readlink(path); err != nil {
+				return nil, err
+			}
+		}
+		found, err = folderprocess.In(ctx, request.Folder, request.At)
+	}
+	if err != nil {
+		return nil, err
+	}
+	processes := make([]Process, 0, len(found))
+	for _, each := range found {
+		processes = append(processes, Process{each.PID, each.StartedAt.In(request.At.Location()).Format(time.RFC3339)})
+	}
+	return processes, nil
+}
+
+func localTime(text string, location *time.Location) string {
 	if at, err := time.Parse(time.RFC3339, text); err == nil {
-		return at.Local().Format(time.RFC3339)
+		return at.In(location).Format(time.RFC3339)
 	}
 	return text
 }
