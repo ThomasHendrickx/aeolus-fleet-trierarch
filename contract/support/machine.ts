@@ -98,17 +98,27 @@ export const CLAUDE_CODE_VERSION = '2.1.306';
 /** How long the stand-in systemd waits for a stopped trierarch to end. */
 const STOP_WAIT_SECONDS = 10;
 
-/** Stops a process whose PID this machine recorded, waiting for it to end. */
-async function stopRecorded(pid: number | undefined): Promise<void> {
-  if (pid === undefined || !Number.isInteger(pid) || pid <= 1) return;
-  const isRunning = (): boolean => {
-    try { process.kill(pid, 0); return true; } catch { return false; }
-  };
+/** A recorded PID and its start time, so a reused PID is never signalled. */
+interface RecordedProcess { readonly pid: number; readonly start: string }
+
+function recordProcess(pid: number | undefined): RecordedProcess | undefined {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 1) return undefined;
+  try {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    return start === undefined ? undefined : { pid, start };
+  } catch { return undefined; }
+}
+
+/** Stops only the same process the machine recorded. */
+async function stopRecorded(recorded: RecordedProcess | undefined): Promise<void> {
+  if (recorded === undefined) return;
+  const isRunning = (): boolean => recordProcess(recorded.pid)?.start === recorded.start;
   if (!isRunning()) return;
-  try { process.kill(pid, 'SIGTERM'); } catch { return; }
+  try { process.kill(recorded.pid, 'SIGTERM'); } catch { return; }
   for (let attempt = 0; attempt < 100 && isRunning(); attempt++) await wait(50);
   if (isRunning()) {
-    try { process.kill(pid, 'SIGKILL'); } catch { return; }
+    try { process.kill(recorded.pid, 'SIGKILL'); } catch { return; }
   }
   for (let attempt = 0; attempt < 100 && isRunning(); attempt++) await wait(50);
 }
@@ -319,6 +329,7 @@ start() {
   cd '${at.home}' || exit 1
   env -i "\${environment[@]}" setsid "\${words[@]}" < /dev/null >> "$state/trierarch.log" 2>&1 &
   echo $! > "$state/pid"
+  echo $! >> "$state/started"
 }
 case "$command" in
   daemon-reload|enable) ;;
@@ -515,8 +526,19 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   remove = () => {
     removing ??= (async () => {
       const proxyFile = join(home, '.aeolus', 'trierarch', 'proxy', 'proxy.pid');
-      const proxyPid = (): number | undefined => existsSync(proxyFile) ? Number(readFileSync(proxyFile, 'utf8')) : undefined;
-      const service = servicePid();
+      const proxyPid = (): RecordedProcess | undefined => {
+        const pid = existsSync(proxyFile) ? Number(readFileSync(proxyFile, 'utf8')) : 0;
+        const recorded = recordProcess(pid);
+        if (recorded === undefined) return undefined;
+        try {
+          const words = readFileSync(`/proc/${String(pid)}/cmdline`, 'utf8').split('\0');
+          const folder = join(home, '.aeolus', 'trierarch', 'proxy');
+          return words.includes('proxy') && words[words.indexOf('--folder') + 1] === folder ? recorded : undefined;
+        } catch { return undefined; }
+      };
+      const started = join(machine, 'systemd', 'started');
+      const pid = servicePid();
+      const service = pid !== undefined && existsSync(started) && readFileSync(started, 'utf8').split('\n').includes(String(pid)) ? recordProcess(pid) : undefined;
       const proxy = proxyPid();
       try {
         await Promise.all([...running].map((command) => command.interrupt()));
