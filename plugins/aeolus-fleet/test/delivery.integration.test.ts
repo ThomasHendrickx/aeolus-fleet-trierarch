@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { ShipId } from '@aeolus-fleet/common';
 import type { FastifyInstance } from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type ShipCaller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
 
@@ -178,7 +178,26 @@ afterEach(async () => {
   rmSync(folder, { recursive: true, force: true });
 });
 
-/** Runs a script in its own process group, so a test can kill it with all it started, as a session dies. */
+/** Stops only the process and descendants started by this test, by their individual PIDs. */
+function stopProcess(pid: number, parent: number): void {
+  try {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    if (Number(fields[1]) !== parent) return;
+    const started = fields[19];
+    process.kill(pid, 'SIGSTOP');
+    const children = (() => {
+      try { return readFileSync(`/proc/${String(pid)}/task/${String(pid)}/children`, 'utf8').trim(); } catch { return ''; }
+    })();
+    for (const child of children.split(' ').filter(Boolean).map(Number)) stopProcess(child, pid);
+    const current = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    if (current.slice(current.lastIndexOf(')') + 2).split(' ')[19] === started) process.kill(pid, 'SIGKILL');
+  } catch {
+    // The process ended while it was being stopped.
+  }
+}
+
+/** Runs a script until it ends, or stops its recorded process tree at test teardown. */
 function start(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}) {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     detached: true,
@@ -195,8 +214,12 @@ function start(script: string, options: { args?: string[]; env?: Record<string, 
     });
   });
   const kill = () => {
-    if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
   };
+  onTestFinished(async () => {
+    kill();
+    await done;
+  });
   return { done, kill, pid: child.pid };
 }
 
