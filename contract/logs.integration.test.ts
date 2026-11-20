@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { aMachine, runProgram, type Machine, type RunningCommand } from './support/machine.js';
 
@@ -108,23 +109,31 @@ describe('logs', () => {
     }
   });
 
-  it('stops a command still running when the machine is removed', async () => {
+  it('stops a command and its child when the machine is removed', async () => {
     const pidFile = join(machine.machine, 'command.pid');
-    const program = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+    const program = "const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); require('node:fs').writeFileSync(process.argv[1], JSON.stringify([process.pid, child.pid])); setInterval(() => {}, 1000)";
     const command = machine.trierarch([], { as: [process.execPath, '-e', program, pidFile] });
     await expect.poll(() => existsSync(pidFile)).toBe(true);
-    const pid = Number(readFileSync(pidFile, 'utf8'));
-    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
-    const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    const pids = z.array(z.number()).parse(JSON.parse(readFileSync(pidFile, 'utf8')));
+    const recorded = pids.map((pid) => {
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      return { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+    });
     try {
       isRemoved = true;
       await machine.remove();
-      expect(() => process.kill(pid, 0)).toThrow();
+      for (const { pid, start } of recorded) {
+        const stat = existsSync(`/proc/${String(pid)}/stat`) ? readFileSync(`/proc/${String(pid)}/stat`, 'utf8') : '';
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        expect(stat === '' || fields[0] === 'Z' || fields[19] !== start).toBe(true);
+      }
     } finally {
-      try {
-        const current = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
-        if (current.slice(current.lastIndexOf(')') + 2).split(' ')[19] === start) process.kill(pid, 'SIGKILL');
-      } catch { /* The command already ended. */ }
+      for (const { pid, start } of recorded) {
+        try {
+          const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === start) process.kill(pid, 'SIGKILL');
+        } catch { /* The command already ended. */ }
+      }
       await command;
     }
   });
