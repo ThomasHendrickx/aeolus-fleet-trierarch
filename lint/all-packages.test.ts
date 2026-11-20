@@ -8,20 +8,20 @@ import { createLint, reportsOf } from './support/lint-probe.ts';
 // test-driven-development skills).
 
 const probes = {
-  core: 'packages/trierarch/src/core/rules-probe.ts',
-  adapter: 'packages/trierarch/src/adapters/rules-probe.ts',
-  test: 'packages/trierarch/src/core/rules-probe.test.ts',
-  adapterTest: 'packages/trierarch/src/cli/rules-probe.test.ts',
+  core: 'scripts/probes/rules-probe.ts',
+  adapter: 'plugins/aeolus-fleet/test/probes/rules-probe.ts',
+  test: 'scripts/probes/rules-probe.test.ts',
+  adapterTest: 'contract/probes/rules-probe.test.ts',
   script: 'scripts/rules-probe.ts',
-  config: 'packages/trierarch/probe.config.ts',
-  pascalCase: 'packages/trierarch/src/adapters/RateLimiter.ts',
-  snakeCase: 'packages/trierarch/src/adapters/rate_limiter.ts',
-  camelCaseTest: 'packages/trierarch/src/adapters/rateLimiter.test.ts',
-  kebabCaseTest: 'packages/trierarch/src/adapters/rate-limiter-probe.test.ts',
-  setup: 'packages/trierarch/test/postgres-probe.global-setup.ts',
+  config: 'probe.config.ts',
+  pascalCase: 'plugins/aeolus-fleet/test/probes/RateLimiter.ts',
+  snakeCase: 'plugins/aeolus-fleet/test/probes/rate_limiter.ts',
+  camelCaseTest: 'plugins/aeolus-fleet/test/probes/rateLimiter.test.ts',
+  kebabCaseTest: 'plugins/aeolus-fleet/test/probes/rate-limiter-probe.test.ts',
+  setup: 'scripts/support/postgres-probe.global-setup.ts',
 };
 // These rules need no package-specific typing, so every probe is typed with the package's tsconfig.
-const lint = createLint({ tsconfig: 'packages/trierarch/tsconfig.json', probes: Object.values(probes) });
+const lint = createLint({ tsconfig: 'tsconfig.json', probes: Object.values(probes) });
 
 const everywhere = [probes.core, probes.adapter, probes.script];
 
@@ -161,25 +161,6 @@ describe('module mocks', () => {
   it('allows vi.fn in an adapter test', async () => {
     const code = "import { vi } from 'vitest';\nexport const spy = vi.fn();";
 
-    expect(reportsOf(await lint(code, probes.adapterTest), 'no-restricted-properties')).toEqual([]);
-  });
-});
-
-describe('test doubles in src/core', () => {
-  const doubles = [
-    { label: 'vi.fn', code: "import { vi } from 'vitest';\nexport const spy = vi.fn();" },
-    { label: 'vi.spyOn', code: "import { vi } from 'vitest';\nexport const spy = vi.spyOn(console, 'log');" },
-  ];
-
-  it.each(doubles)('refuses $label in src/core, tests and code alike', async ({ code }) => {
-    for (const path of [probes.test, probes.core]) {
-      expect(reportsOf(await lint(code, path), 'no-restricted-properties')).toEqual([
-        expect.stringContaining('No vi.fn or vi.spyOn in src/core'),
-      ]);
-    }
-  });
-
-  it.each(doubles)('allows $label in an adapter test', async ({ code }) => {
     expect(reportsOf(await lint(code, probes.adapterTest), 'no-restricted-properties')).toEqual([]);
   });
 });

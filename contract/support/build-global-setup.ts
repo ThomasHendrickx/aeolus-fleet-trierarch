@@ -30,14 +30,7 @@ function nextOf(version: string): string {
   return `${String(major)}.${String(minor)}.${String(patch + 1)}`;
 }
 
-/**
- * Builds today's trierarch once before the suite, as `npm install --global`
- * would install it: the trierarch under test when no other is named, and the
- * one another takes over holds from and gives them to. Another trierarch
- * under test comes built. For either, the Go trierarch of the next version and
- * the test Sigstore's signer are built too, for the release upgrade takes
- * (`go` on PATH).
- */
+/** Builds the repository's Go binary and the next release used by upgrade tests. */
 export function setup(project: TestProject): () => void {
   execFileSync('npm', ['run', 'build'], { cwd: REPOSITORY_ROOT, stdio: 'inherit' });
   const [program = '', ...words] = TRIERARCH_UNDER_TEST;

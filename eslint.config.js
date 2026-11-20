@@ -15,51 +15,7 @@ import tseslint from 'typescript-eslint';
  * passes the complete set for its files.
  */
 
-/** @typedef {{ regex: string, message: string }} ImportRestriction */
-/** @typedef {{ selector: string, message: string }} SyntaxRestriction */
 /** @typedef {{ object: string, property: string, message: string }} PropertyRestriction */
-
-/**
- * What src/core must never import (CLAUDE.md, "Architecture rules"). It
- * includes Prisma and pg, so the core needs no other list for them.
- * @type {ImportRestriction[]}
- */
-const coreForbiddenImports = [
-  { what: 'Prisma', regex: '^(prisma|prisma/.+|@prisma/.+|\\.prisma/.+)$' },
-  { what: 'pg', regex: '^pg([-/].+)?$' },
-  { what: 'Fastify', regex: '^(fastify|fastify/.+|fastify-.+|@fastify/.+)$' },
-  { what: 'tRPC', regex: '^@trpc/.+$' },
-  { what: 'an adapter', regex: '(^|/)adapters(/|$)' },
-  { what: 'Aeolus core, which it reaches only through its fleet adapter', regex: '^@aeolus-fleet/core(/.+)?$' },
-].map(({ what, regex }) => ({
-  regex,
-  message: `src/core must not import ${what}. The core holds domain, use cases and ports; adapters depend on it, never the other way round.`,
-}));
-
-const clockMessage = 'src/core never reads the clock: take `now` from the Clock port or as input.';
-const cryptoMessage = 'src/core never uses crypto: hashing and random tokens are ports.';
-
-/** The core is deterministic and never throws (domain-modelling and typescript skills). */
-const coreImpure = {
-  /** @type {ImportRestriction[]} */
-  imports: [{ regex: '^(node:)?crypto$', message: cryptoMessage }],
-  /** @type {SyntaxRestriction[]} */
-  syntax: [
-    { selector: 'NewExpression[callee.name="Date"][arguments.length=0]', message: clockMessage },
-    { selector: 'CallExpression[callee.name="Date"]', message: clockMessage },
-    {
-      selector: 'ThrowStatement',
-      message: 'src/core never throws: return a Result with a domain error kind. Only adapters throw, for system failures.',
-    },
-  ],
-  /** @type {PropertyRestriction[]} */
-  properties: [
-    { object: 'Date', property: 'now', message: clockMessage },
-    { object: 'Math', property: 'random', message: 'src/core never makes randomness: take it from a port.' },
-    { object: 'globalThis', property: 'crypto', message: cryptoMessage },
-  ],
-  globals: [{ name: 'crypto', message: cryptoMessage }],
-};
 
 /** @type {PropertyRestriction[]} */
 const noModuleMocks = ['mock', 'doMock'].map((property) => ({
@@ -67,49 +23,6 @@ const noModuleMocks = ['mock', 'doMock'].map((property) => ({
   property,
   message: 'No module mocks: hand-write an in-memory fake of the port and assert outcomes (test-driven-development skill).',
 }));
-
-/**
- * The core is tested with hand-written in-memory fakes, asserting outcomes and
- * stored state, not calls. Adapters (I/O) may use them.
- * @type {PropertyRestriction[]}
- */
-const noTestDoubles = ['fn', 'spyOn'].map((property) => ({
-  object: 'vi',
-  property,
-  message:
-    'No vi.fn or vi.spyOn in src/core: hand-write an in-memory fake and assert outcomes and stored state, not calls (test-driven-development skill).',
-}));
-
-// esquery regex literals cannot contain a slash, so write it as \x2F.
-const esqueryRegex = (/** @type {string} */ regex) => `/${regex.replaceAll('/', '\\x2F')}/`;
-
-/**
- * no-restricted-imports does not see import() expressions or import('x') types,
- * so each import restriction is also a syntax restriction.
- * @param {ImportRestriction[]} restrictions
- * @returns {SyntaxRestriction[]}
- */
-function dynamicImports(restrictions) {
-  return restrictions.flatMap(({ regex, message }) => [
-    { selector: `ImportExpression[source.value=${esqueryRegex(regex)}]`, message },
-    { selector: `TSImportType[source.value=${esqueryRegex(regex)}]`, message },
-  ]);
-}
-
-/**
- * Every import restriction for a set of files, static and dynamic, plus any
- * other syntax restriction for the same files.
- * @param {{ patterns: ImportRestriction[], syntax?: SyntaxRestriction[] }} restrictions
- */
-function importRules({ patterns, syntax = [] }) {
-  return {
-    'no-restricted-imports': [
-      'error',
-      { patterns: patterns.map(({ regex, message }) => ({ regex, caseSensitive: true, message })) },
-    ],
-    'no-restricted-syntax': ['error', ...dynamicImports(patterns), ...syntax],
-  };
-}
 
 export default defineConfig(
   globalIgnores(['**/node_modules/', '**/dist/', '**/coverage/']),
@@ -180,14 +93,4 @@ export default defineConfig(
     rules: { 'no-restricted-exports': 'off' },
   },
 
-  {
-    // Its core holds no framework or adapter, reads no clock and never throws.
-    name: 'aeolus/trierarch-core',
-    files: ['packages/trierarch/src/core/**/*.ts'],
-    rules: {
-      ...importRules({ patterns: [...coreForbiddenImports, ...coreImpure.imports], syntax: coreImpure.syntax }),
-      'no-restricted-properties': ['error', ...noModuleMocks, ...noTestDoubles, ...coreImpure.properties],
-      'no-restricted-globals': ['error', ...coreImpure.globals],
-    },
-  },
 );

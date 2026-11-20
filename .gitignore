@@ -23,5 +23,5 @@ coverage/
 # TypeScript build state
 *.tsbuildinfo
 
-# The published package's LICENSE, copied from the root one while npm packs it
-packages/*/LICENSE
+# The locally built Go trierarch
+/aeolus-trierarch

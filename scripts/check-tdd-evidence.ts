@@ -14,7 +14,7 @@
 import { git, repositoryRoot, type PullRequestRange } from './support/git.ts';
 import { runPullRequestCheck } from './support/report.ts';
 
-const PRODUCTION_FOLDER = 'packages/trierarch/src/';
+const PRODUCTION_FOLDER = 'go/';
 const TEST_FILE = /\.test\.tsx?$|_test\.go$|(^|\/)(test|e2e)\//;
 /** A conventional commit of type feat or fix, with or without a scope or a breaking mark. */
 const FEAT_OR_FIX_SUBJECT = /^(feat|fix)(\([^)]*\))?!?: /;

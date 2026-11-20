@@ -77,12 +77,6 @@ const SHARED = [
   'go/internal/cli/cli.go',
   'contract/run.integration.test.ts',
   'contract/support/machine.ts',
-  'packages/trierarch/src/adapters/files.ts',
-  'packages/trierarch/src/core/ports.ts',
-  'packages/trierarch/src/bin/aeolus-trierarch.ts',
-  'packages/trierarch/package.json',
-  'packages/trierarch/tsconfig.build.json',
-  'packages/trierarch/test/support/fake-codex.ts',
   'plugins/aeolus-fleet/scripts/aeolus-turn.sh',
   'plugins/aeolus-fleet/.claude-plugin/plugin.json',
   'plugins/aeolus-fleet/.codex-plugin/plugin.json',
@@ -91,8 +85,6 @@ const SHARED = [
 
 /** What only the integration job reads: the trierarch's and the plugin's own integration tests and what they import. */
 const INTEGRATION_ONLY = [
-  'packages/trierarch/test/trierarch.integration.test.ts',
-  'packages/trierarch/test/fixtures/claude-code/screen.txt',
   'plugins/aeolus-fleet/test/delivery.integration.test.ts',
   'plugins/aeolus-fleet/test/script-environment.ts',
   'plugins/aeolus-fleet/test/foreign-harness.setup.ts',
@@ -109,9 +101,8 @@ const NEITHER = [
   'plugins/aeolus-fleet/copilot-skills/crew/SKILL.md',
   'plugins/aeolus-fleet/hooks/hooks.json',
   'plugins/aeolus-fleet/test/ask.test.ts',
-  'packages/trierarch/image/Containerfile',
-  'packages/trierarch/image/session-init.sh',
-  'packages/trierarch/src/adapters/files.test.ts',
+  'image/Containerfile',
+  'image/session-init.sh',
   '.github/workflows/release.yml',
   '.github/workflows/go-binaries.yml',
   'scripts/check-em-dash.ts',

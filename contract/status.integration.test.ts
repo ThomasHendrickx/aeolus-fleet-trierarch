@@ -9,7 +9,6 @@ import { z } from 'zod';
 import { aCrewingMachine, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, PLUGIN_ROOT, type Machine } from './support/machine.js';
-import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // `aeolus-trierarch status` says the whole state, and `status` and `list` colour their words where a person reads a colour terminal (docs/trierarch.md, "Commands").
 
@@ -116,8 +115,7 @@ describe('status', () => {
     expect(lines).toEqual([
       `Version: ${report.version}`,
       `Aeolus Fleet plugin: claude-code ${pluginVersion()}`,
-      // Today's trierarch, kept for existing machines, does not say when the models were confirmed.
-      ...(isTodaysTrierarch ? [] : ['Models confirmed: claude-code <confirmed>']),
+      'Models confirmed: claude-code <confirmed>',
       `Repositories: ${REPOSITORY}`,
       `Service: running, pid ${String(report.service.pid)}, since <since>`,
       `Fleet: ${fleet.url}, the lease of ${fleet.trierarchShip.shipId} is valid`,

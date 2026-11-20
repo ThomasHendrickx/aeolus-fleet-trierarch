@@ -8,9 +8,23 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { readLogLine } from '../../../packages/trierarch/src/adapters/log.js';
 import { startRoutedStubFleet, startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
 import { scriptEnvironment } from './script-environment.js';
+
+const logRecordSchema = z.union([
+  z.strictObject({ time: z.string(), shipId: z.string(), shipName: z.string().optional(), action: z.string(), outcome: z.string(), next: z.string().optional() }),
+  z.strictObject({ time: z.string(), level: z.enum(['info', 'warn']), message: z.string() }),
+]);
+
+/** Reads the plugin's public log format without importing a trierarch implementation. */
+function readLogLine(line: string) {
+  try {
+    const record = logRecordSchema.safeParse(JSON.parse(line));
+    return record.success ? record.data : { line };
+  } catch {
+    return { line };
+  }
+}
 
 // The aeolus-fleet plugin's bash scripts, as a session runs them: in its folder,
 // with the plugin's data folder, against a stub of the fleet's REST door.
@@ -212,7 +226,7 @@ function turn(env: Record<string, string> = {}): Run {
   return run('aeolus-identity.sh', { args: ['turn'], env });
 }
 
-/** The plugin's log, each line read by the trierarch's own log reader, as aeolus-trierarch logs reads its log. */
+/** The plugin's log, each JSON line read independently of the trierarch. */
 function logged() {
   const file = join(data, 'logs', 'aeolus.log');
   if (!statSync(file, { throwIfNoEntry: false })) return [];

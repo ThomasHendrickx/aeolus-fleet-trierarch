@@ -5,12 +5,12 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 
-import { isTodaysTrierarch, TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
+import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
 /**
  * A machine for the trierarch under test, as a program sees one: a home of
  * its own, a PATH whose harnesses are the stand-ins of
- * packages/trierarch/test/support behind the commands a real harness answers
+ * the contract suite behind the commands a real harness answers
  * (`claude`, `codex`, `copilot`), and a systemd user manager stand-in
  * (`systemctl`) that runs the service's program line as systemd would. The
  * environment holds nothing of the shell that runs the suite, so a crewed
@@ -44,7 +44,7 @@ export interface Machine {
   readonly repository: string;
   /** The aeolus-fleet plugin's data folder for Claude Code. */
   readonly pluginData: string;
-  /** The trierarch under test as this machine runs it: a copy of its file in the home's ~/.local/bin, as an install puts it, so an upgrade replaces this machine's alone; one run by an interpreter, as today's, as it is. */
+  /** The trierarch under test as this machine runs it: a copy of its file in the home's ~/.local/bin, as an install puts it, so an upgrade replaces this machine's alone; a supplied command with arguments is run as it is. */
   readonly underTest: readonly string[];
   /** Runs the trierarch under test with the words given, from the home, to its end; another trierarch's command when `as` names one, with more variables when `env` gives them. */
   trierarch(words: readonly string[], at?: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<CommandOutcome>;
@@ -87,7 +87,6 @@ export interface CommandOutcome {
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 export const PLUGIN_ROOT = join(REPOSITORY_ROOT, 'plugins', 'aeolus-fleet');
-const STAND_INS = join(REPOSITORY_ROOT, 'packages', 'trierarch', 'test', 'support');
 const CONTRACT_SUPPORT = join(REPOSITORY_ROOT, 'contract', 'support');
 /** The Copilot CLI version the stand-in says: one the trierarch proves its plugin's hooks on. */
 const COPILOT_VERSION = '1.0.105';
@@ -210,7 +209,7 @@ if [ "$1" = -p ] && [ "$2" = --model ]; then
   echo "[claude-code:unrecognized_model] {\\"model\\":\\"$3\\"}" >&2; exit 1
 fi
 [ -s "$machine/claude-refuses-model" ] && export FAKE_CLAUDE_REFUSES_MODEL="$(cat "$machine/claude-refuses-model")"
-exec '${process.execPath}' '${join(STAND_INS, 'fake-claude-code.ts')}' --plugin '${PLUGIN_ROOT}' "$HOME/${relative(at.home, at.pluginData)}" "$@"
+exec '${process.execPath}' '${join(CONTRACT_SUPPORT, 'fake-claude-code.ts')}' --plugin '${PLUGIN_ROOT}' "$HOME/${relative(at.home, at.pluginData)}" "$@"
 `;
 }
 
@@ -394,7 +393,7 @@ case "$1" in
     esac
     exit 0 ;;
 esac
-exec '${process.execPath}' '${join(STAND_INS, 'fake-codex.ts')}' "$@" --plugin '${PLUGIN_ROOT}' '${at.pluginData}'
+exec '${process.execPath}' '${join(CONTRACT_SUPPORT, 'fake-codex.ts')}' "$@" --plugin '${PLUGIN_ROOT}' '${at.pluginData}'
 `;
 }
 
@@ -410,7 +409,7 @@ case "$1" in
     exit 0 ;;
   mcp) echo '{"mcpServers":{}}'; exit 0 ;;
 esac
-exec '${process.execPath}' '${join(STAND_INS, 'fake-copilot.ts')}' "$@" --plugin '${PLUGIN_ROOT}' '${at.pluginData}'
+exec '${process.execPath}' '${join(CONTRACT_SUPPORT, 'fake-copilot.ts')}' "$@" --plugin '${PLUGIN_ROOT}' '${at.pluginData}'
 `;
 }
 
@@ -484,7 +483,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   // A trierarch that is one file is copied, as an install puts it in the user's own folder; one run by an interpreter is run as it is.
   const [program = '', ...programWords] = TRIERARCH_UNDER_TEST;
   const installed = join(home, '.local', 'bin', 'aeolus-trierarch');
-  const isOneFile = !isTodaysTrierarch && programWords.length === 0;
+  const isOneFile = programWords.length === 0;
   const underTest = isOneFile ? [installed] : TRIERARCH_UNDER_TEST;
   if (isOneFile) {
     mkdirSync(dirname(installed), { recursive: true });

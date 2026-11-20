@@ -1,8 +1,4 @@
-/**
- * Lets Node run the trierarch from its TypeScript source, as a test starts a
- * hold the way the trierarch does: a relative `.js` import that has no file
- * resolves to the `.ts` beside it. Node strips the types itself.
- */
+/** Resolves the contract helpers' relative .js imports to their TypeScript source in Node. */
 import { registerHooks } from 'node:module';
 
 registerHooks({

@@ -27,28 +27,11 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
-      # The trierarch's tmux adapter is tested against the real tmux.
-      - run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
-      # The trierarch's systemd unit is tested against a real systemd user
-      # manager, here only: on a developer's machine it is the one a live
-      # trierarch runs under. Lingering starts the runner's own.
-      - name: Start the systemd user manager
-        run: |
-          sudo loginctl enable-linger "$USER"
-          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
-          for _ in $(seq 30); do
-            state=$(XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user is-system-running || true)
-            case "$state" in running | degraded) exit 0 ;; esac
-            sleep 1
-          done
-          echo "the systemd user manager is ${state:-unreachable}" >&2
-          exit 1
       - run: npm run typecheck
       - run: npm run lint
       - id: tests
         run: npm run test:unit
         env:
-          AEOLUS_TEST_USER_SYSTEMD: '1'
           TESTCONTAINERS_RYUK_DISABLED: 'true'
       - name: Check Docker test leftovers
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
@@ -58,7 +41,7 @@ jobs:
         run: node scripts/check-test-run-leftovers.ts podman
 
   go:
-    # The Go trierarch (docs/design/trierarch-binary.md), built beside today's.
+    # The Go trierarch (docs/design/trierarch-binary.md).
     name: Go format, vet, staticcheck and tests
     runs-on: ubuntu-latest
     defaults:
@@ -84,7 +67,7 @@ jobs:
 
   go-macos:
     # The Go trierarch's service on macOS: the launchd agent and the log it
-    # caps, where launchd lives. On pushes only, as trierarch-macos.
+    # caps, where launchd lives. On pushes only, as plugin-macos.
     name: Go service tests on macOS
     if: github.event_name == 'push'
     runs-on: macos-latest
@@ -99,13 +82,13 @@ jobs:
           cache-dependency-path: go/go.sum
       - run: go test -race -v ./internal/service ./internal/logfile
 
-  trierarch-macos:
+  plugin-macos:
     # The trierarch and the aeolus-fleet plugin's scripts run on macOS too, where
     # Linux CI misses their regressions: BSD awk and sed for the scripts. On
     # pushes only: a macOS runner costs about 10 times the minutes. The unit
     # layer only: the runner has no Docker for the integration layer's
     # Testcontainers.
-    name: Trierarch and plugin unit tests on macOS
+    name: Plugin and tooling unit tests on macOS
     if: github.event_name == 'push'
     runs-on: macos-latest
     steps:
@@ -115,9 +98,7 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
-      # The trierarch's tmux adapter is tested against the real tmux.
-      - run: command -v tmux || brew install tmux
-      - run: npx vitest run --project trierarch:unit --project plugin:unit --project scripts:unit
+      - run: npx vitest run --project plugin:unit --project scripts:unit
         env:
           TESTCONTAINERS_RYUK_DISABLED: 'true'
 
@@ -145,9 +126,6 @@ jobs:
       - name: Every test file belongs to a Vitest project
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: node scripts/check-test-projects.ts
-      - name: Every use case has a test
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: node scripts/check-use-case-tests.ts
       - name: TDD evidence
         if: ${{ !cancelled() && steps.install.outcome == 'success' && github.event_name == 'pull_request' }}
         run: node scripts/check-tdd-evidence.ts "$BASE_SHA" "$HEAD_SHA"
@@ -247,16 +225,6 @@ jobs:
             go/
             # The suite, its fleet, machine and stand-in harnesses.
             contract/
-            # The suite builds this trierarch with npm run build, which compiles src without its tests.
-            packages/trierarch/src/
-            # A unit test in src is no part of that build.
-            ':(exclude,glob)packages/trierarch/src/**/*.test.ts'
-            # The package the build runs from, with its dependencies.
-            packages/trierarch/package.json
-            # The build's compiler settings and what it includes.
-            packages/trierarch/tsconfig.build.json
-            # The suite runs the stand-in harnesses from here.
-            packages/trierarch/test/support/
             # The stand-in harnesses run the plugin's scripts, and the trierarch calls them.
             plugins/aeolus-fleet/scripts/
             # The trierarch and the suite read each harness's plugin manifest for its version.
@@ -269,8 +237,6 @@ jobs:
 
           # What only the integration job reads: the trierarch's and the plugin's own integration tests.
           integration=(
-            # The trierarch's integration tests, their fixtures and their stand-ins.
-            packages/trierarch/test/
             # The plugin's integration test against a real fleet.
             plugins/aeolus-fleet/test/delivery.integration.test.ts
             # The environment that test runs the scripts in.
@@ -344,21 +310,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run set-version -- "$VERSION"
-      - run: podman build --file packages/trierarch/image/Containerfile --build-arg VERSION="$VERSION" --tag localhost/aeolus-session:ci .
-      - run: packages/trierarch/image/test/smoke-test.sh podman localhost/aeolus-session:ci "$VERSION"
-
-  publish-dry-run:
-    name: Publish dry run
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-      - run: npm ci
-      # The same steps as release.yml, with a throwaway prerelease version:
-      # 0.0.0 is already on npm, and npm requires a tag for a prerelease.
-      - run: npm run set-version -- "0.0.0-ci.${{ github.run_id }}"
-      - run: npm run build
-      - run: npm publish --dry-run --access public --tag dry-run --workspace @aeolus-fleet/trierarch
+      - run: podman build --file image/Containerfile --build-arg VERSION="$VERSION" --tag localhost/aeolus-session:ci .
+      - run: image/test/smoke-test.sh podman localhost/aeolus-session:ci "$VERSION"

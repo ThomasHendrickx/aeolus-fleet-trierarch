@@ -1,11 +1,8 @@
 /**
- * Whether a release may publish a candidate (decision 0011): a passed run of
- * candidate.yml, of the commit the release runs on, whose integrity.json names every package of the trierarch at the version
- * asked, and whose downloaded tarballs are byte for byte the ones it packed. The release publishes those tarballs, so the
- * bytes staging walked are the bytes on npm.
- *
- * Usage: gh run view <run id> --json workflowName,conclusion,headSha \
- *          | node scripts/candidate-check.ts <version> <sha> <candidate folder>
+ * Checks a passed candidate run of the released commit and the versioned plugin
+ * archive's integrity before the release changes anything.
+ * Usage: gh run view <run id> --json workflowName,conclusion,headSha
+ *   | node scripts/candidate-check.ts <version> <sha> <candidate folder>
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -37,7 +34,7 @@ export function candidateRefusal(check: {
   if (check.run.headSha !== check.sha) {
     return `The candidate is of ${check.run.headSha}, not of the released commit ${check.sha}`;
   }
-  for (const name of ['@aeolus-fleet/trierarch']) {
+  for (const name of ['aeolus-fleet-plugin']) {
     const tarball = check.manifest.find((packed) => packed.name === name);
     if (tarball === undefined) {
       return `The candidate has no ${name}`;
@@ -45,7 +42,7 @@ export function candidateRefusal(check: {
     if (tarball.version !== check.version) {
       return `The candidate holds ${name} ${tarball.version}, not ${check.version}`;
     }
-    const filename = `aeolus-fleet-trierarch-${check.version}.tgz`;
+    const filename = `aeolus-fleet-plugin-${check.version}.tgz`;
     if (tarball.filename !== filename) {
       return `The candidate names ${tarball.filename}, not ${filename}`;
     }
@@ -60,7 +57,7 @@ export function candidateRefusal(check: {
   return undefined;
 }
 
-/** npm's integrity of a file: sha512, base64. */
+/** The candidate integrity of a file: sha512, base64. */
 function integrityOf(path: string): string {
   return `sha512-${createHash('sha512').update(readFileSync(path)).digest('base64')}`;
 }

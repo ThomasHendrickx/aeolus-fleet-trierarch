@@ -12,11 +12,11 @@ A machine runs a trierarch without Node or an npm dependency tree. Install is on
 
 ### What today's trierarch is
 
-- `@aeolus-fleet/trierarch` is a Node command (`engines.node >= 26`), installed with `npm install --global`; the trierarch plugin's setup line is `npx @aeolus-fleet/trierarch init ...` (docs/trierarch.md, "A machine joins"). About 13,900 lines of TypeScript and 17,500 lines of tests.
+- The former `@aeolus-fleet/trierarch` was a Node command (`engines.node >= 26`), installed with `npm install --global`; the trierarch plugin's setup line is `npx @aeolus-fleet/trierarch init ...` (docs/trierarch.md, "A machine joins"). About 13,900 lines of TypeScript and 17,500 lines of tests.
 - Its runtime dependencies are `@aeolus-fleet/common` and `zod`, which common needs too: the tree is small. What Node brings is the runtime itself, npm, the registry at every install and upgrade, and `npx` running the newest package at setup.
 - It uses only Node's standard modules: `fs`, `path`, `child_process`, `net` and `http` (the socket per ship it crews, `hold.sock`, the model proxy), `https`, `readline`, `crypto`. Nothing in it needs a JavaScript engine except itself.
 - It runs itself as Node: the service's `ProgramArguments` and `ExecStart` are `node <script> run`; the hold and the model proxy are started as `process.execPath` with the bin script (`runtime-adapters.ts`); the hold's guard is an inline script run with `node -e` (`hold.ts`); its version is read from its `package.json`.
-- `upgrade` is built on npm: npm's latest version, `npm install --global <version>`, a global folder that is not the user's to write (the `sudo` route), and putting the old version back on failure. Its plugin step (the aeolus-fleet plugin from release tag `v<version>`, through each harness's own command) does not use npm.
+- The former Node `upgrade` was built on npm: npm's latest version, `npm install --global <version>`, a global folder that is not the user's to write (the `sudo` route), and putting the old version back on failure. Its plugin step (the aeolus-fleet plugin from release tag `v<version>`, through each harness's own command) does not use npm.
 - A hold of another version is replaced once its session's turn is idle (`otherVersionStep`), so the sessions of a Node trierarch can be taken over by a trierarch of any other build, as on any upgrade.
 - The contract with core is `/api/v1` and `common`'s schemas: crew settings, the trierarch report details, the configuration (and `config.schema.json`, which `init` and `upgrade` write), with `MINIMUM_CORE_VERSION`. A trierarch in another language has no `common` to import: those shapes are written again or generated.
 - docs/trierarch.md says "Anyone may write another: this file is what it must do". A trierarch with no Node is that other trierarch.
@@ -62,7 +62,7 @@ Static binaries with no C library, cross-built for each operating system and chi
 - The bare binary from the GitHub Release, by hand, with its checksum.
 - Homebrew, natural on macOS and available on Linux: `brew install thomashendrickx/aeolus/aeolus-trierarch` from the tap `ThomasHendrickx/homebrew-aeolus`, whose formula installs the release binary for the machine's system and chip, checked against the checksum in the formula, and `brew upgrade` moves to a newer release. The release workflow writes the formula (`homebrew/aeolus-trierarch.rb` with the version, URLs and checksums of the release) to the tap at each release from main, with a deploy key that can write to the tap only.
 - `upgrade` fetches the release itself, checks its checksum and attestation, and replaces the file. It does not use npm.
-- The npm package stays during the move, so today's machines upgrade as they do now.
+- The Go binary is the only trierarch. Both machines run it; the unused npm package is removed.
 
 ### Signing on macOS
 

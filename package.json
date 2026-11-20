@@ -1,27 +1,23 @@
 {
   "name": "aeolus-fleet-trierarch",
   "private": true,
-  "description": "Aeolus trierarch: workspace root for @aeolus-fleet/trierarch, with the aeolus-fleet plugin for Claude Code and Codex and the session image.",
+  "description": "Aeolus trierarch binary, aeolus-fleet plugin and session image.",
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "npm@11.19.1",
   "engines": {
     "node": ">=26"
   },
-  "workspaces": [
-    "packages/trierarch"
-  ],
   "scripts": {
-    "build": "npm run build --workspace @aeolus-fleet/trierarch",
-    "typecheck": "tsc --project tsconfig.json && npm run typecheck --workspaces",
+    "build": "cd go && go build -o ../aeolus-trierarch ./cmd/aeolus-trierarch",
+    "typecheck": "tsc --project tsconfig.json",
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run",
     "test:unit": "vitest run --project '*:unit'",
     "test:integration": "vitest run --project '*:integration'",
     "test:e2e": "vitest run --project '*:e2e'",
     "test:contract:go": "vitest run --project contract:integration init.integration run.integration ship-socket.integration hold.integration takeover.integration model-proxy.integration harnesses.integration upgrade.integration notices.integration subscription.integration detect.integration install.integration logs.integration pass-failure.integration machine-load.integration worktree.integration ship-folder.integration trusted-repositories.integration mcp-configuration.integration usage.integration status.integration activity.integration checkouts.integration settings.integration failed-starts.integration launch-marker.integration container.integration used-up-window.integration",
-    "set-version": "node scripts/set-version.ts",
-    "go:schema": "vitest run --project trierarch:unit go-configuration-schema --update"
+    "set-version": "node scripts/set-version.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -33,7 +29,9 @@
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.1",
     "vitest": "^5.1.1",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "@aeolus-fleet/common": "^0.41.0",
+    "@aeolus-fleet/core": "^0.43.0"
   },
   "overrides": {
     "@scalar/json-magic": {

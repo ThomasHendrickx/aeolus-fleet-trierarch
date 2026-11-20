@@ -5,15 +5,13 @@ import { z } from 'zod';
 
 import type { Fleet } from './fleet.js';
 import type { Machine } from './machine.js';
-import { isTodaysTrierarch, TODAYS_TRIERARCH } from './trierarch-under-test.js';
 
 /** The repository's name in the configuration, as a crew request names it. */
 export const REPOSITORY = 'aeolus-fleet';
 
 /** The trierarch plugin's setup line for the fleet's trierarch ship; with `pluginShip`, it names the trierarch plugin's ship the trusted repositories come from. */
 export function setupLineOf(fleet: Fleet, options: { pluginShip?: string; harnesses?: readonly string[]; as?: readonly string[] } = {}): string[] {
-  const isNodePackage = options.as === undefined ? isTodaysTrierarch : options.as === TODAYS_TRIERARCH;
-  const harnessFlags = isNodePackage ? [] : ['--harnesses', (options.harnesses ?? ['claude-code']).join(',')];
+  const harnessFlags = ['--harnesses', (options.harnesses ?? ['claude-code']).join(',')];
   return ['init', ...harnessFlags, '--fleet-url', fleet.url, '--ship-id', fleet.trierarchShip.shipId, '--secret-stdin', ...(options.pluginShip === undefined ? [] : ['--plugin-ship-id', options.pluginShip]), '--yes'];
 }
 

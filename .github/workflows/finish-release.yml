@@ -9,7 +9,7 @@
 #
 # release.yml calls it after its tag with its own run id. Dispatch it by hand,
 # from main, with a release run's id when that run stopped after its tag: the
-# version is on npm, its image and tag are pushed, and none of them can be
+# image and tag are pushed, and neither can be
 # published again. It publishes nothing to npm, pushes no image and no tag.
 #
 # The binaries are the Actions artifacts of the named run, never built here:
@@ -241,8 +241,8 @@ jobs:
           echo "Closed milestone '$MILESTONE'." | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The plugin marketplace installs from main, so main carries the plugin's
-      # latest released version, whichever branch released it (the package on
-      # main keeps 0.0.0). If this step fails, the release is whole; set it by
+      # latest released version, whichever branch released it.
+      # If this step fails, the release is whole; set it by
       # hand with npm run set-version -- --plugin-only <version>, commit and push.
       - name: Set the aeolus-fleet plugin to ${{ inputs.version }} on main
         env:

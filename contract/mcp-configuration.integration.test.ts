@@ -12,7 +12,6 @@ import { newKey, unwrap, type ShipCaller } from '@aeolus-fleet/core/testing';
 import { aCrewingMachine, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, runProgram, PLUGIN_ROOT, type Machine } from './support/machine.js';
-import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // The fleet's MCP configuration from the trierarch plugin's ship: asked for, applied, confirmed and offered (docs/trierarch.md, "Crew-time MCP servers").
 
@@ -69,7 +68,7 @@ function aConfiguration(at: { version: number; publicKey: string; fleetId?: stri
   return { payload: JSON.stringify({ fleetId: at.fleetId ?? fleet.argo.fleetId, pluginShipId: plugin, version: at.version, publicKey: at.publicKey, servers: at.servers ?? [{ name: 'company-graph', url: graphUrl, transport: 'streamable-http', tools: ['read_neo4j_cypher'] }], secrets: [] }), contentType: CONFIGURATION_TYPE };
 }
 
-describe.skipIf(isTodaysTrierarch)("the fleet's MCP configuration", () => {
+describe("the fleet's MCP configuration", () => {
   const graph = createServer((_request, response) => { response.writeHead(401).end(); });
 
   beforeAll(async () => {
@@ -140,7 +139,7 @@ describe.skipIf(isTodaysTrierarch)("the fleet's MCP configuration", () => {
 });
 
 // Permission calls share the MCP proxy, but never use a fleet MCP server.
-describe.skipIf(isTodaysTrierarch)('permission questions for the owner', () => {
+describe('permission questions for the owner', () => {
   it.each(['connection closes', 'ship is released'])('puts the question in the owner inbox and withdraws it when the %s', async (end) => {
     const owner = await fleet.commission('thomas');
     await fleet.database.ship.update({ where: { id: owner }, data: { kind: 'person' } });
@@ -185,7 +184,7 @@ describe.skipIf(isTodaysTrierarch)('permission questions for the owner', () => {
 });
 
 
-describe.skipIf(isTodaysTrierarch)('permission answer hand-over', () => {
+describe('permission answer hand-over', () => {
   it('takes the owner answer before hand-over while other messages and rejected answers wait for the next turn', async () => {
     const owner = await fleet.commission('person');
     await fleet.database.ship.update({ where: { id: owner }, data: { kind: 'person' } });
@@ -243,7 +242,7 @@ describe.skipIf(isTodaysTrierarch)('permission answer hand-over', () => {
 
 // The model endpoint is deterministic; the installed Claude Code executes its
 // real tools and receives answers sent by a person ship in the real test core.
-describe.skipIf(isTodaysTrierarch || process.env.AEOLUS_TEST_CLAUDE_CODE !== '1')('real Claude Code permission answers', () => {
+describe.skipIf(process.env.AEOLUS_TEST_CLAUDE_CODE !== '1')('real Claude Code permission answers', () => {
   it.each([1, 2, 3])('a person answers option %s and the real session obeys it', async (option) => {
     const owner = await fleet.commission('person');
     await fleet.database.ship.update({ where: { id: owner }, data: { kind: 'person' } });
@@ -337,7 +336,7 @@ function realModelReply(response: ServerResponse, at: { call: number; input: { f
 }
 
 
-describe.skipIf(isTodaysTrierarch)('a withdrawn permission question', () => {
+describe('a withdrawn permission question', () => {
   it('hands its late answer as an ordinary message and logs the sender', async () => {
     const { owner, scout, permission } = await aPermissionSession();
     const cancellation = new AbortController();

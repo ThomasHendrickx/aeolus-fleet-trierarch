@@ -1,22 +1,5 @@
-# Publishes @aeolus-fleet/trierarch to npm, pushes the session image
-# (decision 0039) to ghcr.io with that version, and tags v<version> a commit
-# with the aeolus-fleet plugin's version on top of the released commit, so a version
-# on npm always matches a tag in git and the tag holds the plugin of that
-# version (aeolus-trierarch upgrade installs it from there). Before it publishes,
-# it attests the Go trierarch's binary for each system and chip
-# (aeolus-trierarch-<goos>-<goarch>, built and tested by go-binaries.yml where
-# it runs), a GitHub artifact attestation per binary, signed here: upgrade takes
-# only an attestation signed by this file. After the tag, finish-release.yml,
-# called with this run's id, creates the GitHub Release with this run's
-# binaries and their SHA256SUMS, closes the release's milestone, sets the
-# aeolus-fleet plugin to the version on main and, for a release from main,
-# writes the Homebrew formula to the tap. When a run stops after its tag,
-# dispatch finish-release.yml with the version and this run's id: the version
-# cannot be published or tagged again.
-#
-# The only way the package can be published: npm trusted publishing (OIDC) is
-# configured for exactly this file name, and tokens are disallowed (decision
-# 0011). Never add an NPM_TOKEN or any other npm secret. Provenance is automatic.
+# Releases the Go binaries, versioned aeolus-fleet plugin and session image.
+# finish-release.yml creates the GitHub Release and updates the Homebrew tap.
 name: Release
 
 on:
@@ -75,7 +58,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          # Plain releases only: npm needs a dist-tag for a prerelease, which this workflow does not set.
+          # Plain releases only.
           if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "::error::Version must be MAJOR.MINOR.PATCH, got '$VERSION'"
             exit 1
@@ -103,16 +86,6 @@ jobs:
           node-version: 26
           registry-url: https://registry.npmjs.org
           cache: npm
-
-      - name: Use npm 11.5.1 or later (needed for trusted publishing)
-        run: |
-          if ! node -e '
-            const [major, minor, patch] = process.argv[1].split(".").map(Number);
-            process.exit(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)))) ? 0 : 1);
-          ' "$(npm --version)"; then
-            npm install --global npm@^11.5.1
-          fi
-          npm --version
 
       - run: npm ci
 
@@ -161,7 +134,7 @@ jobs:
           path: ${{ runner.temp }}/release-metadata/
           if-no-files-found: error
 
-      - name: Set the version on the trierarch and the aeolus-fleet plugin
+      - name: Set the version on the aeolus-fleet plugin
         env:
           VERSION: ${{ inputs.version }}
         run: npm run set-version -- "$VERSION"
@@ -193,20 +166,6 @@ jobs:
           fi
           echo "Milestone '$MILESTONE' has no open issues." | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # Catches a problem in the package before it is published. A dry run
-      # refuses a version on npm already too, so it skips it, as the publish
-      # step below does.
-      - name: Dry run
-        env:
-          PACKAGE: '@aeolus-fleet/trierarch'
-          VERSION: ${{ inputs.version }}
-        run: |
-          if [[ "$(npm view "$PACKAGE@$VERSION" version 2>/dev/null)" == "$VERSION" ]]; then
-            echo "$PACKAGE@$VERSION is on npm already: skipped"
-          else
-            npm publish --dry-run --access public "$RUNNER_TEMP/candidate/aeolus-fleet-trierarch-$VERSION.tgz"
-          fi
-
       # Built before anything is published, so a broken image stops the release
       # first. The plugin in it carries the version set above.
       - name: Build the session image
@@ -215,7 +174,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           IMAGE="ghcr.io/${OWNER,,}/aeolus-session:$VERSION"
-          podman build --file packages/trierarch/image/Containerfile --build-arg VERSION="$VERSION" --tag "$IMAGE" .
+          podman build --file image/Containerfile --build-arg VERSION="$VERSION" --tag "$IMAGE" .
           echo "SESSION_IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       # Attested before anything is published, so a binary that cannot be attested
@@ -259,22 +218,7 @@ jobs:
             gh attestation verify "$binary" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
           done
 
-      # Skips a version on npm already, so releasing a version again after it
-      # failed before its tag pushes the image again and tags it. Dispatch it
-      # again from main: Re-run jobs replays the failed run's own copy of this
-      # file.
-      - name: Publish @aeolus-fleet/trierarch
-        env:
-          PACKAGE: '@aeolus-fleet/trierarch'
-          VERSION: ${{ inputs.version }}
-        run: |
-          if [[ "$(npm view "$PACKAGE@$VERSION" version 2>/dev/null)" == "$VERSION" ]]; then
-            echo "$PACKAGE@$VERSION is on npm already: skipped"
-          else
-            npm publish --access public "$RUNNER_TEMP/candidate/aeolus-fleet-trierarch-$VERSION.tgz"
-          fi
-
-      # After the package is on npm, before the tag: releasing a version again
+      # Before the tag: releasing a version again
       # after it failed partway pushes the image again, which replaces it.
       - name: Push the session image
         env:
@@ -284,7 +228,7 @@ jobs:
           printenv GH_TOKEN | podman login ghcr.io --username "$ACTOR" --password-stdin
           podman push "$SESSION_IMAGE"
 
-      # After the package is on npm. The tag holds the released commit with the
+      # The tag holds the released commit with the
       # plugin's manifests at the version on top (set above), off main's
       # history, so a harness installing the plugin from the tag gets the
       # plugin of that version under its version. If this step fails, push the

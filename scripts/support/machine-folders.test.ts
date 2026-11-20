@@ -23,8 +23,8 @@ it('makes a contract machine in a new short folder when a random name already ex
     console.log(machine.home);
   `;
   try {
-    const result = spawnSync(process.execPath, ['--import', fileURLToPath(new URL('../../packages/trierarch/test/support/source-loader.ts', import.meta.url)), '--input-type=module', '-e', program], {
-      env: { ...process.env, TRIERARCH_TEST_SHORT_FOLDER: root }, encoding: 'utf8',
+    const result = spawnSync(process.execPath, ['--import', fileURLToPath(new URL('./source-loader.ts', import.meta.url)), '--input-type=module', '-e', program], {
+      env: { ...process.env, TRIERARCH_TEST_SHORT_FOLDER: root, AEOLUS_TRIERARCH_UNDER_TEST: "/bin/true" }, encoding: 'utf8',
     });
     expect(result.status, result.stderr).toBe(0);
     expect(existsSync(result.stdout.trim())).toBe(true);
