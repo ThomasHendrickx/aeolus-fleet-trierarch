@@ -519,7 +519,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   const programs = new Set<ChildProcess>();
   const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> } = {}) =>
     runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }), onStarted: (child) => { programs.add(child); child.once('close', () => programs.delete(child)); } });
-  const running = new Set<RunningCommand>();
+  const running = new Set<{ stop(): Promise<number> }>();
   const start = (words: readonly string[]): RunningCommand => {
     const [program = '', ...args] = [...underTest, ...words];
     const child = spawn(program, args, { cwd: home, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -532,7 +532,11 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
         resolve(code ?? 1);
       });
     });
-    const command: RunningCommand = {
+    const command = {
+      stop: () => {
+        if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
+        return ended;
+      },
       stdout: () => stdout,
       interrupt: async () => {
         if (child.exitCode === null && child.signalCode === null) child.kill('SIGINT');
@@ -563,7 +567,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
       const started = join(machine, 'systemd', 'started');
       const proxy = proxyPid();
       try {
-        await Promise.all([...running].map((command) => command.interrupt()));
+        await Promise.all([...running].map((command) => command.stop()));
         await Promise.all([...programs].map(async (child) => {
           const isGoing = (): boolean => child.pid !== undefined && child.exitCode === null && child.signalCode === null;
           if (!isGoing()) return;

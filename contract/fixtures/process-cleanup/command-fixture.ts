@@ -8,7 +8,7 @@ import { aMachine } from '../../support/machine.js';
 
 it('fails with a command running', async () => {
   const machine = await aMachine();
-  machine.start(['follow', process.env.PROCESS_CLEANUP_ENDING ?? 'ignores']);
+  machine.start(['follow', process.env.PROCESS_CLEANUP_ENDING ?? 'ignore']);
   const pidFile = join(machine.home, 'command.pid');
   await expect.poll(() => existsSync(pidFile)).toBe(true);
   const pids = z.tuple([z.number(), z.number()]).parse(JSON.parse(readFileSync(pidFile, 'utf8')));
