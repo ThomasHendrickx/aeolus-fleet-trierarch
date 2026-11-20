@@ -1,3 +1,4 @@
+import { onTestFinished } from 'vitest';
 import { z } from 'zod';
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type PrismaClient, type ShipCaller, type UseCases } from '@aeolus-fleet/core/testing';
@@ -98,6 +99,14 @@ export async function aFleet(): Promise<Fleet> {
   const databaseUrl = await createMigratedDatabase();
   const database = createPrismaClient(databaseUrl);
   const server = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false });
+  let closing: Promise<void> | undefined;
+  const close = (): Promise<void> => {
+    closing ??= (async () => {
+      try { await server.close(); } finally { await database.$disconnect(); }
+    })();
+    return closing;
+  };
+  onTestFinished(close);
   const url = await server.listen({ host: '127.0.0.1', port: 0 });
   const useCases = createUseCases({ prisma: database });
   const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
@@ -186,9 +195,6 @@ export async function aFleet(): Promise<Fleet> {
         return parsed.success && parsed.data.worktreeShipId === shipId && parsed.data.repository === repository ? [parsed.data.outcome] : [];
       })[0];
     },
-    close: async () => {
-      await server.close();
-      await database.$disconnect();
-    },
+    close,
   };
 }

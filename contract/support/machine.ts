@@ -5,6 +5,8 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 
+import { onTestFinished } from 'vitest';
+
 import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
 /**
@@ -96,28 +98,19 @@ export const CLAUDE_CODE_VERSION = '2.1.306';
 /** How long the stand-in systemd waits for a stopped trierarch to end. */
 const STOP_WAIT_SECONDS = 10;
 
-/** Stop only a proxy whose command names this machine's private folder. */
-async function stopProxy(home: string): Promise<void> {
-  const folder = join(home, '.aeolus', 'trierarch', 'proxy');
-  const owned = (): number[] => readdirSync('/proc').flatMap((entry) => {
-    if (!/^\d+$/.test(entry)) return [];
-    try {
-      const words = readFileSync(join('/proc', entry, 'cmdline'), 'utf8').split('\0');
-      return words.includes('proxy') && words.includes('--folder') && words[words.indexOf('--folder') + 1] === folder ? [Number(entry)] : [];
-    } catch {
-      return [];
-    }
-  });
-  for (const pid of owned()) {
-    try { process.kill(pid, 'SIGTERM'); } catch { /* Already ended. */ }
+/** Stops a process whose PID this machine recorded, waiting for it to end. */
+async function stopRecorded(pid: number | undefined): Promise<void> {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 1) return;
+  const isRunning = (): boolean => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  };
+  if (!isRunning()) return;
+  try { process.kill(pid, 'SIGTERM'); } catch { return; }
+  for (let attempt = 0; attempt < 100 && isRunning(); attempt++) await wait(50);
+  if (isRunning()) {
+    try { process.kill(pid, 'SIGKILL'); } catch { return; }
   }
-  for (let attempt = 0; attempt < 100 && owned().length > 0; attempt++) await wait(50);
-  const remaining = owned();
-  for (const pid of remaining) {
-    try { process.kill(pid, 'SIGKILL'); } catch { /* Already ended. */ }
-  }
-  for (let attempt = 0; attempt < 100 && owned().length > 0; attempt++) await wait(50);
-  if (owned().length > 0) throw new Error('the test machine model proxy did not stop');
+  for (let attempt = 0; attempt < 100 && isRunning(); attempt++) await wait(50);
 }
 
 /** Runs a program to its end, never blocking this process: the fleet in it must answer meanwhile. */
@@ -433,6 +426,8 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   const others = at.others ?? [];
   // In the run's short folder: the ship sockets under the machine's home are within the system's limit only for a short path.
   const root = aShortFolder();
+  let remove: () => Promise<void> = () => { rmSync(root, { recursive: true, force: true }); return Promise.resolve(); };
+  onTestFinished(() => remove());
   const home = join(root, 'h');
   const machine = join(root, 'machine');
   const bin = join(machine, 'bin');
@@ -516,6 +511,24 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
     void ended.then(() => running.delete(command));
     return command;
   };
+  let removing: Promise<void> | undefined;
+  remove = () => {
+    removing ??= (async () => {
+      const proxyFile = join(home, '.aeolus', 'trierarch', 'proxy', 'proxy.pid');
+      const proxyPid = (): number | undefined => existsSync(proxyFile) ? Number(readFileSync(proxyFile, 'utf8')) : undefined;
+      const service = servicePid();
+      const proxy = proxyPid();
+      try {
+        await Promise.all([...running].map((command) => command.interrupt()));
+        await trierarch(['uninstall']);
+      } finally {
+        await stopRecorded(service);
+        await stopRecorded(proxy ?? proxyPid());
+        rmSync(root, { recursive: true, force: true });
+      }
+    })();
+    return removing;
+  };
   return {
     home,
     machine,
@@ -565,26 +578,6 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
       readFileSync(join(machine, `${harness}-calls.txt`), { encoding: 'utf8', flag: 'a+' })
         .split('\n')
         .filter((line) => line !== ''),
-    remove: async () => {
-      // uninstall stops every session and the service, as it does on a machine; the service's pid is ended too when it did not.
-      try {
-        await Promise.all([...running].map((command) => command.interrupt()));
-        await trierarch(['uninstall']);
-        const pid = servicePid();
-        if (pid !== undefined) {
-          try {
-            process.kill(pid, 'SIGKILL');
-          } catch {
-            // Ended already.
-          }
-        }
-      } finally {
-        try {
-          await stopProxy(home);
-        } finally {
-          rmSync(root, { recursive: true, force: true });
-        }
-      }
-    },
+    remove,
   };
 }
