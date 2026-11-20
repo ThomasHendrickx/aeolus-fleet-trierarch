@@ -2,14 +2,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
-import { expect, it, onTestFinished } from 'vitest';
+import { beforeEach, expect, it, onTestFinished } from 'vitest';
 
 import { descendantsOf } from '../../../scripts/support/test-process.js';
 import { aCrewingMachine, listedEntryOf, REPOSITORY } from '../../support/crewing.js';
 import { aFleet } from '../../support/fleet.js';
 import { aMachine } from '../../support/machine.js';
 
-it('ends with the test resources still in use', async () => {
+// Setup runs in its own hook, so the test's own timeout can be short: the timeout proves the same in seconds.
+beforeEach(async () => {
   const fleet = await aFleet();
   const machine = await aMachine();
   onTestFinished(() => {
@@ -26,7 +27,7 @@ it('ends with the test resources still in use', async () => {
         return current.slice(current.lastIndexOf(')') + 2).split(' ')[19] === start ? descendantsOf(pid) : [];
       } catch { return []; }
     });
-    writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify([worker, ...started, ...descendants]));
+    writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify({ started: [worker, ...started], descendants }));
   });
   const keys = join(machine.trierarchHome, 'keys');
   mkdirSync(keys, { recursive: true, mode: 0o700 });
@@ -50,8 +51,11 @@ it('ends with the test resources still in use', async () => {
   expect(serviceRecords.some((line) => line.startsWith(`${String(service)} `))).toBe(true);
   expect(proxyRecords.some((line) => line.startsWith(`${String(proxy)} `))).toBe(true);
   expect(holdRecords.some((line) => line.startsWith(`${String(hold)} `))).toBe(true);
+});
+
+it('ends with the test resources still in use', async () => {
   if (process.env.PROCESS_CLEANUP_ENDING === 'timeout') {
-    await wait(120_000);
+    await wait(60_000);
   } else if (process.env.PROCESS_CLEANUP_ENDING === 'failure') {
     throw new Error('the fixture test failed');
   }

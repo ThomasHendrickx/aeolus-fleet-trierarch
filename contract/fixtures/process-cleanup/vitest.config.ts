@@ -10,7 +10,7 @@ export default defineConfig({
   test: {
     include: ['contract/fixtures/process-cleanup/fixture.ts'],
     provide: { postgresUrl: process.env.PROCESS_CLEANUP_POSTGRES_URL ?? '' },
-    testTimeout: 60_000,
+    testTimeout: 5_000,
     hookTimeout: 180_000,
   },
 });
