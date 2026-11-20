@@ -101,3 +101,32 @@ it('closes the plugin fleet when setup fails before the door starts', async () =
     rmSync(folder, { recursive: true, force: true });
   }
 }, 180_000);
+
+
+it('stops a machine command that ignores an interrupt after a test fails', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'command-cleanup-'));
+  const pidsFile = join(folder, 'pids');
+  const config = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'command-vitest.config.ts');
+  const program = join(ROOT, 'contract', 'fixtures', 'process-cleanup', 'ignores-interrupt.sh');
+  const child = spawn(process.execPath, [VITEST, 'run', '--config', config], {
+    cwd: ROOT,
+    env: { ...process.env, AEOLUS_TRIERARCH_UNDER_TEST: program, PROCESS_CLEANUP_PIDS: pidsFile, NO_COLOR: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr.on('data', (chunk: Buffer) => { output += chunk.toString(); });
+  const exited = await new Promise<number | null>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+  const pids = existsSync(pidsFile) ? z.tuple([processSchema, processSchema]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
+  try {
+    expect(exited, output).toBe(1);
+    expect(pids, output).toHaveLength(2);
+    expect(pids.filter(isRunning), output).toEqual([]);
+  } finally {
+    for (const recorded of pids) if (isRunning(recorded)) process.kill(recorded.pid, 'SIGKILL');
+    rmSync(folder, { recursive: true, force: true });
+  }
+}, 60_000);
