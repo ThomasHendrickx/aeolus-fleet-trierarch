@@ -2,8 +2,12 @@ package cli
 
 import (
 	"encoding/json"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipview"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -130,5 +134,104 @@ func TestShipStatusCannotReadAnInvalidState(t *testing.T) {
 	out, code := Main([]string{"status", "shp_one"}, machine)
 	if code != 1 || !strings.Contains(out, "cannot read the state at "+at.State) || strings.Contains(out, "SECRET-CREW-TOKEN") {
 		t.Fatalf("invalid state = %d, %s", code, out)
+	}
+}
+
+func TestShipStatusJSONMatchesTheApprovedFactsShape(t *testing.T) {
+	machine, at := aShipStatus(t)
+	out, code := Main([]string{"status", "shp_one", "--json"}, machine)
+	want := strings.ReplaceAll(`{
+ "shipId":"shp_one","shipName":"design-tri-271c","harness":"claude-code","isContainer":false,
+ "state":"running","since":"2026-11-20T13:30:12+01:00","restarts":0,
+ "places":{
+ "shipFolder":"@ROOT@/ships/shp_one/repositories","main":"@ROOT@/ships/shp_one/repositories/main",
+ "subRepositories":{"tools":"@ROOT@/ships/shp_one/repositories/sub-repos/tools"},
+ "home":"@ROOT@/ships/shp_one/home","socket":"@ROOT@/ships/shp_one/sockets/fleet.sock",
+ "hold":"@ROOT@/sessions/shp_one","events":"@ROOT@/sessions/shp_one/events.jsonl"
+ },
+ "session":{"status":"exited","holdPid":999999999,"sessionId":"session-one",
+ "activity":{"kind":"tool","tool":"Bash","at":"2026-11-20T14:02:19+01:00"},"processes":[]},
+ "unreadable":[]
+}`, "@ROOT@", at.Home)
+	var gotJSON, wantJSON any
+	if err := json.Unmarshal([]byte(out), &gotJSON); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(want), &wantJSON); err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 || !reflect.DeepEqual(gotJSON, wantJSON) {
+		t.Fatalf("JSON = %d, %s; want %s", code, out, want)
+	}
+}
+
+func TestShipStatusShowsRunningProcessesWithoutTheirCommands(t *testing.T) {
+	machine, at := aShipStatus(t)
+	folder := filepath.Join(at.Ships, "shp_one", "repositories")
+	if err := os.MkdirAll(folder, 0700); err != nil {
+		t.Fatal(err)
+	}
+	start := func(dir string, args ...string) *exec.Cmd {
+		t.Helper()
+		process := exec.Command(os.Args[0], append([]string{"-test.run=TestShipStatusProcess", "--"}, args...)...)
+		process.Dir = dir
+		input, err := process.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := process.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = input.Close(); _ = process.Process.Kill(); _ = process.Wait() })
+		return process
+	}
+	held := start(at.Home, "hold", "shp_one", "--sessions", at.Sessions)
+	child := start(folder, "SECRET-CREW-TOKEN")
+	writeStatusFile(t, filepath.Join(at.Sessions, "shp_one", "hold.pid"), strconv.Itoa(held.Process.Pid))
+	if err := os.Remove(filepath.Join(at.Sessions, "shp_one", "exit-reason")); err != nil {
+		t.Fatal(err)
+	}
+	for _, flags := range [][]string{{}, {"--json"}} {
+		out, code := Main(append([]string{"status", "shp_one"}, flags...), machine)
+		if code != 0 || !strings.Contains(out, strconv.Itoa(child.Process.Pid)) || strings.Contains(out, "SECRET-CREW-TOKEN") {
+			t.Fatalf("process facts = %d, %s", code, out)
+		}
+		if len(flags) > 0 {
+			var view struct {
+				Session struct {
+					Status    string
+					Processes []struct {
+						PID       int
+						StartedAt string
+					}
+				}
+			}
+			if err := json.Unmarshal([]byte(out), &view); err != nil {
+				t.Fatal(err)
+			}
+			if view.Session.Status != "running" || len(view.Session.Processes) != 1 || view.Session.Processes[0].PID != child.Process.Pid || view.Session.Processes[0].StartedAt == "" {
+				t.Fatalf("process facts = %+v", view)
+			}
+		} else if !strings.Contains(out, "Processes: "+strconv.Itoa(child.Process.Pid)+" for ") {
+			t.Fatalf("process text = %s", out)
+		}
+	}
+}
+
+func TestShipStatusProcess(t *testing.T) {
+	for _, arg := range os.Args {
+		if arg == "--" {
+			var b [1]byte
+			_, _ = os.Stdin.Read(b[:])
+			return
+		}
+	}
+}
+
+func TestShipStatusNamesTheUnreadableFactAsTheScreenDoes(t *testing.T) {
+	view := shipview.View{ShipID: "shp_one", ShipName: "one", Harness: "codex", State: "running", Since: "2026-11-20T13:30:12Z", Unreadable: []shipview.Unreadable{{Path: "/proc/48102/cwd", Error: "permission denied", Fact: "processes"}}}
+	out := describeShip(view, time.Date(2026, 11, 20, 14, 2, 31, 0, time.UTC))
+	if !strings.Contains(out, "Processes: unreadable: /proc/48102/cwd: permission denied") || strings.Contains(out, "Processes: none") || strings.Contains(out, "Unreadable:") {
+		t.Fatalf("partial text = %s", out)
 	}
 }

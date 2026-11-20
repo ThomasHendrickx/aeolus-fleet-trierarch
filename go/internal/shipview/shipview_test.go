@@ -175,7 +175,7 @@ func TestTheReaderReportsProcessReadErrorsWithoutLosingTheShip(t *testing.T) {
 	path := "/proc/123/cwd"
 	facts := &processFacts{failure: &fs.PathError{Op: "readlink", Path: path, Err: fs.ErrPermission}}
 	view, err := (Reader{Files: filesOnDisk{}, Processes: facts}).Ship(context.Background(), at, "one", now)
-	if err != nil || view.ShipName != "one" || !reflect.DeepEqual(view.Unreadable, []Unreadable{{Path: path, Error: "permission denied"}}) {
+	if err != nil || view.ShipName != "one" || !reflect.DeepEqual(view.Unreadable, []Unreadable{{Path: path, Error: "permission denied", Fact: "processes"}}) {
 		t.Fatalf("partial view = %+v, %v", view, err)
 	}
 }
