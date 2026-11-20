@@ -38,7 +38,7 @@ func describeShip(view shipview.View, now time.Time) string {
 	processes := []string{}
 	for _, p := range view.Session.Processes {
 		started, _ := time.Parse(time.RFC3339, p.StartedAt)
-		processes = append(processes, fmt.Sprintf("%d for %s", p.PID, age(now.Sub(started))))
+		processes = append(processes, fmt.Sprintf("%d for %s: %s", p.PID, age(now.Sub(started)), p.Command))
 	}
 	processText := "none"
 	if len(processes) > 0 {

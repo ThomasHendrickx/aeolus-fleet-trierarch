@@ -23,6 +23,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/copilot"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mask"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
@@ -82,10 +83,11 @@ type Activity struct {
 	At   string `json:"at"`
 }
 
-// Process names a process and when it started, without its command line.
+// Process names a process, when it started and its masked command.
 type Process struct {
 	PID       int    `json:"pid"`
 	StartedAt string `json:"startedAt"`
+	Command   string `json:"command"`
 }
 
 // Unreadable names a fact's source that could not be read.
@@ -264,6 +266,11 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 		}
 	}
 	if view.Session.Status == "running" {
+		masker, maskErr := (mask.Loader{Files: files}).Load(at)
+		if maskErr != nil {
+			view.record("processes", at.State, maskErr)
+			return view, nil
+		}
 		processes := r.Processes
 		if processes == nil {
 			processes = machineProcesses{}
@@ -272,6 +279,9 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 		if err != nil {
 			view.record("processes", one.Folder, err)
 		} else {
+			for i := range found {
+				found[i].Command = masker.Line(found[i].Command)
+			}
 			view.Session.Processes = found
 		}
 	}
@@ -320,7 +330,7 @@ func (machineProcesses) Processes(ctx context.Context, request ProcessRequest) (
 	}
 	processes := make([]Process, 0, len(found))
 	for _, each := range found {
-		processes = append(processes, Process{each.PID, each.StartedAt.In(request.At.Location()).Format(time.RFC3339)})
+		processes = append(processes, Process{PID: each.PID, StartedAt: each.StartedAt.In(request.At.Location()).Format(time.RFC3339), Command: each.Command})
 	}
 	return processes, nil
 }

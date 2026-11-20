@@ -6,18 +6,20 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// Process is a process's pid and start time. Its command is never requested.
+// Process is a process's pid, start time and command, which callers must mask before showing.
 type Process struct {
 	PID       int
 	StartedAt time.Time
+	Command   string
 }
 
-// In reads the processes whose working folder is in folder, without reading commands.
+// In reads the processes whose working folder is in folder, including whole commands.
 func In(ctx context.Context, folder string, now time.Time) ([]Process, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -35,11 +37,20 @@ func In(ctx context.Context, folder string, now time.Time) ([]Process, error) {
 	if len(wanted) == 0 {
 		return found, nil
 	}
-	text, err := exec.CommandContext(ctx, "ps", "-eo", "pid=,etime=").Output()
+	pids := make([]int, 0, len(wanted))
+	for pid := range wanted {
+		pids = append(pids, pid)
+	}
+	slices.Sort(pids)
+	names := make([]string, 0, len(pids))
+	for _, pid := range pids {
+		names = append(names, strconv.Itoa(pid))
+	}
+	text, err := exec.CommandContext(ctx, "ps", "-ww", "-p", strings.Join(names, ","), "-o", "pid=,etime=,args=").Output()
 	if err != nil {
 		return nil, fmt.Errorf("read process times: %w", err)
 	}
-	times, err := Times(string(text), now)
+	times, err := Commands(string(text), now)
 	if err != nil {
 		return nil, err
 	}
@@ -70,9 +81,46 @@ func Times(text string, now time.Time) ([]Process, error) {
 		if err != nil {
 			return nil, err
 		}
-		found = append(found, Process{pid, now.Add(-elapsed)})
+		found = append(found, Process{PID: pid, StartedAt: now.Add(-elapsed)})
 	}
 	return found, nil
+}
+
+// Commands reads ps's pid, elapsed time and remaining command, preserving its spaces.
+func Commands(text string, now time.Time) ([]Process, error) {
+	found := []Process{}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		pidText, rest := column(line)
+		if pidText == "PID" {
+			continue
+		}
+		elapsedText, command := column(rest)
+		pid, err := strconv.Atoi(pidText)
+		if err != nil || pid <= 0 {
+			return nil, errors.New("invalid process pid")
+		}
+		elapsed, err := duration(elapsedText)
+		if err != nil {
+			return nil, err
+		}
+		if command == "" {
+			return nil, errors.New("missing process command")
+		}
+		found = append(found, Process{PID: pid, StartedAt: now.Add(-elapsed), Command: command})
+	}
+	return found, nil
+}
+
+func column(text string) (string, string) {
+	at := strings.IndexAny(text, " \t")
+	if at < 0 {
+		return text, ""
+	}
+	return text[:at], strings.TrimLeft(text[at:], " \t")
 }
 
 func duration(text string) (time.Duration, error) {
