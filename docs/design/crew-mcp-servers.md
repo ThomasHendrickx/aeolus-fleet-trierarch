@@ -80,7 +80,7 @@ Slices, each one PR:
 
 1. **core**: `mcpServers` in the crew settings, decision 0027 amended, the console shows and edits it. Release.
 2. **trierarch plugin**: the server list in its configuration (name, URL, the tools a session may call), sent to every trierarch as the trusted repositories are, asked for at a trierarch's first pass.
-3. **trierarch**: keeps the list, reports per harness which servers it offers, checks before it crews and gives back what it cannot give; raises `MINIMUM_CORE_VERSION`.
+3. **trierarch**: keeps the list, reports per harness which servers it offers (`harnesses[].mcpServers` in the report details, a list of names, in common's `trierarchReportDetailsSchema`), checks before it crews and gives back what it cannot give; raises `MINIMUM_CORE_VERSION`.
 4. **trierarch plugin**: placement leaves out a machine whose report does not offer every named server, with the reason in needs-crew.
 5. **trierarch**: the MCP proxy on the host, forwarding only the listed tools, no credential yet; Claude Code started with `--mcp-config` pointing at it per session. The company graph works end to end here once Thomas's network step is done.
 6. **trierarch**: Claude Code in a container (the proxy at Podman's host address, as the model proxy is reached).
