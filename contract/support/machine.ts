@@ -310,7 +310,21 @@ echo "$*" >> "$state/calls.txt"
 command="$1"; shift
 unit="\${1:-aeolus-trierarch.service}"
 file='${join(at.home, '.config', 'systemd', 'user')}'/"$unit"
-pid() { [ -f "$state/pid" ] && kill -0 "$(cat "$state/pid")" 2>/dev/null && cat "$state/pid"; }
+start_time() {
+  local stat
+  [ -r "/proc/$1/stat" ] || return 1
+  IFS= read -r stat < "/proc/$1/stat"
+  stat="\${stat##*) }"
+  set -- $stat
+  printf '%s' "\${20}"
+}
+pid() {
+  local running started
+  [ -f "$state/pid" ] && [ -f "$state/started" ] || return 1
+  running="$(cat "$state/pid")"
+  started="$(start_time "$running")" || return 1
+  grep -qxF "$running $started" "$state/started" && kill -0 "$running" 2>/dev/null && echo "$running"
+}
 stop() {
   local running; running="$(pid)" || return 0
   kill -TERM "$running"
@@ -328,8 +342,9 @@ start() {
   done < "$file"
   cd '${at.home}' || exit 1
   env -i "\${environment[@]}" setsid "\${words[@]}" < /dev/null >> "$state/trierarch.log" 2>&1 &
-  echo $! > "$state/pid"
-  echo $! >> "$state/started"
+  local running=$!
+  echo "$running" > "$state/pid"
+  printf '%s %s\n' "$running" "$(start_time "$running")" >> "$state/started"
 }
 case "$command" in
   daemon-reload|enable) ;;
@@ -538,7 +553,8 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
       };
       const started = join(machine, 'systemd', 'started');
       const pid = servicePid();
-      const service = pid !== undefined && existsSync(started) && readFileSync(started, 'utf8').split('\n').includes(String(pid)) ? recordProcess(pid) : undefined;
+      const candidate = recordProcess(pid);
+      const service = candidate !== undefined && existsSync(started) && readFileSync(started, 'utf8').split('\n').includes(`${String(candidate.pid)} ${candidate.start}`) ? candidate : undefined;
       const proxy = proxyPid();
       try {
         await Promise.all([...running].map((command) => command.interrupt()));
