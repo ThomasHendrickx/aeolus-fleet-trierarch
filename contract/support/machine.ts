@@ -530,8 +530,11 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
     });
     const command: RunningCommand = {
       stdout: () => stdout,
-      interrupt: () => {
-        child.kill('SIGINT');
+      interrupt: async () => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGINT');
+        const status = await Promise.race([ended, wait(1_000).then(() => undefined)]);
+        if (status !== undefined) return status;
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
         return ended;
       },
     };
