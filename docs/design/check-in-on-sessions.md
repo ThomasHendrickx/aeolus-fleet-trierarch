@@ -1,6 +1,6 @@
 # Design: tools to check in on and debug the sessions a trierarch keeps (#271)
 
-Status: stage 2, the detailed design. The purpose is approved by Thomas on 20 Nov (card 563c69d7, option 1), with the scope below, and he answered the ten questions of stage 1 and the six of stage 2 on 20 Nov, one card each; they are the sixteen decisions below. What follows them is this design on those decisions, with the screens drawn as text, which a reviewer checks the build against. One question is open at the end. Nothing is built.
+Status: approved by Thomas on 20 Nov (card d4f6edcb, option 1): this design and its screens are the acceptance criteria for the build. The purpose is approved by Thomas on 20 Nov (card 563c69d7, option 1), with the scope below, and he answered the ten questions of stage 1 and the seven of stage 2 on 20 Nov, one card each; they are the seventeen decisions below. What follows them is this design on those decisions, with the screens drawn as text, which a reviewer checks the build against. No question is open. Nothing is built.
 
 Thomas, verbatim (#271): "It would be handy if the trierarch process had tools that helped with debugging and checking in on sessions." And on 20 Nov: "fits the unit rework we did. Making one of our critical parts of aeolus more dev friendly". The unit rework is the ship folder: one `ships/<shipId>/` per ship, holding its ship folder with `main/` and `sub-repos/<repository>/` (aeolus-fleet#1759, [ship-folder.md](ship-folder.md)).
 
@@ -90,6 +90,7 @@ Thomas answered each question on 20 Nov, one card each, in the order they were a
 - **D14. How many lines** (Q14, option 1): 200 lines are shown and kept, as many as the pass already reads for activity (`activity.eventLines`).
 - **D15. Plain `status`** (Q15, option 2): `status` with no ship says the last pass's age, for example `Last pass: succeeded, 4s ago`, from `seen.json`.
 - **D16. Where a dead session's end is kept** (Q16, option 1): in `~/.aeolus/trierarch/ended/<shipId>.json`, beside `ships/`, mode 600.
+- **D17. Plain `status` after a failed pass** (Q17, option 2): a failed last pass says the age of the last success, for example `Last pass: failed (last success 3m ago)`, and `Last pass: failed (no success yet)` when none has succeeded.
 
 ## The parts in the Go binary
 
@@ -263,6 +264,20 @@ Before:
 ```
 Before: Last pass: succeeded
 After:  Last pass: succeeded, 4s ago
+```
+
+A failed last pass (D17), before and after:
+
+```
+Before: Last pass: failing since 2026-10-06T08:00:00.000Z: the fleet cannot be reached
+After:  Last pass: failed (last success 3m ago)
+```
+
+A failed last pass when none has succeeded (D17), before and after:
+
+```
+Before: Last pass: failing since 2026-10-06T08:00:00.000Z: the fleet cannot be reached
+After:  Last pass: failed (no success yet)
 ```
 
 After:
@@ -475,14 +490,3 @@ No terminal:
 $ aeolus-trierarch tui < /dev/null
 tui needs a terminal: read one ship with aeolus-trierarch status <ship> --json
 ```
-
-## Questions
-
-One question is open: a screen needs a choice Thomas has not made.
-
-**Q17. What does plain `status` say of the last pass's age when the last pass failed, or no pass has succeeded yet?**
-D15 gives `Last pass: succeeded, 4s ago`, with the age read from `seen.json`'s `passAt`, which only a succeeded pass writes.
-1. A failed pass says what it says today, with no age (`seen.json` holds no time of a failed pass); before any pass succeeded the line says what it says today, with no age.
-2. A failed pass also says the age of the last pass that succeeded, for example `Last pass: failed, fleet unreachable (last succeeded 3m ago)`.
-
-Pick 1: it adds only what D15 names, on the pass that succeeded, and invents no new phrase for a failure.
