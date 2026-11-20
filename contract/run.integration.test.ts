@@ -48,6 +48,15 @@ afterEach(async ({ task }) => {
 });
 
 describe('run with the reconciler', () => {
+  it('records the hold pid when it starts', async () => {
+    await aRunningScout();
+    const pidFile = join(machine.trierarchHome, 'sessions', scout, 'hold.pid');
+    const recorded = join(machine.machine, 'hold-started-pids');
+    await expect.poll(() => existsSync(pidFile), { timeout: CREWED_WITHIN_MS }).toBe(true);
+    const pid = readFileSync(pidFile, 'utf8').trim();
+    await expect.poll(() => existsSync(recorded) ? readFileSync(recorded, 'utf8').split('\n').some((line) => line.startsWith(`${pid} `)) : false).toBe(true);
+  });
+
   it("crews an assigned request: the ship's lease is held and its session starts in a worktree of the repository", async () => {
     const session = sessionOf(machine, 'scout');
 

@@ -185,6 +185,34 @@ describe('logs', () => {
     }
   });
 
+  it('stops a hold that never wrote its pid file', async () => {
+    const marker = join(machine.machine, 'hold-started');
+    const sessions = join(machine.trierarchHome, 'sessions');
+    const env = { HOME: machine.home, PATH: `${join(machine.machine, 'bin')}:${join(machine.machine, 'tools')}` };
+    const program = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+    let recorded: { pid: number; start: string | undefined } | undefined;
+    try {
+      const started = await runProgram(['sh', '-c', '"$@" < /dev/null > /dev/null 2>&1 &', 'sh', process.execPath, '-e', program, marker, 'hold', 'test-ship', '--sessions', sessions], { cwd: machine.home, env });
+      expect(started.status, started.stderr).toBe(0);
+      await expect.poll(() => existsSync(marker)).toBe(true);
+      const pid = Number(readFileSync(marker, 'utf8'));
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      recorded = { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+      isRemoved = true;
+      await machine.remove();
+      const current = existsSync(`/proc/${String(pid)}/stat`) ? readFileSync(`/proc/${String(pid)}/stat`, 'utf8') : '';
+      const fields = current.slice(current.lastIndexOf(')') + 2).split(' ');
+      expect(current === '' || fields[0] === 'Z' || fields[19] !== recorded.start).toBe(true);
+    } finally {
+      if (recorded !== undefined) {
+        try {
+          const stat = readFileSync(`/proc/${String(recorded.pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === recorded.start) process.kill(recorded.pid, 'SIGKILL');
+        } catch { /* The hold already ended. */ }
+      }
+    }
+  });
+
   it('stops a command and its child when the machine is removed', async () => {
     const pidFile = join(machine.machine, 'command.pid');
     const program = "const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); require('node:fs').writeFileSync(process.argv[1], JSON.stringify([process.pid, child.pid])); setInterval(() => {}, 1000)";
