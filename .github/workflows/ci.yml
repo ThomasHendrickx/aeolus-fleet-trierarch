@@ -166,13 +166,17 @@ jobs:
             sudo sed -i '$ i\  signal (receive) set=(term) peer=podman,' /etc/apparmor.d/usr.bin.pasta
             sudo apparmor_parser -r /etc/apparmor.d/usr.bin.pasta
           fi
+      # Each process the suites start is recorded there, for the leftovers check to find any left running.
       - id: tests
         run: npm run test:integration
         env:
+          AEOLUS_TEST_PROCESS_RECORD: ${{ runner.temp }}/test-processes
           TESTCONTAINERS_RYUK_DISABLED: 'true'
       - name: Check Docker test leftovers
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         run: node scripts/check-test-run-leftovers.ts docker
+        env:
+          AEOLUS_TEST_PROCESS_RECORD: ${{ runner.temp }}/test-processes
 
   changed-paths:
     # Decides whether a pull request runs the contract and the integration jobs: only when a path
@@ -284,14 +288,18 @@ jobs:
       - run: go build -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=0.99.0" -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
         working-directory: go
       # The upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release, with go on PATH.
+      # Each process the suite starts is recorded there, for the leftovers check to find any left running.
       - id: tests
         run: npm run test:contract:go
         env:
+          AEOLUS_TEST_PROCESS_RECORD: ${{ runner.temp }}/test-processes
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
           TESTCONTAINERS_RYUK_DISABLED: 'true'
       - name: Check Docker test leftovers
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         run: node scripts/check-test-run-leftovers.ts docker
+        env:
+          AEOLUS_TEST_PROCESS_RECORD: ${{ runner.temp }}/test-processes
 
   session-image:
     # The image a trierarch runs container sessions from (decision 0039), built
