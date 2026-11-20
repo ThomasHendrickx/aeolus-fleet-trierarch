@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { z } from 'zod';
 
+import { stopProcess } from '../scripts/support/test-process.js';
 import { aCrewingMachine, isRunning, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
@@ -25,6 +26,23 @@ const SAID_WITHIN_MS = 30_000;
 
 const IDENTITY = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' };
 const git = (folder: string, ...args: string[]): string => execFileSync('git', ['-C', folder, ...args], { env: { ...process.env, ...IDENTITY }, encoding: 'utf8' }).trim();
+
+/** A process owned by this test, registered for cleanup before the test continues. */
+function aTestProcess(cwd: string): { pid: number; stop: () => void } {
+  const child = spawn('sleep', ['600'], { cwd, stdio: 'ignore' });
+  const pid = child.pid;
+  if (pid === undefined) throw new Error('sleep did not start');
+  const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+  const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+  const stop = () => {
+    try {
+      const current = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      if (current.slice(current.lastIndexOf(')') + 2).split(' ')[19] === start) stopProcess(pid, process.pid);
+    } catch { /* The process already ended. */ }
+  };
+  onTestFinished(stop);
+  return { pid, stop };
+}
 
 const configurationSchema = z.looseObject({ harnesses: z.record(z.string(), z.unknown()), repositories: z.record(z.string(), z.looseObject({ path: z.string() })) });
 
@@ -439,19 +457,13 @@ exec '${realGit}' "$@"
       if (hasUnsavedWork) {
         writeFileSync(join(stray, 'unsaved.txt'), 'unsaved\n');
       }
-      const child = spawn('sleep', ['600'], { cwd: stray, stdio: 'ignore' });
-      const pid = child.pid;
-      if (pid === undefined) {
-        throw new Error('sleep did not start');
-      }
+      const { pid, stop } = aTestProcess(stray);
       try {
         expect((await machine.trierarch(['restart'])).status).toBe(0);
         await expect.poll(() => isRunning(pid), { timeout: SAID_WITHIN_MS }).toBe(false);
         await expect.poll(() => existsSync(stray), { timeout: SAID_WITHIN_MS }).toBe(false);
       } finally {
-        if (isRunning(pid)) {
-          process.kill(pid, 'SIGKILL');
-        }
+        stop();
       }
     });
   }
@@ -462,8 +474,8 @@ exec '${realGit}' "$@"
     const unknown = join(machine.trierarchHome, 'ships', REPOSITORY, 'notes');
     mkdirSync(plain, { recursive: true });
     mkdirSync(unknown, { recursive: true });
-    const children = [plain, unknown].map((cwd) => spawn('sleep', ['600'], { cwd, stdio: 'ignore' }));
-    const pids = children.flatMap((child) => (child.pid === undefined ? [] : [child.pid]));
+    const children = [plain, unknown].map(aTestProcess);
+    const pids = children.map((child) => child.pid);
     try {
       execFileSync('git', ['clone', '-q', machine.repository, plain]);
       writeFileSync(join(unknown, 'notes.md'), 'no repository\n');
@@ -474,9 +486,7 @@ exec '${realGit}' "$@"
       }
       expect(pids.filter(isRunning)).toEqual([]);
     } finally {
-      for (const pid of pids.filter(isRunning)) {
-        process.kill(pid, 'SIGKILL');
-      }
+      for (const child of children) child.stop();
     }
   });
 });
