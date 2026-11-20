@@ -411,6 +411,40 @@ it('starts after its guard crashes when macOS answers EPERM for the old session 
   }
 });
 
+// A group that keeps answering EPERM is a real refusal, not an unreaped group: the start must fail, not succeed.
+it('does not start after its guard crashes when the old session group keeps answering EPERM, and names the refusal as the cause', { timeout: 30_000 }, async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  const previous = join(sessions, shipId);
+  await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'trap "" TERM; while :; do echo old > "$TMPDIR/writing"; sleep 0.1; done'], harness: 'claude-code' });
+  await expect.poll(() => existsSync(join(temp, 'writing'))).toBe(true);
+  const guard = await guardOf(runtime, shipId);
+  const groups = readFileSync(join(previous, 'harness-sessions'), 'utf8').trim().split('\n').map(Number);
+  process.kill(guard, 'SIGKILL');
+  await expect.poll(() => isAlive(guard)).toBe(false);
+  const kill = process.kill.bind(process);
+  const denied = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+  const signal = vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
+    if (groups.includes(-pid)) throw denied;
+    return kill(pid, name);
+  });
+  try {
+    const failure: unknown = await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' }).then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain('did not stop');
+    expect((failure as Error).cause).toBe(denied);
+    expect(starts()).toHaveLength(0);
+  } finally {
+    signal.mockRestore();
+    rmSync(join(previous, 'guard-active'), { force: true });
+    for (const group of groups) {
+      try { process.kill(-group, 'SIGKILL'); } catch { /* The test session already ended. */ }
+    }
+  }
+});
+
 it('starts after a same-boot guard leaves a marker without an identity', { timeout: 15_000 }, async () => {
   const runtime = aRuntime();
   const shipId = newId('ship');
