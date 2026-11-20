@@ -120,10 +120,10 @@ it('stops a machine command that ignores an interrupt after a test fails', async
     child.on('error', reject);
     child.on('close', resolve);
   });
-  const pids = existsSync(pidsFile) ? z.tuple([processSchema, processSchema]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
+  const pids = existsSync(pidsFile) ? z.tuple([processSchema, processSchema, processSchema]).parse(JSON.parse(readFileSync(pidsFile, 'utf8'))) : [];
   try {
     expect(exited, output).toBe(1);
-    expect(pids, output).toHaveLength(2);
+    expect(pids, output).toHaveLength(3);
     expect(pids.filter(isRunning), output).toEqual([]);
   } finally {
     for (const recorded of pids) if (isRunning(recorded)) process.kill(recorded.pid, 'SIGKILL');
