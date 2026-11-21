@@ -102,6 +102,14 @@ The reader uses local files and the host or container process table, never the f
 
 A credential source that exists but cannot be read or decoded suppresses all lines and process commands, naming the path and reason: `Last lines: not shown: cannot read <path> to mask it (<error>)`. Missing optional credential sources hold no value. Other unreadable files are named while the remaining facts stay visible; an unreadable state fails the command. JSON keeps suppressed lines and processes empty and names the credential source in `unreadable`. An unknown ship exits 1 and names the ships crewed here. Reading changes no file and sends no session content off the computer.
 
+### Live local screens
+
+Run `aeolus-trierarch tui` in a terminal as the trierarch's user, including over SSH. The list shows each locally crewed ship's state, harness, turn, activity, inbox and restarts, with the last read time and pass age. Up/down or j/k moves the selection; enter opens the ship. The opened ship shows the same local facts as `status <ship>`, its places and masked session lines. Up/down or j/k scrolls the lines; esc goes back and q quits. To act, use a forced message, **Restart** or **Edit…** in the console.
+
+The screens read local facts again every five seconds. A ship removed while open returns to the list with its name and `is no longer crewed here`. An unreadable state is shown and retried on the next tick; previously read facts remain visible with their last successful read time. Individual unreadable facts leave the others available. Reading changes no file and calls no fleet or hold socket.
+
+Each session line is masked by the shared reader before the live screen cuts it to the terminal width with `…`. `status <ship>` keeps it whole, and a line without its own timestamp shows `--:--:--` in both. Both stdin and stdout must be terminals: otherwise `tui` starts no screen, says `tui needs a terminal: read one ship with aeolus-trierarch status <ship> --json`, and exits 2.
+
 ### What a trierarch reports
 
 Its report, sent on start and again whenever it changes: its state (`working` while a session runs, `idle` with none), a one-line note such as "4 of 6 running, 1 crashed" (the sessions that run of `caps.ships`, and the crashed ones when there are any), and `details`, read from its local configuration and what runs. Each harness's `flags` are the flags its configuration gives it, and its `riskyFlags` those of them its adapter calls risky, so a reader needs no harness knowledge: `--dangerously-skip-permissions` for Claude Code and `--dangerously-bypass-approvals-and-sandbox` for Codex. The console marks them:

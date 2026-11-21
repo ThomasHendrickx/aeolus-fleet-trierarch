@@ -38,6 +38,7 @@ stateDiagram-v2
 On the computer, as the trierarch's user:
 
 ```sh
+aeolus-trierarch tui
 aeolus-trierarch list
 aeolus-trierarch status
 aeolus-trierarch status design-tri-271c
@@ -45,6 +46,7 @@ aeolus-trierarch status design-tri-271c --json
 aeolus-trierarch logs --follow
 ```
 
+- `tui` opens the [live local screens](../trierarch.md#live-local-screens): up/down or j/k moves, enter opens a ship, esc goes back, and q quits. Its local facts refresh every five seconds. Session lines are masked before being cut to the width; use `status <ship>` to read them whole, or `status <ship> --json` without a terminal.
 - `list` shows each ship on this computer: its state, harness, workspace, since when it is in that state, and its restarts within the last hour.
 - `status` counts the ships by state, shows the caps in use, and says whether the trierarch's last pass succeeded or how it fails, such as when it cannot reach the fleet.
 - `status <ship>` finds one ship by name or id and shows its local session facts, the last observed turn and inbox counts with how long ago each was seen, masked process commands and the last 200 whole, masked session lines. It works without the fleet or the service. An inbox without a running session says `not watched while no session runs`; a running session not observed yet says `not seen yet`. `--json` also includes the session status, hold pid and session id, all its paths, and the same masked commands and lines. An unreadable source is named while the rest stays visible; an unreadable credential source suppresses lines and commands because they cannot be safely masked. An unknown ship exits 1 and names the ships crewed here. See [Reading one ship](../trierarch.md#reading-one-ship-on-this-machine), including which credentials are known and the limit on masking secrets found elsewhere.
