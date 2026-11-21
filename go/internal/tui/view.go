@@ -325,13 +325,7 @@ func elapsed(now time.Time, text string) string {
 	if err != nil {
 		return "unknown"
 	}
-	return age(now.Sub(t))
-}
-func age(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", max(0, int(d.Round(time.Second)/time.Second)))
-	}
-	return fmt.Sprintf("%dm", int(d.Round(time.Minute)/time.Minute))
+	return shipview.Age(now.Sub(t))
 }
 func clean(text string) string {
 	return strings.Map(func(r rune) rune {
