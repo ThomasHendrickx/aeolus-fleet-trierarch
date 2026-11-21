@@ -23,6 +23,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/copilot"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mask"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
@@ -41,7 +42,7 @@ func (e unknownShip) Error() string {
 }
 func (e unknownShip) Unwrap() error { return ErrShipUnknown }
 
-// View contains facts only. Session content and credentials have no fields here.
+// View contains local facts and masked session lines, never credential values.
 type View struct {
 	ShipID      string       `json:"shipId"`
 	ShipName    string       `json:"shipName"`
@@ -52,6 +53,7 @@ type View struct {
 	Restarts    int          `json:"restarts"`
 	Places      Places       `json:"places"`
 	Session     Session      `json:"session"`
+	Lines       []Line       `json:"lines"`
 	Unreadable  []Unreadable `json:"unreadable"`
 }
 
@@ -82,10 +84,11 @@ type Activity struct {
 	At   string `json:"at"`
 }
 
-// Process names a process and when it started, without its command line.
+// Process names a process, when it started and its masked command.
 type Process struct {
 	PID       int    `json:"pid"`
 	StartedAt string `json:"startedAt"`
+	Command   string `json:"command"`
 }
 
 // Unreadable names a fact's source that could not be read.
@@ -198,6 +201,7 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 		ShipID: one.ShipID, ShipName: one.ShipName, Harness: one.Harness,
 		State: one.State, Since: localTime(one.Since, now.Location()),
 		Unreadable: []Unreadable{},
+		Lines:      []Line{},
 		Session:    Session{Status: "exited", Processes: []Process{}},
 		Places: Places{
 			ShipFolder: one.Folder, SubRepositories: map[string]string{},
@@ -250,20 +254,21 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 	if reason == "" && view.Session.HoldPID > 0 && processproof.Runs(view.Session.HoldPID, "hold", one.ShipID, "--sessions", at.Sessions) {
 		view.Session.Status = "running"
 	}
-	readers := map[string]func([]string) (activity.Reading, bool){"claude-code": claudecode.ActivityIn, "codex": codex.ActivityIn, "copilot": copilot.ActivityIn}
-	if reader := readers[one.Harness]; reader != nil {
-		file, err := files.Open(held.Events)
-		view.record("activity", held.Events, err)
-		if err == nil {
-			latest, ok, err := activity.OfFile(file, func(line string) (activity.Reading, bool) { return reader([]string{line}) })
-			_ = file.Close()
-			view.record("activity", held.Events, err)
-			if ok && err == nil {
-				view.Session.Activity = &Activity{latest.Kind, latest.Tool, latest.At.In(now.Location()).Format(time.RFC3339)}
-			}
+	masker, maskErr := (mask.Loader{Files: files}).Load(ctx, at)
+	if maskErr != nil {
+		var source *mask.SourceError
+		if errors.As(maskErr, &source) {
+			view.Unreadable = append(view.Unreadable, Unreadable{Fact: "masking", Path: source.Path, Error: source.Err.Error()})
+		} else {
+			view.Unreadable = append(view.Unreadable, Unreadable{Fact: "masking", Path: at.Home, Error: maskErr.Error()})
 		}
 	}
+	readers := map[string]func([]string) (activity.Reading, bool){"claude-code": claudecode.ActivityIn, "codex": codex.ActivityIn, "copilot": copilot.ActivityIn}
+	view.readEvents(ctx, files, held.Events, readers[one.Harness], masker, now)
 	if view.Session.Status == "running" {
+		if maskErr != nil {
+			return view, nil
+		}
 		processes := r.Processes
 		if processes == nil {
 			processes = machineProcesses{}
@@ -272,6 +277,9 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 		if err != nil {
 			view.record("processes", one.Folder, err)
 		} else {
+			for i := range found {
+				found[i].Command = masker.Line(found[i].Command)
+			}
 			view.Session.Processes = found
 		}
 	}
@@ -320,7 +328,7 @@ func (machineProcesses) Processes(ctx context.Context, request ProcessRequest) (
 	}
 	processes := make([]Process, 0, len(found))
 	for _, each := range found {
-		processes = append(processes, Process{each.PID, each.StartedAt.In(request.At.Location()).Format(time.RFC3339)})
+		processes = append(processes, Process{PID: each.PID, StartedAt: each.StartedAt.In(request.At.Location()).Format(time.RFC3339), Command: each.Command})
 	}
 	return processes, nil
 }

@@ -38,13 +38,16 @@ func describeShip(view shipview.View, now time.Time) string {
 	processes := []string{}
 	for _, p := range view.Session.Processes {
 		started, _ := time.Parse(time.RFC3339, p.StartedAt)
-		processes = append(processes, fmt.Sprintf("%d for %s", p.PID, age(now.Sub(started))))
+		processes = append(processes, fmt.Sprintf("%d for %s: %s", p.PID, age(now.Sub(started)), p.Command))
 	}
 	processText := "none"
 	if len(processes) > 0 {
 		processText = strings.Join(processes, "; ")
 	}
 	for _, unreadable := range view.Unreadable {
+		if unreadable.Fact == "masking" {
+			processText = "not shown: cannot read " + unreadable.Path + " to mask it (" + unreadable.Error + ")"
+		}
 		value := fmt.Sprintf("unreadable: %s: %s", unreadable.Path, unreadable.Error)
 		if unreadable.Fact == "processes" {
 			processText = value
@@ -60,10 +63,39 @@ func describeShip(view shipview.View, now time.Time) string {
 		fmt.Sprintf("Places: ship folder %s, hold %s", view.Places.ShipFolder, view.Places.Hold),
 	}
 	for _, unreadable := range view.Unreadable {
-		if unreadable.Fact == "activity" || unreadable.Fact == "processes" {
+		if unreadable.Fact == "activity" || unreadable.Fact == "processes" || unreadable.Fact == "masking" {
 			continue
 		}
 		text = append(text, fmt.Sprintf("Unreadable: %s: %s", unreadable.Path, unreadable.Error))
+	}
+	lineFailure := ""
+	for _, unreadable := range view.Unreadable {
+		if unreadable.Fact == "activity" {
+			lineFailure = fmt.Sprintf("unreadable: %s: %s", unreadable.Path, unreadable.Error)
+		}
+		if unreadable.Fact == "masking" {
+			lineFailure = "not shown: cannot read " + unreadable.Path + " to mask it (" + unreadable.Error + ")"
+			break
+		}
+	}
+	if lineFailure != "" {
+		text = append(text, "Last lines: "+lineFailure)
+	} else {
+		text = append(text, "Last lines:")
+		for _, line := range view.Lines {
+			stamp := "--:--:--"
+			if at, err := time.Parse(time.RFC3339Nano, line.At); err == nil {
+				stamp = at.Format("15:04:05")
+			}
+			prefix := stamp
+			if line.Kind != "" {
+				prefix += " " + line.Kind
+			}
+			if line.Tool != "" {
+				prefix += " " + line.Tool
+			}
+			text = append(text, "  "+prefix+" "+line.Line)
+		}
 	}
 	return strings.Join(text, "\n")
 }

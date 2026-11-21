@@ -59,8 +59,8 @@ func TestShipStatusShowsLocalFactsByNameOrIDWithoutCredentials(t *testing.T) {
 				if code != 0 {
 					t.Fatalf("status = %d, %s", code, out)
 				}
-				if strings.Contains(out, "SECRET-CREW-TOKEN") || strings.Contains(out, "crewToken") || strings.Contains(out, "command") {
-					t.Fatalf("status disclosed credentials or commands: %s", out)
+				if strings.Contains(out, "SECRET-CREW-TOKEN") || strings.Contains(out, "crewToken") {
+					t.Fatalf("status disclosed credentials: %s", out)
 				}
 				if isJSON {
 					var got struct {
@@ -94,6 +94,7 @@ func TestShipStatusShowsLocalFactsByNameOrIDWithoutCredentials(t *testing.T) {
 					}
 				} else {
 					want := "Ship: design-tri-271c (shp_one), claude-code, on the host\nState: running since 2026-11-20T13:30:12+01:00, 0 restarts\nActivity: tool Bash, 12s ago\nProcesses: none\nPlaces: ship folder " + filepath.Join(at.Ships, "shp_one", "repositories") + ", hold " + filepath.Join(at.Sessions, "shp_one")
+					want += "\nLast lines:\n  --:--:-- tool Bash {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"[masked: crew token]\"}}]}}"
 					if out != want {
 						t.Fatalf("status = %s\nwant %s", out, want)
 					}
@@ -151,7 +152,7 @@ func TestShipStatusJSONMatchesTheApprovedFactsShape(t *testing.T) {
  },
  "session":{"status":"exited","holdPid":999999999,"sessionId":"session-one",
  "activity":{"kind":"tool","tool":"Bash","at":"2026-11-20T14:02:19+01:00"},"processes":[]},
- "unreadable":[]
+ "lines":[{"at":"","kind":"tool","tool":"Bash","line":"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"[masked: crew token]\"}}]}}"}],"unreadable":[]
 }`, "@ROOT@", at.Home)
 	var gotJSON, wantJSON any
 	if err := json.Unmarshal([]byte(out), &gotJSON); err != nil {
@@ -165,7 +166,8 @@ func TestShipStatusJSONMatchesTheApprovedFactsShape(t *testing.T) {
 	}
 }
 
-func TestShipStatusShowsRunningProcessesWithoutTheirCommands(t *testing.T) {
+func aRunningShipStatus(t *testing.T) (Machine, paths.Paths, int) {
+	t.Helper()
 	machine, at := aShipStatus(t)
 	folder := filepath.Join(at.Ships, "shp_one", "repositories")
 	if err := os.MkdirAll(folder, 0700); err != nil {
@@ -191,9 +193,14 @@ func TestShipStatusShowsRunningProcessesWithoutTheirCommands(t *testing.T) {
 	if err := os.Remove(filepath.Join(at.Sessions, "shp_one", "exit-reason")); err != nil {
 		t.Fatal(err)
 	}
+	return machine, at, child.Process.Pid
+}
+
+func TestShipStatusShowsRunningProcessesWithMaskedCommands(t *testing.T) {
+	machine, _, childPID := aRunningShipStatus(t)
 	for _, flags := range [][]string{{}, {"--json"}} {
 		out, code := Main(append([]string{"status", "shp_one"}, flags...), machine)
-		if code != 0 || !strings.Contains(out, strconv.Itoa(child.Process.Pid)) || strings.Contains(out, "SECRET-CREW-TOKEN") {
+		if code != 0 || !strings.Contains(out, strconv.Itoa(childPID)) || strings.Contains(out, "SECRET-CREW-TOKEN") || !strings.Contains(out, "[masked: crew token]") {
 			t.Fatalf("process facts = %d, %s", code, out)
 		}
 		if len(flags) > 0 {
@@ -203,18 +210,55 @@ func TestShipStatusShowsRunningProcessesWithoutTheirCommands(t *testing.T) {
 					Processes []struct {
 						PID       int
 						StartedAt string
+						Command   string
 					}
 				}
 			}
 			if err := json.Unmarshal([]byte(out), &view); err != nil {
 				t.Fatal(err)
 			}
-			if view.Session.Status != "running" || len(view.Session.Processes) != 1 || view.Session.Processes[0].PID != child.Process.Pid || view.Session.Processes[0].StartedAt == "" {
+			if view.Session.Status != "running" || len(view.Session.Processes) != 1 || view.Session.Processes[0].PID != childPID || view.Session.Processes[0].StartedAt == "" || !strings.Contains(view.Session.Processes[0].Command, "[masked: crew token]") {
 				t.Fatalf("process facts = %+v", view)
 			}
-		} else if !strings.Contains(out, "Processes: "+strconv.Itoa(child.Process.Pid)+" for ") {
+		} else if !strings.Contains(out, "Processes: "+strconv.Itoa(childPID)+" for ") {
 			t.Fatalf("process text = %s", out)
 		}
+	}
+}
+
+func TestShipStatusHidesCommandsWhenCredentialsAreUnreadable(t *testing.T) {
+	machine, at, _ := aRunningShipStatus(t)
+	if err := os.Mkdir(at.ModelToken, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, flags := range [][]string{{}, {"--json"}} {
+		out, code := Main(append([]string{"status", "shp_one"}, flags...), machine)
+		if code != 0 || strings.Contains(out, "SECRET-CREW-TOKEN") || strings.Contains(out, "TestShipStatusProcess") || !strings.Contains(out, at.ModelToken) {
+			t.Fatalf("unmaskable commands = %d, %s", code, out)
+		}
+	}
+}
+
+func TestShipStatusShowsWholeMaskedLinesAfterTheirTimeKindAndTool(t *testing.T) {
+	machine, at := aShipStatus(t)
+	event := `{"timestamp":"2026-11-20T13:31:27+01:00","type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"SECRET-CREW-TOKEN ` + strings.Repeat("whole ", 200) + `"}}]}}`
+	writeStatusFile(t, filepath.Join(at.Sessions, "shp_one", "events.jsonl"), event+"\n")
+	out, code := Main([]string{"status", "shp_one"}, machine)
+	want := "Last lines:\n  13:31:27 tool Bash " + strings.ReplaceAll(event, "SECRET-CREW-TOKEN", "[masked: crew token]")
+	if code != 0 || !strings.HasSuffix(out, want) {
+		t.Fatalf("whole lines = %d, %s", code, out)
+	}
+}
+
+func TestShipStatusHidesLinesWhenCredentialsAreUnreadable(t *testing.T) {
+	machine, at := aShipStatus(t)
+	writeStatusFile(t, filepath.Join(at.Sessions, "shp_one", "events.jsonl"), "whole fake-event\n")
+	if err := os.Mkdir(at.ModelToken, 0700); err != nil {
+		t.Fatal(err)
+	}
+	out, code := Main([]string{"status", "shp_one"}, machine)
+	if code != 0 || !strings.Contains(out, "Last lines: not shown: cannot read "+at.ModelToken+" to mask it (is a directory)") || strings.Contains(out, "whole ") {
+		t.Fatalf("unmaskable lines = %d, %s", code, out)
 	}
 }
 
