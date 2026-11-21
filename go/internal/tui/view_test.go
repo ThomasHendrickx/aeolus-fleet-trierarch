@@ -263,3 +263,23 @@ func TestListViewShowsNoPassYet(t *testing.T) {
 		t.Fatalf("View(no pass) = %s, want read time and no pass yet", got)
 	}
 }
+
+func TestLiveViewsShowHourAges(t *testing.T) {
+	for _, screen := range []screen{listScreen, shipScreen} {
+		t.Run(fmt.Sprint(screen), func(t *testing.T) {
+			m := aScreen()
+			m.screen = screen
+			m.now = m.now.Add(3 * time.Hour)
+			got := screenWords(m.View())
+			wants := []string{"busy 4h", "tool Bash, 3h ago", "pass 3h ago"}
+			if screen == shipScreen {
+				wants = []string{"Turn busy since 13:31:27 (4h), seen 3h ago", "tool Bash, 3h ago", "Processes pid 48211 4h", "Inbox 2 waiting, 1 forced, seen 3h ago"}
+			}
+			for _, want := range wants {
+				if !strings.Contains(got, want) {
+					t.Errorf("View(%v, hours old) = %s, want %q", screen, got, want)
+				}
+			}
+		})
+	}
+}
