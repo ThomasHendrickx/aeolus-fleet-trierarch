@@ -117,6 +117,10 @@ type Machine struct {
 	Detect func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error)
 	// ServiceLog is the trierarch's log where its service writes it, as logs reads it.
 	ServiceLog func(at paths.Paths) servicelog.Log
+	// IsInputTerminal overrides stdin detection for an embedding caller.
+	IsInputTerminal func() bool
+	// RunTUI overrides the terminal program for an embedding caller.
+	RunTUI func(paths.Paths, style.Style) error
 	// IsTerminal says whether stdout is a terminal, where status and list colour their words.
 	IsTerminal bool
 	// StartedAt is when the process started, ISO 8601; empty when it cannot be told.
@@ -130,7 +134,10 @@ const usage = `Usage: aeolus-trierarch <command>
   init --fleet-url <url> --ship-id <id> --secret-stdin [--plugin-ship-id <id>] [--harnesses <list>] [--unattended <list>] [--repositories <list> | --repositories-in <folder> | --no-repositories] [--clone-into <folder>] [--folder <name> <path>]... [--no-folders] [--max-ships <n>] [--max-running <n>] [--service yes|no] [--yes]
                  set this machine up from the trierarch plugin's setup line
   status         how the trierarch stands on this machine
+  status <ship>  one ship, by its name or id: its session, turn, activity, processes,
+                 inbox, last lines and last end, on this machine only
   list           the ships it crews
+  tui            the same, live, full screen: the ship list, one ship opened, its last end
   add repository|folder <name> <path>
                  add a place the trierarch may crew ships in, and trust it
   login          each harness's login and whether it holds an API key
@@ -164,7 +171,7 @@ const usage = `Usage: aeolus-trierarch <command>
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
 var valueFlags = []string{"--fleet-url", "--ship-id", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into", "--service"}
-var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow", "--no-repositories", "--no-folders", "--secret-stdin"}
+var switchFlags = []string{"--json", "--help", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow", "--no-repositories", "--no-folders", "--secret-stdin"}
 
 type parsed struct {
 	words    []string
@@ -231,6 +238,9 @@ func Main(args []string, machine Machine) (string, int) {
 	if !ok {
 		return usage, 2
 	}
+	if command.switches["--help"] {
+		return usage, 0
+	}
 	isJSON := command.switches["--json"]
 	if (command.switches["--version"] && len(command.words) == 0) || slices.Equal(command.words, []string{"-v"}) {
 		if isJSON {
@@ -249,6 +259,7 @@ func Main(args []string, machine Machine) (string, int) {
 		look = style.Of(machine.Environ, machine.IsTerminal)
 	}
 	commands := map[string]func() (answer, error){
+		"tui": func() (answer, error) { return live(at, machine, look) },
 		"init": func() (answer, error) {
 			// Setup's progress goes to stdout as it happens, never into --json.
 			var initPrint func(line string)

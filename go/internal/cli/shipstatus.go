@@ -18,6 +18,24 @@ func shipStatus(at paths.Paths, machine Machine, ship string) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
+	standing, unreadable := localStanding(at, machine, now)
+	view.Trierarch = standing
+	for _, source := range unreadable {
+		duplicate := false
+		for _, existing := range view.Unreadable {
+			if existing.Path == source.Path && existing.Error == source.Error {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			view.Unreadable = append(view.Unreadable, source)
+		}
+	}
+	return answer{data: view, text: describeShip(view, now)}, nil
+}
+
+func localStanding(at paths.Paths, machine Machine, now time.Time) (shipview.Standing, []shipview.Unreadable) {
 	isRunning := false
 	var serviceFailure *shipview.Unreadable
 	if machine.Service != nil {
@@ -35,20 +53,7 @@ func shipStatus(at paths.Paths, machine Machine, ship string) (answer, error) {
 		standing.Says = append([]string{fmt.Sprintf("unreadable: %s: %s", serviceFailure.Path, serviceFailure.Error)}, standing.Says...)
 		unreadable = append(unreadable, *serviceFailure)
 	}
-	view.Trierarch = standing
-	for _, source := range unreadable {
-		duplicate := false
-		for _, existing := range view.Unreadable {
-			if existing.Path == source.Path && existing.Error == source.Error {
-				duplicate = true
-				break
-			}
-		}
-		if !duplicate {
-			view.Unreadable = append(view.Unreadable, source)
-		}
-	}
-	return answer{data: view, text: describeShip(view, now)}, nil
+	return standing, unreadable
 }
 
 func describeShip(view shipview.View, now time.Time) string {
