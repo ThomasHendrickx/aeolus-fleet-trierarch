@@ -123,8 +123,23 @@ describe('the finish workflow', () => {
 });
 
 describe('the candidate workflow', () => {
-  it('leaves Go binary builds to the release workflow', () => {
+  it('builds and checks binaries before packing their integrity with the plugin', () => {
     const candidate = workflow('../.github/workflows/candidate.yml');
-    expect(candidate).not.toContain('go-binaries.yml');
+    expect(candidate).toContain('uses: ./.github/workflows/go-binaries.yml');
+    expect(candidate).toContain('needs: binaries');
+    expect(candidate).toContain('pattern: aeolus-trierarch-*');
+    expect(candidate).toContain('readdirSync(folder)');
+    expect(candidate).not.toContain('node scripts/release-gate.ts');
+  });
+});
+
+ describe('publishing candidate binaries', () => {
+  it('downloads and checks the candidate before preserving its binaries for the finish workflow', () => {
+    const release = workflow(RELEASE);
+    expect(release).not.toContain('go-binaries.yml');
+    expect(stepNamed(release, 'Download the candidate')).toContain('--pattern "aeolus-trierarch-*"');
+    expect(stepNamed(release, 'Download the candidate')).toContain('node scripts/candidate-check.ts');
+    expect(release).toContain('name: aeolus-trierarch-candidate');
+    expect(release).toContain('needs: release');
   });
 });
