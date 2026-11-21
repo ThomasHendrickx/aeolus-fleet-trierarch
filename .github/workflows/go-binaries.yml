@@ -77,24 +77,44 @@ jobs:
           TMPDIR: ${{ runner.temp }}
         run: go test -race ./...
 
-      - if: runner.os == 'Linux'
-        uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-      - if: runner.os == 'Linux'
-        run: npm ci
-      - if: runner.os == 'Linux'
-        uses: ./.github/actions/test-images
-      # The upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release, with go on PATH.
-      - name: Contract tests on ${{ env.NAME }}
-        if: runner.os == 'Linux'
-        run: npm run test:contract:go
-        env:
-          AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/${{ env.NAME }}
-
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ env.NAME }}
           path: ${{ runner.temp }}/${{ env.NAME }}
           if-no-files-found: error
+
+  contract:
+    name: Contract tests on aeolus-trierarch-linux-${{ matrix.goarch }} (${{ matrix.shard }}/3)
+    needs: binary
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-latest, goarch: amd64, shard: 1 }
+          - { runner: ubuntu-latest, goarch: amd64, shard: 2 }
+          - { runner: ubuntu-latest, goarch: amd64, shard: 3 }
+          - { runner: ubuntu-24.04-arm, goarch: arm64, shard: 1 }
+          - { runner: ubuntu-24.04-arm, goarch: arm64, shard: 2 }
+          - { runner: ubuntu-24.04-arm, goarch: arm64, shard: 3 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - uses: ./.github/actions/test-images
+      - uses: actions/download-artifact@v8
+        with:
+          name: aeolus-trierarch-linux-${{ matrix.goarch }}
+          path: ${{ runner.temp }}/binary
+      - run: chmod +x "$RUNNER_TEMP/binary/aeolus-trierarch-linux-${{ matrix.goarch }}"
+      # Upgrade tests build the next version with Go on PATH.
+      - run: npm run test:contract:go -- --shard=${{ matrix.shard }}/3
+        env:
+          AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/binary/aeolus-trierarch-linux-${{ matrix.goarch }}

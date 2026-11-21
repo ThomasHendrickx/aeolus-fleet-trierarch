@@ -134,8 +134,7 @@ jobs:
         run: node scripts/check-em-dash.ts "$BASE_SHA" "$HEAD_SHA"
 
   integration:
-    # Runs the trierarch's, the plugin's and the contract suite's integration tests against Postgres
-    # and the trierarch built from source, so it runs when changed-paths finds what they read changed.
+    # Runs the non-contract integration projects against Postgres.
     name: Integration tests (Postgres in Testcontainers)
     needs: changed-paths
     if: ${{ always() && (needs.changed-paths.result != 'success' || needs.changed-paths.outputs.integration == 'true') }}
@@ -149,11 +148,6 @@ jobs:
         with:
           node-version: 26
           cache: npm
-      # The contract suite's upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release.
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go/go.mod
-          cache-dependency-path: go/go.sum
       - run: npm ci
       # The images Testcontainers starts, from the Actions cache.
       - uses: ./.github/actions/test-images
@@ -264,8 +258,12 @@ jobs:
           printf 'contract=%s\nintegration=%s\n' "$contract" "$integration" >> "$GITHUB_OUTPUT"
 
   contract-go:
-    # The contract suite's parts the Go trierarch is built to so far, driven against its binary.
-    name: Contract tests on the Go trierarch
+    # Run each part once; the aggregate below retains the required check name.
+    name: Contract tests on the Go trierarch (${{ matrix.shard }}/3)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     needs: changed-paths
     if: ${{ always() && (needs.changed-paths.result != 'success' || needs.changed-paths.outputs.contract == 'true') }}
     runs-on: ubuntu-latest
@@ -290,7 +288,7 @@ jobs:
       # The upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release, with go on PATH.
       # Each process the suite starts is recorded there, for the leftovers check to find any left running.
       - id: tests
-        run: npm run test:contract:go
+        run: npm run test:contract:go -- --shard=${{ matrix.shard }}/3
         env:
           AEOLUS_TEST_PROCESS_RECORD: ${{ runner.temp }}/test-processes
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
@@ -300,6 +298,22 @@ jobs:
         run: node scripts/check-test-run-leftovers.ts docker
         env:
           AEOLUS_TEST_PROCESS_RECORD: ${{ runner.temp }}/test-processes
+
+  contract-go-result:
+    name: Contract tests on the Go trierarch
+    needs: [changed-paths, contract-go]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all contract shards
+        env:
+          PATHS_RESULT: ${{ needs.changed-paths.result }}
+          CONTRACT_CHANGED: ${{ needs.changed-paths.outputs.contract }}
+          SHARDS_RESULT: ${{ needs.contract-go.result }}
+        run: |
+          if [[ "$PATHS_RESULT" != success ]]; then exit 1; fi
+          if [[ "$CONTRACT_CHANGED" == true && "$SHARDS_RESULT" != success ]]; then exit 1; fi
+          if [[ "$CONTRACT_CHANGED" != true && "$SHARDS_RESULT" != skipped ]]; then exit 1; fi
 
   session-image:
     # The image a trierarch runs container sessions from (decision 0039), built

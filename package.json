@@ -14,9 +14,9 @@
     "lint": "eslint --max-warnings 0 .",
     "test": "vitest run",
     "test:unit": "vitest run --project '*:unit'",
-    "test:integration": "vitest run --project '*:integration'",
+    "test:integration": "vitest run --project plugin:integration",
     "test:e2e": "vitest run --project '*:e2e'",
-    "test:contract:go": "vitest run --project contract:integration init.integration run.integration ship-socket.integration hold.integration takeover.integration model-proxy.integration harnesses.integration upgrade.integration notices.integration subscription.integration detect.integration install.integration logs.integration pass-failure.integration machine-load.integration worktree.integration ship-folder.integration trusted-repositories.integration mcp-configuration.integration usage.integration status.integration activity.integration checkouts.integration settings.integration failed-starts.integration launch-marker.integration container.integration used-up-window.integration",
+    "test:contract:go": "vitest run --project contract:integration",
     "set-version": "node scripts/set-version.ts"
   },
   "devDependencies": {
