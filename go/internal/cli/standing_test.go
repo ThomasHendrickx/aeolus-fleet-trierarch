@@ -115,7 +115,7 @@ func TestPlainStatusReportsTheLastSuccessfulPassAge(t *testing.T) {
 }
 
 func TestShipStandingKeepsOtherFactsWhenAPassOrServiceCannotBeRead(t *testing.T) {
-	for _, kind := range []string{"missing", "malformed", "unreadable", "service"} {
+	for _, kind := range []string{"missing", "malformed", "invalid time", "unreadable", "service"} {
 		t.Run(kind, func(t *testing.T) {
 			machine, at := aShipStatus(t)
 			path := filepath.Join(at.Home, "seen.json")
@@ -127,6 +127,9 @@ func TestShipStandingKeepsOtherFactsWhenAPassOrServiceCannotBeRead(t *testing.T)
 				}
 			case "malformed":
 				writeStatusFile(t, path, `{"passAt":`)
+				want = "unreadable: " + path
+			case "invalid time":
+				writeStatusFile(t, path, `{"passAt":"not-a-time","ships":{}}`)
 				want = "unreadable: " + path
 			case "unreadable":
 				if err := os.Remove(path); err != nil {
