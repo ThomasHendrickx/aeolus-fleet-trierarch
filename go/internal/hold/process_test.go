@@ -180,13 +180,43 @@ func TestTheHoldAnswersAProcessThatLeftAnotherShipsSessionByItsOwnSetsidOnceItIs
 	sessions := shortFolder(t)
 	scout, _ := aHoldProcessOf(t, sessions, ship, `while read -r line; do :; done`)
 	answered := filepath.Join(t.TempDir(), "answer")
+	reparented := answered + ".parent"
+	failed := answered + ".error"
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("caller reparenting: %q; caller error: %s", read(reparented), read(failed))
+		}
+	})
 
-	// perl's setsid, as macOS has no setsid command; the subshell ends at once, so the process calls once its parent is gone.
-	aHoldProcessOf(t, sessions, "shp_01m6jyczpnpp5c0vxh54c966cz", `( perl -MPOSIX -e 'POSIX::setsid(); sleep 1; exec @ARGV' "$CALLER" call `+scout.Socket+` `+answered+` & ); while read -r line; do :; done`)
+	// Fork in perl so the child knows its original parent even if that parent
+	// exits before the child runs. macOS has no setsid command.
+	aHoldProcessOf(t, sessions, "shp_01m6jyczpnpp5c0vxh54c966cz", `perl -MPOSIX -e '
+my $parent = $$;
+defined(my $child = fork()) or die "fork: $!";
+exit 0 if $child;
+defined(POSIX::setsid()) or die "setsid: $!";
+$SIG{ALRM} = sub { die "parent $parent did not exit\n" };
+alarm 5;
+select undef, undef, undef, 0.01 while getppid() == $parent;
+alarm 0;
+open my $ready, ">", shift @ARGV or die "record reparenting: $!";
+print $ready "$parent ".getppid();
+close $ready or die "close reparenting record: $!";
+exec @ARGV;
+die "exec caller: $!";
+' `+reparented+` "$CALLER" call `+scout.Socket+` `+answered+` 2> `+failed+`; while read -r line; do :; done`)
 
-	eventually(t, "the call of the process that left its session answered", func() bool { return read(answered) != "" })
+	eventually(t, "the caller reparented or failed", func() bool { return read(reparented) != "" || read(failed) != "" })
+	if failure := read(failed); failure != "" {
+		t.Fatalf("prepare the reparented caller: %s", failure)
+	}
+	parents := strings.Fields(read(reparented))
+	if len(parents) != 2 || parents[0] == parents[1] {
+		t.Fatalf("caller parent before and after reparenting = %q, want two different pids", read(reparented))
+	}
+	eventually(t, "the call of the process that left its session answered", func() bool { return read(answered) != "" || read(failed) != "" })
 	if got := read(answered); !strings.Contains(got, `"isOk":true`) {
-		t.Fatalf("a reparented process that left another ship's session called = %s, want it answered", got)
+		t.Fatalf("a reparented process that left another ship's session called = %s, error = %s, want it answered", got, read(failed))
 	}
 }
 
