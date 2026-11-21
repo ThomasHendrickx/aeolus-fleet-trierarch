@@ -38,8 +38,13 @@ func ReadStanding(at paths.Paths, now time.Time, isRunning bool) (Standing, []Un
 	var snapshot seen.Snapshot
 	read(filepath.Join(at.Home, "seen.json"), &snapshot)
 	if snapshot.PassAt != "" {
-		stamp := localTime(snapshot.PassAt, now.Location())
-		s.LastPassAt = &stamp
+		stamp, err := time.Parse(time.RFC3339, snapshot.PassAt)
+		if err != nil {
+			v.record("standing", filepath.Join(at.Home, "seen.json"), err)
+		} else {
+			local := stamp.In(now.Location()).Format(time.RFC3339)
+			s.LastPassAt = &local
+		}
 	}
 	if !isRunning {
 		s.Service = "not running"
