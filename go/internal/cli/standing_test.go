@@ -91,6 +91,7 @@ func TestPlainStatusReportsTheLastSuccessfulPassAge(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			machine, _, _ := aMain(t)
 			Main(setupWords(), machine)
+			machine.Now = func() time.Time { return time.Date(2026, 10, 6, 7, 0, 20, 0, time.UTC) }
 			at := paths.Of(machine.HomeDirectory, "")
 			if tc.stamp != "" {
 				writeStatusFile(t, filepath.Join(at.Home, "seen.json"), `{"passAt":`+quoted(tc.stamp)+`,"ships":{}}`)

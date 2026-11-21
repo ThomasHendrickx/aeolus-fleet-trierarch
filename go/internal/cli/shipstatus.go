@@ -18,6 +18,17 @@ func shipStatus(at paths.Paths, machine Machine, ship string) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
+	isRunning := false
+	if machine.Service != nil {
+		service, err := machine.Service(at).Status()
+		if err != nil {
+			return answer{}, err
+		}
+		isRunning = service.IsRunning
+	}
+	standing, unreadable := shipview.ReadStanding(at, now, isRunning)
+	view.Trierarch = standing
+	view.Unreadable = append(view.Unreadable, unreadable...)
 	return answer{data: view, text: describeShip(view, now)}, nil
 }
 
@@ -69,6 +80,12 @@ func describeShip(view shipview.View, now time.Time) string {
 		}
 		text = append(text, fmt.Sprintf("Unreadable: %s: %s", unreadable.Path, unreadable.Error))
 	}
+	standing := strings.Join(view.Trierarch.Says, " ")
+	if view.Trierarch.IsCurrent {
+		stamp, _ := time.Parse(time.RFC3339, view.Trierarch.LastPassAt)
+		standing = "current, last pass " + age(now.Sub(stamp)) + " ago"
+	}
+	text = append(text, "Trierarch: "+standing)
 	lineFailure := ""
 	for _, unreadable := range view.Unreadable {
 		if unreadable.Fact == "activity" {
@@ -101,12 +118,7 @@ func describeShip(view shipview.View, now time.Time) string {
 	return strings.Join(text, "\n")
 }
 
-func age(elapsed time.Duration) string {
-	if elapsed < time.Minute {
-		return fmt.Sprintf("%ds", max(0, int(elapsed.Round(time.Second)/time.Second)))
-	}
-	return fmt.Sprintf("%dm", int(elapsed.Round(time.Minute)/time.Minute))
-}
+func age(elapsed time.Duration) string { return shipview.Age(elapsed) }
 
 // seenText keeps the wording for unavailable observations in one place.
 func seenText(view shipview.View, now time.Time) (string, string) {

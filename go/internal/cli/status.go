@@ -18,6 +18,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipview"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/style"
 )
@@ -50,6 +51,8 @@ type StatusReport struct {
 	Orphans          []string       `json:"orphans"`
 	// PassFailure is why the last pass failed and since when; none when it succeeded.
 	PassFailure *reconciler.PassFailure `json:"passFailure,omitempty"`
+	LastPassAt  string                  `json:"lastPassAt,omitempty"`
+	readAt      time.Time
 }
 
 // StatusFleet is the fleet and the trierarch's own lease: valid, ended or unreachable.
@@ -116,7 +119,9 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	} else if !held {
 		lease = "ended"
 	}
+	standing, _ := shipview.ReadStanding(at, now(), manager.IsRunning)
 	report := StatusReport{
+		LastPassAt: standing.LastPassAt, readAt: now(),
 		Version:           Version,
 		Plugins:           map[string]*string{},
 		ModelsConfirmedAt: map[string]*string{},
@@ -319,8 +324,15 @@ func describeStatus(report StatusReport, look style.Style) string {
 		}
 	}
 	lastPass := look.Tone(style.Good, "succeeded")
+	stamp, stampErr := time.Parse(time.RFC3339, report.LastPassAt)
+	if stampErr == nil {
+		lastPass = look.Tone(style.Good, "succeeded, "+age(report.readAt.Sub(stamp))+" ago")
+	}
 	if report.PassFailure != nil {
-		lastPass = look.Tone(style.Bad, fmt.Sprintf("failing since %s: %s", report.PassFailure.Since, report.PassFailure.Reason))
+		lastPass = look.Tone(style.Bad, "failed (no success yet)")
+		if stampErr == nil {
+			lastPass = look.Tone(style.Bad, "failed (last success "+age(report.readAt.Sub(stamp))+" ago)")
+		}
 	}
 	keptWorktrees := []string{}
 	for _, each := range report.Kept {

@@ -205,7 +205,7 @@ func TestStatusSaysTheWholeState(t *testing.T) {
 		"Service: running, pid 41, since 2026-10-06T07:00:00.000Z",
 		"Fleet: " + fleetURL + ", the lease of " + shipID + " is valid",
 		"Caps: 2 of 4 ships crewed here, 1 of 2 sessions running",
-		"Last pass: failing since 2026-10-06T08:00:00.000Z: the fleet cannot be reached",
+		"Last pass: failed (no success yet)",
 		"Entries: running 1, restarting 1",
 		"Kept worktrees: /worktrees/kept (shp_k)",
 		"Orphans: /worktrees/stray",

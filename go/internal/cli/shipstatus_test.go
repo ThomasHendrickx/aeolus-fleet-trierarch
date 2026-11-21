@@ -32,7 +32,10 @@ func aShipStatus(t *testing.T) (Machine, paths.Paths) {
 	if err := os.Chtimes(events, now.Add(-12*time.Second), now.Add(-12*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	return Machine{HomeDirectory: home, Now: func() time.Time { return now }}, at
+	writeStatusFile(t, filepath.Join(at.Home, "seen.json"), `{"passAt":"2026-11-20T13:02:27Z","ships":{}}`)
+	return Machine{Service: func(paths.Paths) ServiceManager {
+		return &anInstalledService{aServiceManager: aServiceManager{running: true}}
+	}, HomeDirectory: home, Now: func() time.Time { return now }}, at
 }
 
 func quoted(s string) string { b, _ := json.Marshal(s); return string(b) }
@@ -94,7 +97,7 @@ func TestShipStatusShowsLocalFactsByNameOrIDWithoutCredentials(t *testing.T) {
 					}
 				} else {
 					want := "Ship: design-tri-271c (shp_one), claude-code, on the host\nState: running since 2026-11-20T13:30:12+01:00, 0 restarts\nTurn: -\nActivity: tool Bash, 12s ago\nInbox: not watched while no session runs\nProcesses: none\nPlaces: ship folder " + filepath.Join(at.Ships, "shp_one", "repositories") + ", hold " + filepath.Join(at.Sessions, "shp_one")
-					want += "\nLast lines:\n  --:--:-- tool Bash {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"[masked: crew token]\"}}]}}"
+					want += "\nTrierarch: current, last pass 4s ago\nLast lines:\n  --:--:-- tool Bash {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"[masked: crew token]\"}}]}}"
 					if out != want {
 						t.Fatalf("status = %s\nwant %s", out, want)
 					}
@@ -153,6 +156,7 @@ func TestShipStatusJSONMatchesTheApprovedFactsShape(t *testing.T) {
  "session":{"status":"exited","holdPid":999999999,"sessionId":"session-one","turn":null,
  "activity":{"kind":"tool","tool":"Bash","at":"2026-11-20T14:02:19+01:00"},"processes":[]},
  "inbox":{"isWatched":false},
+ "trierarch":{"service":"running","lastPassAt":"2026-11-20T14:02:27+01:00","passFailure":null,"isCurrent":true,"says":[]},
  "lines":[{"at":"","kind":"tool","tool":"Bash","line":"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"[masked: crew token]\"}}]}}"}],"unreadable":[]
 }`, "@ROOT@", at.Home)
 	var gotJSON, wantJSON any
