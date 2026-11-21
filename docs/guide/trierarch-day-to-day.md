@@ -46,7 +46,7 @@ aeolus-trierarch status design-tri-271c --json
 aeolus-trierarch logs --follow
 ```
 
-- `tui` opens the [live local screens](../trierarch.md#live-local-screens): up/down or j/k moves, enter opens a ship, esc goes back, and q quits. Its local facts refresh every five seconds. Session lines are masked before being cut to the width; use `status <ship>` to read them whole, or `status <ship> --json` without a terminal.
+- `tui` opens the [live local screens](../trierarch.md#live-local-screens): up/down or j/k moves, enter opens a ship, e opens its last-end screen from the list or opened ship, esc goes back, and q quits. The last-end screen shows the last exited session's time, reason, duration, harness, session id, activity and masked last lines, or `none kept` when no end is kept. Its local facts refresh every five seconds. Session lines are masked before being cut to the width; use `status <ship>` to read them whole, or `status <ship> --json` without a terminal.
 - `list` shows each ship on this computer: its state, harness, workspace, since when it is in that state, and its restarts within the last hour.
 - `status` counts the ships by state, shows the caps in use, and says whether the last pass succeeded or failed, with the last successful pass age when available (or no success yet after a failure).
 - `status <ship>` adds a `Trierarch` line: current and the pass age, or independent service-down, failed-pass and stale-pass warnings. A pass is stale only when older than one minute.

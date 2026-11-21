@@ -111,7 +111,7 @@ A credential source that exists but cannot be read or decoded suppresses all lin
 
 ### Live local screens
 
-Run `aeolus-trierarch tui` in a terminal as the trierarch's user, including over SSH. The list shows each locally crewed ship's state, harness, turn, activity, inbox and restarts, with the last read time and pass age. Up/down or j/k moves the selection; enter opens the ship. The opened ship shows the same local facts as `status <ship>`, its places and masked session lines. Up/down or j/k scrolls the lines; esc goes back and q quits. To act, use a forced message, **Restart** or **Edit…** in the console.
+Run `aeolus-trierarch tui` in a terminal as the trierarch's user, including over SSH. The list shows each locally crewed ship's state, harness, turn, activity, inbox and restarts, with the last read time and pass age. Up/down or j/k moves the selection; enter opens the ship. The opened ship shows the same local facts as `status <ship>`, its places and masked session lines. From the list or opened ship, e opens the last-end screen: the last exited session's time, reason, duration, harness, session id, activity and masked last lines, or `none kept` when no end is kept. Up/down or j/k scrolls the lines; esc returns to the previous screen and q quits. To act, use a forced message, **Restart** or **Edit…** in the console.
 
 The screens read local facts again every five seconds. A ship removed while open returns to the list with its name and `is no longer crewed here`. An unreadable state is shown and retried on the next tick; previously read facts remain visible with their last successful read time. Individual unreadable facts leave the others available. Reading changes no file and calls no fleet or hold socket.
 
