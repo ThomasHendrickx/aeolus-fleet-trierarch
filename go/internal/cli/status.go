@@ -174,7 +174,10 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	if running, isRead := readRunning(at.Running); manager.IsRunning && isRead && running.PID == manager.PID {
 		report.RunningVersion = running.Version
 		if !running.FirstReportAccepted {
-			report.ServiceReadiness = "first report not accepted"
+			report.ServiceReadiness = "first report pending"
+			if running.FirstReportRefusal != "" {
+				report.ServiceReadiness = "first report not accepted: " + running.FirstReportRefusal
+			}
 		} else if started, err := time.Parse(time.RFC3339, manager.Since); err != nil {
 			report.ServiceReadiness = "cannot determine how long the process has run"
 		} else if now().Sub(started) < 10*time.Second {

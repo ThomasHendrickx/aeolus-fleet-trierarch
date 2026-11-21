@@ -825,6 +825,7 @@ type Running struct {
 	PID                 int    `json:"pid"`
 	Version             string `json:"version"`
 	FirstReportAccepted bool   `json:"firstReportAccepted,omitempty"`
+	FirstReportRefusal  string `json:"firstReportRefusal,omitempty"`
 }
 
 // RunningPID is the pid of the trierarch running.json at the path names, 0 when it names none.
@@ -848,6 +849,16 @@ func readRunning(path string) (Running, bool) {
 // ReportAccepted records that this process's first report reached the fleet.
 func ReportAccepted(path string, pid int) error {
 	return writeRunning(path, Running{PID: pid, Version: Version, FirstReportAccepted: true})
+}
+
+// ReportRefused records the fleet's refusal until this process's first report is accepted.
+func ReportRefused(path string, pid int, reason string) error {
+	running, ok := readRunning(path)
+	if !ok || running.PID != pid || running.FirstReportAccepted {
+		return nil
+	}
+	running.FirstReportRefusal = reason
+	return writeRunning(path, running)
 }
 
 func writeRunning(path string, running Running) error {
