@@ -25,6 +25,7 @@ import (
 
 // Machine holds list facts, with no session content or process commands.
 type Machine struct {
+	Trierarch  Standing
 	Ships      []View
 	PassAt     string
 	Unreadable []Unreadable
@@ -120,9 +121,7 @@ func (r Reader) List(ctx context.Context, at paths.Paths, now time.Time) (Machin
 			}
 			_ = file.Close()
 		}
-		for _, failure := range facts.Unreadable {
-			row.Unreadable = append(row.Unreadable, failure)
-		}
+		row.Unreadable = append(row.Unreadable, facts.Unreadable...)
 		result.Ships = append(result.Ships, row)
 	}
 	slices.SortFunc(result.Ships, func(a, b View) int { return strings.Compare(a.ShipName+"\x00"+a.ShipID, b.ShipName+"\x00"+b.ShipID) })

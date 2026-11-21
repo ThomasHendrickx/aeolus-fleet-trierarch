@@ -49,11 +49,26 @@ func (m Model) View() string {
 	if m.isOpening || (m.source != nil && !m.hasRead && len(m.machine.Ships) == 0 && m.failure == "") {
 		return "aeolus-trierarch\nReading local ship facts…\nq quit"
 	}
+	standing := m.machine.Trierarch
+	if m.screen != listScreen {
+		standing = m.ship.Trierarch
+
+	}
+	var banners []string
+	for _, warning := range standing.Says {
+		banners = append(banners, "! "+clean(warning))
+	}
+	fullHeight := m.height
+	m.height = max(1, m.height-len(banners))
 	if m.screen == listScreen {
 		lines = m.listView()
+	} else if m.screen == endScreen {
+		lines = m.endView()
 	} else {
 		lines = m.shipView()
 	}
+	m.height = fullHeight
+	lines = append(banners, lines...)
 	if m.failure != "" {
 		lines = append([]string{m.failure}, lines...)
 	}
@@ -186,7 +201,7 @@ func (m Model) shipView() []string {
 			lines = append(lines, m.label(label, fmt.Sprintf("pid %d  %s  %s", p.PID, elapsed(m.now, p.StartedAt), clean(p.Command))))
 		}
 	}
-	lines = append(lines, m.label("Last end", "none kept: no session of this ship ended since it was crewed here"))
+	lines = append(lines, m.label("Last end", lastEndText(v)))
 	places := [][2]string{{"ship folder", v.Places.ShipFolder}, {"main", v.Places.Main}}
 	names := make([]string, 0, len(v.Places.SubRepositories))
 	for name := range v.Places.SubRepositories {
@@ -322,4 +337,45 @@ func clean(text string) string {
 		}
 		return r
 	}, ansi.Strip(text))
+}
+
+func lastEndText(v shipview.View) string {
+	if failure := factFailure(v, "last end"); failure != "" {
+		return failure
+	}
+	if v.LastEnd == nil {
+		return "none kept: no session of this ship ended since it was crewed here"
+	}
+	return clock(v.LastEnd.EndedAt) + ", " + clean(v.LastEnd.ExitReason) + " (e to read it)"
+}
+
+func (m Model) endView() []string {
+	v := m.ship
+	lines := []string{m.pair(m.look.Tone(style.Strong, "aeolus-trierarch > "+clean(v.ShipName)+" > last end"), "read "+m.readTime()), m.rule()}
+	footer := []string{"esc back   q quit"}
+	if v.LastEnd == nil || factFailure(v, "last end") != "" {
+		return append(append(lines, m.label("Last end", lastEndText(v)), m.rule()), footer...)
+	}
+	e := v.LastEnd
+	duration := "unknown"
+	start, errStart := time.Parse(time.RFC3339Nano, e.StartedAt)
+	end, errEnd := time.Parse(time.RFC3339Nano, e.EndedAt)
+	if errStart == nil && errEnd == nil {
+		d := max(time.Duration(0), end.Sub(start)).Round(time.Second)
+		duration = fmt.Sprintf("%dm %ds", int(d/time.Minute), int(d%time.Minute/time.Second))
+	}
+	active := "none"
+	if a := e.Activity; a != nil {
+		active = clean(a.Kind)
+		if a.Tool != "" {
+			active += " " + clean(a.Tool)
+		}
+		active += ", at " + clock(a.At)
+	}
+	lines = append(lines, m.label("Ended", clock(e.EndedAt)+", "+clean(e.ExitReason)+", after running "+duration), m.label("Session", clean(e.Harness)+", session "+clean(e.SessionID)), m.label("Activity", active), m.label("Kept until", "the next session of "+clean(v.ShipName)+" ends, or its folder goes"), m.rule(), m.pair("Its last lines", "up/down scroll"))
+	events := make([]shipview.Line, 0, len(e.Lines))
+	for _, line := range e.Lines {
+		events = append(events, shipview.Line(line))
+	}
+	return m.withLines(lines, events, clean(e.LinesError), footer)
 }

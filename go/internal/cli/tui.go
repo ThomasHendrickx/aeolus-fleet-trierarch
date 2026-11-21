@@ -23,19 +23,30 @@ func live(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	if machine.RunTUI != nil {
 		return answer{}, machine.RunTUI(at, look)
 	}
-	return answer{}, tui.Run(context.Background(), localViews{at: at}, look)
+	return answer{}, tui.Run(context.Background(), localViews{at: at, machine: machine}, look)
 }
 
-type localViews struct{ at paths.Paths }
+type localViews struct {
+	at      paths.Paths
+	machine Machine
+}
 
 func (v localViews) Read(ctx context.Context, ship string, now time.Time) (shipview.Machine, shipview.View, error) {
 	machine, err := (shipview.Reader{}).List(ctx, v.at, now)
 	if err != nil {
 		return machine, shipview.View{}, err
 	}
+	standing, unreadable := localStanding(v.at, v.machine, now)
+	machine.Trierarch = standing
+	machine.Unreadable = append(machine.Unreadable, unreadable...)
+	for i := range machine.Ships {
+		machine.Ships[i].Trierarch = standing
+	}
 	if ship == "" {
 		return machine, shipview.View{}, nil
 	}
 	opened, err := (shipview.Reader{}).Ship(ctx, v.at, ship, now)
+	opened.Trierarch = standing
+	opened.Unreadable = append(opened.Unreadable, unreadable...)
 	return machine, opened, err
 }

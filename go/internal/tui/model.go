@@ -124,7 +124,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.screen == listScreen {
 				m.selected = max(0, min(max(0, len(m.machine.Ships)-1), m.selected+delta))
 			} else {
-				m.offset = max(0, min(max(0, len(m.ship.Lines)-m.linePageSize()), m.offset+delta))
+				m.offset = max(0, min(max(0, m.lineCount()-m.linePageSize()), m.offset+delta))
 			}
 		case "enter", "e":
 			if m.screen == endScreen || (msg.String() == "enter" && m.screen != listScreen) {
@@ -154,7 +154,27 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) linePageSize() int {
 	// The fixed part of the ship screen includes the footer and the lines' heading.
 	copy := m
+	copy.height = max(1, m.height-len(m.ship.Trierarch.Says))
+	if m.screen == endScreen {
+		if m.ship.LastEnd == nil {
+			return 1
+		}
+		end := *m.ship.LastEnd
+		end.Lines = nil
+		copy.ship.LastEnd = &end
+		return max(1, copy.height-len(copy.endView())+1)
+	}
 	copy.ship.Lines = nil
 	copy.offset = 0
-	return max(1, m.height-len(copy.shipView())+1)
+	return max(1, copy.height-len(copy.shipView())+1)
+}
+
+func (m Model) lineCount() int {
+	if m.screen == endScreen {
+		if m.ship.LastEnd == nil {
+			return 0
+		}
+		return len(m.ship.LastEnd.Lines)
+	}
+	return len(m.ship.Lines)
 }
