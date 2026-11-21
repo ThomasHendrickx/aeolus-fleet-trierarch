@@ -14,7 +14,7 @@ func (r Runtime) Processes(ctx context.Context, shipID string, now time.Time) ([
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	args := []string{"top", containerName(shipID), "-eo", "pid,etime,args"}
+	args := []string{"top", containerName(shipID), "-ww", "-eo", "pid,etime,args"}
 	var text string
 	var err error
 	if r.Run != nil {
