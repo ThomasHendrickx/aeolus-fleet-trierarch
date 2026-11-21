@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -11,7 +13,7 @@ import (
 func TestAContainersProcessesShowPIDStartAndWholeCommand(t *testing.T) {
 	now := time.Date(2026, 11, 20, 14, 2, 31, 0, time.UTC)
 	runtime := Runtime{Run: func(args ...string) (string, error) {
-		want := []string{"top", "trierarch-shp_one", "-eo", "pid,etime,args"}
+		want := []string{"top", "trierarch-shp_one", "-ww", "-eo", "pid,etime,args"}
 		if !reflect.DeepEqual(args, want) {
 			t.Fatalf("runtime arguments = %v, want %v", args, want)
 		}
@@ -20,6 +22,21 @@ func TestAContainersProcessesShowPIDStartAndWholeCommand(t *testing.T) {
 	got, err := runtime.Processes(context.Background(), "shp_one", now)
 	if err != nil || len(got) != 1 || got[0].PID != 48211 || got[0].StartedAt.Format(time.RFC3339) != "2026-11-20T13:31:28Z" || got[0].Command != "npm test --workspaces" {
 		t.Fatalf("Processes = %+v, %v", got, err)
+	}
+}
+
+func TestAContainersProcessCommandsReachTheMaskerBeforeAnyWidthCut(t *testing.T) {
+	command := "tool " + strings.Repeat("wide ", 50) + "fake-credential-at-the-end"
+	runtime := Runtime{Run: func(args ...string) (string, error) {
+		// The foreign ps may apply a width unless explicitly asked for unlimited output.
+		if !slices.Contains(args, "-ww") {
+			return "PID ELAPSED COMMAND\n48211 00:01 " + command[:80] + "\n", nil
+		}
+		return "PID ELAPSED COMMAND\n48211 00:01 " + command + "\n", nil
+	}}
+	got, err := runtime.Processes(context.Background(), "shp_one", time.Now())
+	if err != nil || len(got) != 1 || got[0].Command != command {
+		t.Fatalf("process command was cut before masking: %+v, %v", got, err)
 	}
 }
 
