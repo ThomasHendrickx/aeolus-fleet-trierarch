@@ -65,14 +65,15 @@ func describeShip(view shipview.View, now time.Time) string {
 			lastEnd = fmt.Sprintf("unreadable: %s: %s", failure.Path, failure.Error)
 		}
 	}
+	turn, inbox := seenText(view, now)
 	text := []string{
 		fmt.Sprintf("Ship: %s (%s), %s, %s", view.ShipName, view.ShipID, view.Harness, place),
 		fmt.Sprintf("State: %s since %s, %d restarts", view.State, view.Since, view.Restarts),
-		"Activity: " + activity, "Processes: " + processText, "Last end: " + lastEnd,
+		"Turn: " + turn, "Activity: " + activity, "Inbox: " + inbox, "Processes: " + processText, "Last end: " + lastEnd,
 		fmt.Sprintf("Places: ship folder %s, hold %s", view.Places.ShipFolder, view.Places.Hold),
 	}
 	for _, unreadable := range view.Unreadable {
-		if unreadable.Fact == "last end" || unreadable.Fact == "activity" || unreadable.Fact == "processes" || unreadable.Fact == "masking" {
+		if unreadable.Fact == "seen" || unreadable.Fact == "last end" || unreadable.Fact == "activity" || unreadable.Fact == "processes" || unreadable.Fact == "masking" {
 			continue
 		}
 		text = append(text, fmt.Sprintf("Unreadable: %s: %s", unreadable.Path, unreadable.Error))
@@ -114,4 +115,34 @@ func age(elapsed time.Duration) string {
 		return fmt.Sprintf("%ds", max(0, int(elapsed.Round(time.Second)/time.Second)))
 	}
 	return fmt.Sprintf("%dm", int(elapsed.Round(time.Minute)/time.Minute))
+}
+
+// seenText keeps the wording for unavailable observations in one place.
+func seenText(view shipview.View, now time.Time) (string, string) {
+	turn, inbox := "unknown", "not seen yet"
+	if view.Session.Status != "running" {
+		turn = "-"
+	}
+	if marked := view.Session.Turn; marked != nil {
+		turn = marked.State
+		if marked.Since != "" {
+			turn += " since " + marked.Since
+		}
+		at, _ := time.Parse(time.RFC3339, marked.SeenAt)
+		turn += ", seen " + age(now.Sub(at)) + " ago"
+	}
+	if seen := view.Inbox; seen != nil {
+		inbox = "not watched while no session runs"
+		if seen.IsWatched {
+			at, _ := time.Parse(time.RFC3339, seen.SeenAt)
+			inbox = fmt.Sprintf("%d waiting, %d forced, seen %s ago", seen.Waiting, seen.Forced, age(now.Sub(at)))
+		}
+	}
+	for _, unreadable := range view.Unreadable {
+		if unreadable.Fact == "seen" {
+			value := fmt.Sprintf("unreadable: %s: %s", unreadable.Path, unreadable.Error)
+			return value, value
+		}
+	}
+	return turn, inbox
 }

@@ -57,6 +57,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/release"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/runpass"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/seen"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/selfreport"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/servicelog"
@@ -695,6 +696,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	}
 	pass := runpass.Pass{
 		Paths:             at,
+		Seen:              seen.File{Path: filepath.Join(at.Home, "seen.json")},
 		EndPermissions:    func(ship string) { permissionChannel.End(ship, logLine) },
 		Fleet:             client,
 		Sessions:          running,

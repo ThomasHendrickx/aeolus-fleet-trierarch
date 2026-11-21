@@ -93,7 +93,7 @@ func TestShipStatusShowsLocalFactsByNameOrIDWithoutCredentials(t *testing.T) {
 						t.Fatalf("places = %v", got.Places)
 					}
 				} else {
-					want := "Ship: design-tri-271c (shp_one), claude-code, on the host\nState: running since 2026-11-20T13:30:12+01:00, 0 restarts\nActivity: tool Bash, 12s ago\nProcesses: none\nLast end: none kept: no session of this ship ended since it was crewed here\nPlaces: ship folder " + filepath.Join(at.Ships, "shp_one", "repositories") + ", hold " + filepath.Join(at.Sessions, "shp_one")
+					want := "Ship: design-tri-271c (shp_one), claude-code, on the host\nState: running since 2026-11-20T13:30:12+01:00, 0 restarts\nTurn: -\nActivity: tool Bash, 12s ago\nInbox: not watched while no session runs\nProcesses: none\nLast end: none kept: no session of this ship ended since it was crewed here\nPlaces: ship folder " + filepath.Join(at.Ships, "shp_one", "repositories") + ", hold " + filepath.Join(at.Sessions, "shp_one")
 					want += "\nLast lines:\n  --:--:-- tool Bash {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"[masked: crew token]\"}}]}}"
 					if out != want {
 						t.Fatalf("status = %s\nwant %s", out, want)
@@ -150,9 +150,10 @@ func TestShipStatusJSONMatchesTheApprovedFactsShape(t *testing.T) {
  "home":"@ROOT@/ships/shp_one/home","socket":"@ROOT@/ships/shp_one/sockets/fleet.sock",
  "hold":"@ROOT@/sessions/shp_one","events":"@ROOT@/sessions/shp_one/events.jsonl"
  },
- "session":{"status":"exited","holdPid":999999999,"sessionId":"session-one",
+ "session":{"status":"exited","holdPid":999999999,"sessionId":"session-one","turn":null,
  "activity":{"kind":"tool","tool":"Bash","at":"2026-11-20T14:02:19+01:00"},"processes":[]},
  "lastEnd":null,
+ "inbox":{"isWatched":false},
  "lines":[{"at":"","kind":"tool","tool":"Bash","line":"{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"[masked: crew token]\"}}]}}"}],"unreadable":[]
 }`, "@ROOT@", at.Home)
 	var gotJSON, wantJSON any

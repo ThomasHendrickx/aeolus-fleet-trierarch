@@ -27,6 +27,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mask"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/seen"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
@@ -55,6 +56,7 @@ type View struct {
 	Restarts    int          `json:"restarts"`
 	Places      Places       `json:"places"`
 	Session     Session      `json:"session"`
+	Inbox       *Inbox       `json:"inbox"`
 	Lines       []Line       `json:"lines"`
 	Unreadable  []Unreadable `json:"unreadable"`
 }
@@ -72,11 +74,12 @@ type Places struct {
 
 // Session is what the hold's files say about its session.
 type Session struct {
-	Status    string    `json:"status"`
-	HoldPID   int       `json:"holdPid"`
-	SessionID string    `json:"sessionId"`
-	Activity  *Activity `json:"activity"`
-	Processes []Process `json:"processes"`
+	Status    string     `json:"status"`
+	Turn      *seen.Turn `json:"turn"`
+	HoldPID   int        `json:"holdPid"`
+	SessionID string     `json:"sessionId"`
+	Activity  *Activity  `json:"activity"`
+	Processes []Process  `json:"processes"`
 }
 
 // Activity is the latest event's kind and tool, never its content.
@@ -270,6 +273,7 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 	if reason == "" && view.Session.HoldPID > 0 && processproof.Runs(view.Session.HoldPID, "hold", one.ShipID, "--sessions", at.Sessions) {
 		view.Session.Status = "running"
 	}
+	view.readSeen(files, at, now)
 	masker, maskErr := (mask.Loader{Files: files}).Load(ctx, at)
 	if maskErr != nil {
 		var source *mask.SourceError
