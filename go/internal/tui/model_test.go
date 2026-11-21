@@ -210,3 +210,16 @@ func TestAReadFailureKeepsTheLastReadTime(t *testing.T) {
 		t.Fatalf("View(failed read at 14:03:31) = %s, want read 14:02:31", got)
 	}
 }
+
+func TestOpeningAShipShowsLoadingBeforeItsFactsArrive(t *testing.T) {
+	m := aScreen()
+	m.source = &localFacts{machine: m.machine, ship: m.ship}
+	m, cmd := press(t, m, "enter")
+	if got := m.View(); !strings.Contains(got, "Reading local ship facts…") || strings.Contains(got, "none kept") {
+		t.Fatalf("View(opening ship) = %s, want loading without a premature no-end claim", got)
+	}
+	m = readResult(t, m, cmd)
+	if got := m.View(); strings.Contains(got, "Reading local ship facts…") || !strings.Contains(got, "Processes") {
+		t.Fatalf("View(opened ship) = %s, want its loaded facts", got)
+	}
+}
