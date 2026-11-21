@@ -63,14 +63,14 @@ jobs:
 
       - run: npm ci
 
-      # Branch candidates can be inspected before merging; release keeps its branch gate.
-      - name: Check the commit passed CI
+      # The release's own gate: a candidate is only what may be released.
+      - name: Check the commit is on a release branch and passed CI
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --json status,conclusion,url \
-            | jq --exit-status '.[0] | .status == "completed" and .conclusion == "success"'
+          gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --event push --json status,conclusion,url \
+            | node scripts/release-gate.ts "$GITHUB_REF" "$GITHUB_SHA"
 
       - name: Set the version on the trierarch and the aeolus-fleet plugin
         env:
