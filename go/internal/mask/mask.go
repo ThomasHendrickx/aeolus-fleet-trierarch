@@ -23,7 +23,10 @@ type Files interface{ Open(string) (fs.File, error) }
 type Loader struct{ Files Files }
 
 // Masker holds replacements privately. Its zero value suppresses all content.
-type Masker struct{ replacer *strings.Replacer }
+type Masker struct {
+	values  map[string]string
+	ordered []string
+}
 
 // SourceError names the credential source that prevents safe content output.
 type SourceError struct {
@@ -40,10 +43,35 @@ func (e *SourceError) Unwrap() error { return e.Err }
 
 // Line replaces known values, as written or JSON-escaped, without cutting content.
 func (m Masker) Line(text string) string {
-	if m.replacer == nil {
+	if m.values == nil {
 		return ""
 	}
-	return m.replacer.Replace(text)
+	var out strings.Builder
+	for start := 0; start < len(text); {
+		end, label := start, ""
+		for _, value := range m.ordered {
+			if strings.HasPrefix(text[start:], value) {
+				end, label = start+len(value), m.values[value]
+				break
+			}
+		}
+		if end == start {
+			out.WriteByte(text[start])
+			start++
+			continue
+		}
+		// Find matches on the original text, including starts inside a masked span.
+		for pos := start + 1; pos < end; pos++ {
+			for _, value := range m.ordered {
+				if strings.HasPrefix(text[pos:], value) && pos+len(value) > end {
+					end = pos + len(value)
+				}
+			}
+		}
+		out.WriteString(label)
+		start = end
+	}
+	return out.String()
 }
 
 type disk struct{}
@@ -187,11 +215,7 @@ func (l Loader) Load(at paths.Paths) (Masker, error) {
 	}
 	ordered := sortedKeys(values)
 	slices.SortStableFunc(ordered, func(a, b string) int { return len(b) - len(a) })
-	pairs := make([]string, 0, len(ordered)*2)
-	for _, value := range ordered {
-		pairs = append(pairs, value, values[value])
-	}
-	return Masker{replacer: strings.NewReplacer(pairs...)}, nil
+	return Masker{values: values, ordered: ordered}, nil
 }
 
 func sortedKeys[V any](values map[string]V) []string {
