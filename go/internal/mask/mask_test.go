@@ -1,7 +1,9 @@
 package mask
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -35,7 +37,7 @@ func TestEveryKnownCredentialIsMaskedAsWrittenAndJSONEscaped(t *testing.T) {
 	} {
 		keep(t, source.path, source.text)
 	}
-	m, err := Load(at)
+	m, err := Load(context.Background(), at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +68,7 @@ func TestMaskingReplacesTheLongestValueBeforeItsPrefixWithoutRemaskingLabels(t *
 	at := paths.Of(t.TempDir(), "")
 	keep(t, at.State, `{"entries":{"one":{"crewToken":"fake-prefix"},"two":{"crewToken":"fake-prefix-long"}}}`)
 	keep(t, at.ModelToken, "crew token")
-	m, err := Load(at)
+	m, err := Load(context.Background(), at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +94,7 @@ func TestUnreadableOrMalformedCredentialSourcesRefuseAllContent(t *testing.T) {
 			keep(t, filepath.Join(at.Keys, "codex"), "fake-key")
 			keep(t, filepath.Join(at.Sessions, "other", "secret-env.json"), `{}`)
 			path := filepath.Join(at.Home, filepath.FromSlash(name))
-			m, err := (Loader{Files: deniedFiles{path}}).Load(at)
+			m, err := (Loader{Files: deniedFiles{path}}).Load(context.Background(), at)
 			if err == nil || !strings.Contains(err.Error(), "cannot read "+path+" to mask it (permission denied)") {
 				t.Fatalf("Load error = %v", err)
 			}
@@ -105,7 +107,7 @@ func TestUnreadableOrMalformedCredentialSourcesRefuseAllContent(t *testing.T) {
 		at := paths.Of(t.TempDir(), "")
 		keep(t, at.State, `{"entries":{}}`)
 		keep(t, at.McpConfiguration, malformed)
-		m, err := Load(at)
+		m, err := Load(context.Background(), at)
 		if err == nil || m.Line("fake-value") != "" {
 			t.Fatal("malformed credential source allowed content")
 		}
@@ -115,7 +117,7 @@ func TestUnreadableOrMalformedCredentialSourcesRefuseAllContent(t *testing.T) {
 func TestOverlappingCredentialsNeverExposeEitherTail(t *testing.T) {
 	at := paths.Of(t.TempDir(), "")
 	keep(t, at.State, `{"entries":{"one":{"crewToken":"fake-abcdef"},"two":{"crewToken":"def-fake-tail"}}}`)
-	m, err := Load(at)
+	m, err := Load(context.Background(), at)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,5 +125,16 @@ func TestOverlappingCredentialsNeverExposeEitherTail(t *testing.T) {
 	want := "before [masked: crew token] after"
 	if got := m.Line(input); got != want {
 		t.Fatalf("Line(%q) = %q, want %q", input, got, want)
+	}
+}
+
+func TestCancelledCredentialLoadingRefusesContent(t *testing.T) {
+	at := paths.Of(t.TempDir(), "")
+	keep(t, at.State, `{"entries":{}}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m, err := Load(ctx, at)
+	if !errors.Is(err, context.Canceled) || m.Line("fake-value") != "" {
+		t.Fatalf("Load(cancelled, %q) = (%q, %v), want empty content and context.Canceled", at.Home, m.Line("fake-value"), err)
 	}
 }

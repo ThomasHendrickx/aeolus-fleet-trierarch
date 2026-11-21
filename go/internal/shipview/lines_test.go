@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mask"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -72,5 +73,36 @@ func TestUnreadableCredentialsSuppressLinesAndNameTheirSourceInJSON(t *testing.T
 		if strings.Contains(string(data), "fake-value") {
 			t.Fatal("unmasked content reached JSON")
 		}
+	}
+}
+
+func TestCancelledEventReadingRecordsTheReasonWithoutLines(t *testing.T) {
+	at, now := aView(t)
+	path := filepath.Join(at.Sessions, "shp_one", "events.jsonl")
+	writeFact(t, path, "fake-event")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var view View
+	view.readEvents(ctx, filesOnDisk{}, path, nil, mask.Masker{}, now)
+	if len(view.Lines) != 0 || len(view.Unreadable) != 1 || view.Unreadable[0].Error != context.Canceled.Error() {
+		t.Fatalf("readEvents(cancelled, %q) = %+v, want no lines and one context canceled reason", path, view)
+	}
+}
+func TestCancelledMaskingRecordsTheReasonOnce(t *testing.T) {
+	at, now := aView(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	view, err := (Reader{}).Ship(ctx, at, "one", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reasons []Unreadable
+	for _, failure := range view.Unreadable {
+		if failure.Fact == "masking" {
+			reasons = append(reasons, failure)
+		}
+	}
+	if len(reasons) != 1 || reasons[0].Error != context.Canceled.Error() || len(view.Lines) != 0 || len(view.Session.Processes) != 0 {
+		t.Fatalf("Ship(cancelled, %q) = %+v, want hidden content and one context canceled masking reason", at.Home, view)
 	}
 }
