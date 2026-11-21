@@ -301,7 +301,7 @@ func startedOn(entry reconciler.Entry, login string, at string) reconciler.Entry
 // nextAfterFailure is what a failed pass tells next to its reason.
 const nextAfterFailure = "the next pass tries again; aeolus-trierarch status and list show where it stands"
 
-// Run runs one pass; it fails only when it cannot load its saved state. A pass that cannot read what it reconciles is logged and kept in the state with its reason and since when, which a pass that succeeds clears.
+// Run runs one pass. State loading and snapshot writing errors are returned to the caller. A pass that cannot read what it reconciles is logged and kept in the state with its reason and since when, which a pass that succeeds clears.
 func (p Pass) Run() error {
 	p.keepProxy()
 	p.watchLoad()
@@ -353,7 +353,6 @@ func (p Pass) Run() error {
 	if p.Seen != nil {
 		snapshot.PassAt = p.Now().UTC().Format(isoMillis)
 		if err := p.Seen.Save(snapshot); err != nil {
-			p.Log(fmt.Sprintf("The pass failed: %v; %s", err, nextAfterFailure))
 			since := p.Now().UTC().Format(isoMillis)
 			if state.PassFailure != nil {
 				since = state.PassFailure.Since
