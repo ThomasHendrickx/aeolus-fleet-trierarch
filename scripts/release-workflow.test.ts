@@ -1,4 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -123,8 +126,53 @@ describe('the finish workflow', () => {
 });
 
 describe('the candidate workflow', () => {
-  it('leaves Go binary builds to the release workflow', () => {
+  it('builds and checks binaries before packing their integrity with the plugin', () => {
     const candidate = workflow('../.github/workflows/candidate.yml');
-    expect(candidate).not.toContain('go-binaries.yml');
+    expect(candidate).toContain('uses: ./.github/workflows/go-binaries.yml');
+    expect(candidate).toContain('needs: binaries');
+    expect(candidate).toContain('pattern: aeolus-trierarch-*');
+
+  });
+
+  it('requires push CI on the same release branch before packing a candidate', () => {
+    const gate = stepNamed(workflow('../.github/workflows/candidate.yml'), 'Check the commit');
+    expect(gate).toContain('--branch "$GITHUB_REF_NAME" --event push');
+    expect(gate).toContain('| node scripts/release-gate.ts "$GITHUB_REF" "$GITHUB_SHA"');
+  });
+
+  it('records the plugin and all four binaries with their SHA-512 checksums', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'candidate-manifest-'));
+    const filenames = ['aeolus-fleet-plugin-0.29.0.tgz', 'aeolus-trierarch-linux-amd64', 'aeolus-trierarch-linux-arm64', 'aeolus-trierarch-darwin-amd64', 'aeolus-trierarch-darwin-arm64'];
+    try {
+      mkdirSync(join(folder, 'candidate'));
+      for (const filename of filenames) {
+        writeFileSync(join(folder, 'candidate', filename), '');
+      }
+      const pack = stepNamed(workflow('../.github/workflows/candidate.yml'), 'Pack the aeolus-fleet plugin');
+      const script = /node --input-type=module -e '([\s\S]*?)'/.exec(pack)?.[1] ?? '';
+      execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+        env: { ...process.env, VERSION: '0.29.0', RUNNER_TEMP: folder },
+      });
+      expect(JSON.parse(readFileSync(join(folder, 'candidate', 'integrity.json'), 'utf8'))).toEqual(
+        filenames.sort().map((filename) => ({
+          name: filename.endsWith('.tgz') ? 'aeolus-fleet-plugin' : filename,
+          version: '0.29.0',
+          filename,
+          integrity: 'sha512-z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXcg/SpIdNs6c5H0NE8XYXysP+DGNKHfuwvY7kxvUdBeoGlODJ6+SfaPg==',
+        })),
+      );
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('publishing candidate binaries', () => {
+  it('downloads and checks the candidate before preserving its binaries for the finish workflow', () => {
+    const release = workflow(RELEASE);
+    expect(release).not.toContain('go-binaries.yml');
+    expect(stepNamed(release, 'Download the candidate')).toContain('--pattern "aeolus-trierarch-*"');
+    expect(stepNamed(release, 'Download the candidate')).toContain('node scripts/candidate-check.ts');
+    expect(release).toContain('name: aeolus-trierarch-candidate');
   });
 });

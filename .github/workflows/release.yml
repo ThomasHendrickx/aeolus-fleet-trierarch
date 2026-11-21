@@ -41,17 +41,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  binaries:
-    name: Go binaries ${{ inputs.version }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/go-binaries.yml
-    with:
-      version: ${{ inputs.version }}
-
   release:
     name: Publish ${{ inputs.version }}
-    needs: binaries
     runs-on: ubuntu-latest
     steps:
       - name: Check the version
@@ -118,6 +109,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           gh run download "$RUN_ID" --name "$VERSION-${GITHUB_SHA::7}" --dir "$RUNNER_TEMP/candidate"
+          gh run download "$RUN_ID" --pattern "aeolus-trierarch-*" --dir "$RUNNER_TEMP/candidate-binaries"
+          cp "$RUNNER_TEMP"/candidate-binaries/aeolus-trierarch-*/aeolus-trierarch-* "$RUNNER_TEMP/candidate/"
           gh run view "$RUN_ID" --json workflowName,conclusion,headSha \
             | node scripts/candidate-check.ts "$VERSION" "$GITHUB_SHA" "$RUNNER_TEMP/candidate"
 
@@ -179,11 +172,15 @@ jobs:
 
       # Attested before anything is published, so a binary that cannot be attested
       # stops the release first. One attestation per binary.
-      - uses: actions/download-artifact@v8
+      - name: Preserve the verified candidate binaries
+        run: |
+          mkdir "$RUNNER_TEMP/binaries"
+          cp "$RUNNER_TEMP"/candidate/aeolus-trierarch-* "$RUNNER_TEMP/binaries/"
+      - uses: actions/upload-artifact@v7
         with:
-          pattern: aeolus-trierarch-*
-          path: ${{ runner.temp }}/binaries
-          merge-multiple: true
+          name: aeolus-trierarch-candidate
+          path: ${{ runner.temp }}/binaries/aeolus-trierarch-*
+          if-no-files-found: error
       - name: SHA256SUMS of the Go binaries
         working-directory: ${{ runner.temp }}/binaries
         run: |

@@ -19,9 +19,10 @@ function aTarball(name: 'plugin', tarball: Partial<PackedTarball> = {}): PackedT
   };
 }
 
-const MANIFEST = [aTarball('plugin')];
+const BINARIES = ['aeolus-trierarch-linux-amd64', 'aeolus-trierarch-linux-arm64', 'aeolus-trierarch-darwin-arm64', 'aeolus-trierarch-darwin-amd64'];
+const MANIFEST = [aTarball('plugin'), ...BINARIES.map((name) => ({ name, version: VERSION, filename: name, integrity: `sha512-${name}` }))];
 /** What the release computed from the downloaded files, by file name. */
-const DOWNLOADED = { 'aeolus-fleet-plugin-0.29.0.tgz': 'sha512-plugin' };
+const DOWNLOADED = { 'aeolus-fleet-plugin-0.29.0.tgz': 'sha512-plugin', ...Object.fromEntries(BINARIES.map((name) => [name, `sha512-${name}`])) };
 
 function refusal(check: { run?: CandidateRun; manifest?: PackedTarball[]; downloaded?: Record<string, string> } = {}) {
   return candidateRefusal({ version: VERSION, sha: SHA, run: aRun(), manifest: MANIFEST, downloaded: DOWNLOADED, ...check });
@@ -62,12 +63,34 @@ describe('the candidate a release publishes', () => {
 
   it('refuses a tarball whose bytes differ from the candidate\'s record', () => {
     expect(refusal({ downloaded: { ...DOWNLOADED, 'aeolus-fleet-plugin-0.29.0.tgz': 'sha512-other' } })).toBe(
-      'aeolus-fleet-plugin-0.29.0.tgz is not the tarball the candidate packed: its integrity differs',
+      'aeolus-fleet-plugin-0.29.0.tgz is not the file the candidate packed: its integrity differs',
     );
   });
 
   it('refuses a tarball the download lacks', () => {
     const withoutConsole = {};
     expect(refusal({ downloaded: withoutConsole })).toBe('The download has no aeolus-fleet-plugin-0.29.0.tgz');
+  });
+});
+
+describe('the candidate binaries a release publishes', () => {
+  it.each(BINARIES)('refuses a missing manifest entry for %s', (name) => {
+    expect(refusal({ manifest: MANIFEST.filter((file) => file.name !== name) })).toBe(`The candidate has no ${name}`);
+  });
+
+  it.each(BINARIES)('refuses changed bytes for %s', (name) => {
+    expect(refusal({ downloaded: { ...DOWNLOADED, [name]: 'sha512-changed' } })).toBe(`${name} is not the file the candidate packed: its integrity differs`);
+  });
+
+  it.each(BINARIES)('refuses a missing download for %s', (name) => {
+    expect(refusal({ downloaded: Object.fromEntries(Object.entries(DOWNLOADED).filter(([filename]) => filename !== name)) })).toBe(`The download has no ${name}`);
+  });
+
+  it.each(BINARIES)('refuses a wrong version for %s', (name) => {
+    expect(refusal({ manifest: MANIFEST.map((file) => file.name === name ? { ...file, version: '0.28.4' } : file) })).toBe(`The candidate holds ${name} 0.28.4, not ${VERSION}`);
+  });
+
+  it.each(BINARIES)('refuses a wrong filename for %s', (name) => {
+    expect(refusal({ manifest: MANIFEST.map((file) => file.name === name ? { ...file, filename: 'other' } : file) })).toBe(`The candidate names other, not ${name}`);
   });
 });
