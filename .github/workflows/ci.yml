@@ -288,7 +288,7 @@ jobs:
       # The upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release, with go on PATH.
       # Each process the suite starts is recorded there, for the leftovers check to find any left running.
       - id: tests
-        run: npm run test:contract:go -- --shard=${{ matrix.shard }}/3 --maxWorkers=3
+        run: npm run test:contract:go -- --shard=${{ matrix.shard }}/3
         env:
           AEOLUS_TEST_PROCESS_RECORD: ${{ runner.temp }}/test-processes
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch

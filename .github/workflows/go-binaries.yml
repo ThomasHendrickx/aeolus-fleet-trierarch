@@ -115,6 +115,6 @@ jobs:
           path: ${{ runner.temp }}/binary
       - run: chmod +x "$RUNNER_TEMP/binary/aeolus-trierarch-linux-${{ matrix.goarch }}"
       # Upgrade tests build the next version with Go on PATH.
-      - run: npm run test:contract:go -- --shard=${{ matrix.shard }}/3 --maxWorkers=3
+      - run: npm run test:contract:go -- --shard=${{ matrix.shard }}/3
         env:
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/binary/aeolus-trierarch-linux-${{ matrix.goarch }}
