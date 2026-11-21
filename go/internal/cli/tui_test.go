@@ -2,6 +2,9 @@ package cli
 
 import (
 	"errors"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/tui"
+	tea "github.com/charmbracelet/bubbletea"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -52,6 +55,36 @@ func TestHelpNamesTheLiveModeAndPlainShipStatus(t *testing.T) {
 	for _, want := range []string{"status <ship>", "one ship, by its name or id", "tui", "the same, live, full screen"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("Main(--help) = %s, want %q", got, want)
+		}
+	}
+}
+
+func TestLiveAndPlainStatusShareWholeMaskedLinesBeforeTheTerminalCut(t *testing.T) {
+	machine, at := aShipStatus(t)
+	raw := `{"type":"assistant","message":{"content":[{"type":"text","text":"SECRET-CREW-TOKEN ` + strings.Repeat("whole-line-", 30) + `"}]}}`
+	writeStatusFile(t, filepath.Join(at.Sessions, "shp_one", "events.jsonl"), raw+"\n")
+	plain, code := Main([]string{"status", "shp_one"}, machine)
+	if code != 0 || !strings.Contains(plain, strings.Repeat("whole-line-", 30)) {
+		t.Fatalf("status(long line) = %s, code %d; want whole line, 0", plain, code)
+	}
+	source := localViews{at: at}
+	m := tui.New(source, style.Plain)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	m = next.(tui.Model)
+	first := m.Init()().(tea.BatchMsg)[0]()
+	next, _ = m.Update(first)
+	m = next.(tui.Model)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(tui.Model)
+	next, _ = m.Update(cmd())
+	m = next.(tui.Model)
+	live := m.View()
+	if !strings.Contains(live, "[masked: crew token]") || !strings.Contains(live, "…") || strings.Contains(live, strings.Repeat("whole-line-", 30)) {
+		t.Fatalf("tui(long masked line) = %s, want masked text clipped with ellipsis", live)
+	}
+	for _, out := range []string{plain, live} {
+		if strings.Contains(out, "SECRET-CREW-TOKEN") {
+			t.Fatal("status/tui(fake credential) exposed value, want masked")
 		}
 	}
 }
