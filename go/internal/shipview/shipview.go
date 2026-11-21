@@ -45,6 +45,7 @@ func (e unknownShip) Unwrap() error { return ErrShipUnknown }
 
 // View contains local facts and masked session lines, never credential values.
 type View struct {
+	LastEnd     *ended.End   `json:"lastEnd"`
 	ShipID      string       `json:"shipId"`
 	ShipName    string       `json:"shipName"`
 	Harness     string       `json:"harness"`
@@ -207,6 +208,24 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 			Hold:   held.Folder, Events: held.Events,
 		},
 	}
+	endPath := ended.Path(at.Home, one.ShipID)
+	endData, endErr := readFile(files, endPath)
+	if endErr == nil {
+		var last ended.End
+		endErr = json.Unmarshal(endData, &last)
+		if endErr == nil {
+			last.EndedAt = localTime(last.EndedAt, now.Location())
+			last.StartedAt = localTime(last.StartedAt, now.Location())
+			if last.Activity != nil {
+				last.Activity.At = localTime(last.Activity.At, now.Location())
+			}
+			for i := range last.Lines {
+				last.Lines[i].At = localTime(last.Lines[i].At, now.Location())
+			}
+			view.LastEnd = &last
+		}
+	}
+	view.record("last end", endPath, endErr)
 	for _, exit := range one.Exits {
 		if ended, err := time.Parse(time.RFC3339, exit); err == nil && now.Sub(ended) >= 0 && now.Sub(ended) < time.Hour {
 			view.Restarts++

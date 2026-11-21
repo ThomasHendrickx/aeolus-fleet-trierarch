@@ -56,14 +56,23 @@ func describeShip(view shipview.View, now time.Time) string {
 			activity = value
 		}
 	}
+	lastEnd := "none kept: no session of this ship ended since it was crewed here"
+	if view.LastEnd != nil {
+		lastEnd = view.LastEnd.EndedAt + ", " + view.LastEnd.ExitReason
+	}
+	for _, failure := range view.Unreadable {
+		if failure.Fact == "last end" {
+			lastEnd = fmt.Sprintf("unreadable: %s: %s", failure.Path, failure.Error)
+		}
+	}
 	text := []string{
 		fmt.Sprintf("Ship: %s (%s), %s, %s", view.ShipName, view.ShipID, view.Harness, place),
 		fmt.Sprintf("State: %s since %s, %d restarts", view.State, view.Since, view.Restarts),
-		"Activity: " + activity, "Processes: " + processText,
+		"Activity: " + activity, "Processes: " + processText, "Last end: " + lastEnd,
 		fmt.Sprintf("Places: ship folder %s, hold %s", view.Places.ShipFolder, view.Places.Hold),
 	}
 	for _, unreadable := range view.Unreadable {
-		if unreadable.Fact == "activity" || unreadable.Fact == "processes" || unreadable.Fact == "masking" {
+		if unreadable.Fact == "last end" || unreadable.Fact == "activity" || unreadable.Fact == "processes" || unreadable.Fact == "masking" {
 			continue
 		}
 		text = append(text, fmt.Sprintf("Unreadable: %s: %s", unreadable.Path, unreadable.Error))
