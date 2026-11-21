@@ -219,3 +219,47 @@ func TestStandingBannerAppearsAboveEveryScreen(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveViewsShowUnobservedRunningSession(t *testing.T) {
+	for _, screen := range []screen{listScreen, shipScreen} {
+		t.Run(fmt.Sprint(screen), func(t *testing.T) {
+			m := aScreen()
+			m.screen = screen
+			m.ship.Session.Turn = nil
+			m.ship.Inbox = nil
+			m.machine.Ships = []shipview.View{m.ship}
+			got := screenWords(m.View())
+			for _, want := range []string{"unknown", "not seen yet"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("View(%v, unobserved running session) = %s, want %q", screen, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLiveViewsShowDashForSessionThatDoesNotRun(t *testing.T) {
+	for _, screen := range []screen{listScreen, shipScreen} {
+		t.Run(fmt.Sprint(screen), func(t *testing.T) {
+			m := aScreen()
+			m.screen = screen
+			m.ship.Session = shipview.Session{}
+			m.machine.Ships = []shipview.View{m.ship}
+			want := "Turn -"
+			if screen == listScreen {
+				want = "claude-code - -"
+			}
+			if got := screenWords(m.View()); !strings.Contains(got, want) {
+				t.Fatalf("View(%v, no running session) = %s, want %q", screen, got, want)
+			}
+		})
+	}
+}
+
+func TestListViewShowsNoPassYet(t *testing.T) {
+	m := aScreen()
+	m.machine.PassAt = ""
+	if got := screenWords(m.View()); !strings.Contains(got, "read 14:02:31, no pass yet") {
+		t.Fatalf("View(no pass) = %s, want read time and no pass yet", got)
+	}
+}
