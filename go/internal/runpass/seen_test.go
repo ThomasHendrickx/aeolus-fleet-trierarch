@@ -109,3 +109,21 @@ func TestAFailedSnapshotWriteFailsThePassAndKeepsItsReasonUntilSuccess(t *testin
 		t.Fatalf("snapshots = %+v, pass failure = %+v", saved.snapshots, p.store.state.PassFailure)
 	}
 }
+
+func TestAFailedInboxReadNeverPublishesAPartialPass(t *testing.T) {
+	p := aRunPass(t)
+	p.crewed(t)
+	saved := &seenPasses{}
+	p.pass.Seen = saved
+	p.run(t)
+	entry := p.store.state.Entries[scout]
+	entry.ShipID, entry.CrewToken = "zzz-second-ship", "fake-second-crew-token"
+	p.store.state.Entries[entry.ShipID] = entry
+	p.sessions.observed = append(p.sessions.observed, sessions.Observed{ShipID: entry.ShipID, Status: "running"})
+	p.fleet.inboxErrorFor = entry.CrewToken
+	p.fleet.asked = nil
+	p.run(t)
+	if len(p.fleet.asked) != 2 || len(saved.snapshots) != 1 || p.store.state.PassFailure == nil {
+		t.Fatalf("inbox reads = %d, snapshots = %+v, failure = %+v", len(p.fleet.asked), saved.snapshots, p.store.state.PassFailure)
+	}
+}

@@ -40,6 +40,7 @@ type aFleet struct {
 	calls          []string
 	refuse         string
 	inboxes        map[string]reconciler.Inbox
+	inboxErrorFor  string
 	asked          []string
 	// told is every notice, in order; refuseOwner is the refusal the fleet gives a report to an owner.
 	told        []told
@@ -136,6 +137,9 @@ func (f *aFleet) ReportToOwner(ownerShipID string, text string, idempotencyKey s
 }
 func (f *aFleet) Inbox(crewToken string) (reconciler.Inbox, error) {
 	f.asked = append(f.asked, crewToken)
+	if crewToken == f.inboxErrorFor {
+		return reconciler.Inbox{}, errors.New("inbox unreachable")
+	}
 	return f.inboxes[crewToken], nil
 }
 
