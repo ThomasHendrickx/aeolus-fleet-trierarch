@@ -878,3 +878,25 @@ func TestInitReportsAServiceRewriteFailure(t *testing.T) {
 	}
 	t.Errorf("report = %+v", report)
 }
+
+func TestFirstReportRefusalIsClearedOnAcceptanceAndDoesNotReplaceIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "running.json")
+	if err := writeRunning(path, Running{PID: 41, Version: Version}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReportRefused(path, 41, "FORBIDDEN: scope missing"); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := readRunning(path); !ok || got.FirstReportRefusal != "FORBIDDEN: scope missing" {
+		t.Fatalf("running = %+v, %t; want the refusal", got, ok)
+	}
+	if err := ReportAccepted(path, 41); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReportRefused(path, 41, "later refusal"); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := readRunning(path); !ok || !got.FirstReportAccepted || got.FirstReportRefusal != "" {
+		t.Errorf("running = %+v, %t; want accepted with no refusal", got, ok)
+	}
+}
