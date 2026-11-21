@@ -68,6 +68,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.request != m.request {
 			return m, nil
 		}
+		m.isOpening = false
 		if errors.Is(msg.err, shipview.ErrShipUnknown) && m.screen != listScreen {
 			m.hasRead = true
 			m.readAt = m.now
@@ -106,6 +107,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "esc":
+			m.isOpening = false
 			m.request++
 			m.offset = 0
 			m.notice = ""
@@ -134,6 +136,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.ship = m.machine.Ships[m.selected]
 			}
+			m.isOpening = true
 			m.from = m.screen
 			m.screen = shipScreen
 			if msg.String() == "e" {

@@ -24,28 +24,29 @@ const (
 
 // Model holds the last facts read; View performs no I/O.
 type Model struct {
-	readAt   time.Time
-	hasRead  bool
-	source   Source
-	request  uint64
-	from     screen
-	machine  shipview.Machine
-	ship     shipview.View
-	screen   screen
-	selected int
-	offset   int
-	width    int
-	height   int
-	now      time.Time
-	failure  string
-	notice   string
-	look     style.Style
+	isOpening bool
+	readAt    time.Time
+	hasRead   bool
+	source    Source
+	request   uint64
+	from      screen
+	machine   shipview.Machine
+	ship      shipview.View
+	screen    screen
+	selected  int
+	offset    int
+	width     int
+	height    int
+	now       time.Time
+	failure   string
+	notice    string
+	look      style.Style
 }
 
 // View renders the current screen, clipping after the reader has masked every line.
 func (m Model) View() string {
 	var lines []string
-	if m.source != nil && !m.hasRead && len(m.machine.Ships) == 0 && m.failure == "" {
+	if m.isOpening || (m.source != nil && !m.hasRead && len(m.machine.Ships) == 0 && m.failure == "") {
 		return "aeolus-trierarch\nReading local ship facts…\nq quit"
 	}
 	if m.screen == listScreen {
