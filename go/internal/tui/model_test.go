@@ -232,6 +232,7 @@ func TestLastEndScrollUsesKeptLinesInsteadOfCurrentLines(t *testing.T) {
 	m.height = 18
 	m.ship.Lines = nil
 	m.ship.LastEnd = &ended.End{}
+	m.ship.Trierarch.Says = []string{"The service is down.", "The last pass is stale."}
 	for i := range 200 {
 		m.ship.LastEnd.Lines = append(m.ship.LastEnd.Lines, ended.Line{Line: fmt.Sprintf("kept line %d", i)})
 	}

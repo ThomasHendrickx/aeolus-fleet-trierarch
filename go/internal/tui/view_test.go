@@ -207,10 +207,13 @@ func TestStandingBannerAppearsAboveEveryScreen(t *testing.T) {
 	for _, screen := range []screen{listScreen, shipScreen, endScreen} {
 		m := aScreen()
 		m.screen = screen
-		m.machine.Ships[0].Trierarch.Says = []string{"The service is down.", "The last pass was 3h ago: what is shown is stale."}
-		m.ship.Trierarch = m.machine.Ships[0].Trierarch
-		// List standing is supplied with every row by the local source.
-		got := m.View()
+		m.machine.Trierarch.Says = []string{"The service is down.", "The last pass was 3h ago: what is shown is stale."}
+		m.ship.Trierarch = m.machine.Trierarch
+		// The machine standing is also available when no ships are crewed.
+		if screen == listScreen {
+			m.machine.Ships = nil
+		}
+		got := screenWords(m.View())
 		if !strings.HasPrefix(got, "! The service is down.\n! The last pass was 3h ago: what is shown is stale.\n") {
 			t.Fatalf("View(%v) = %s, want ordered banners", screen, got)
 		}
