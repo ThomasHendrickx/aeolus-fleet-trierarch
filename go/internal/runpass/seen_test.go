@@ -2,7 +2,10 @@ package runpass
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,6 +110,23 @@ func TestAFailedSnapshotWriteFailsThePassAndKeepsItsReasonUntilSuccess(t *testin
 	p.run(t)
 	if len(saved.snapshots) != 2 || p.store.state.PassFailure != nil {
 		t.Fatalf("snapshots = %+v, pass failure = %+v", saved.snapshots, p.store.state.PassFailure)
+	}
+}
+
+func TestAFailedSnapshotFileSaveNamesTheSnapshotInThePassFailure(t *testing.T) {
+	p := aRunPass(t)
+	p.crewed(t)
+	path := filepath.Join(t.TempDir(), "seen.json")
+	if err := os.Mkdir(path+".tmp", 0700); err != nil {
+		t.Fatal(err)
+	}
+	p.pass.Seen = seen.File{Path: path}
+	if err := p.pass.Run(); err == nil {
+		t.Fatal("Run succeeded with an unwritable snapshot")
+	}
+	failure := p.store.state.PassFailure
+	if failure == nil || !strings.HasPrefix(failure.Reason, "save seen snapshot: ") {
+		t.Fatalf("pass failure = %+v, want reason naming the seen snapshot", failure)
 	}
 }
 
