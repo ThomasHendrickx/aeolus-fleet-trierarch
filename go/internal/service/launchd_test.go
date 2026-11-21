@@ -462,3 +462,19 @@ func TestStartSaysWhyWhenItCannotRecordTheRunsItStartedAt(t *testing.T) {
 		t.Error("Start() = nil, want why it cannot record the runs it started at")
 	}
 }
+
+func TestStatusKeepsPlistPathWhenRestartCountCannotBeRead(t *testing.T) {
+	launchctl := &aLaunchctl{}
+	agent := installed(t, launchctl)
+	launchctl.answers["launchctl print "+target] = "runs = 7\n"
+	if err := os.Remove(agent.startedRunsFile()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(agent.startedRunsFile(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := agent.Status()
+	if err == nil || got.File != agent.File() {
+		t.Fatalf("Status(unreadable runs) = %+v, %v, want file %q and error", got, err, agent.File())
+	}
+}
