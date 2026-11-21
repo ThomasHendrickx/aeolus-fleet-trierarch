@@ -218,7 +218,12 @@ describe('colour', () => {
     expect(coloured).toContain(`${ESCAPE}[`);
     expect(coloured).toContain(`${ESCAPE}[1mVersion:${ESCAPE}[22m`);
     expect(coloured).toContain(`${ESCAPE}[32mrunning${ESCAPE}[39m`);
-    expect(stripVTControlCharacters(coloured).replace(/since [^\n]+/, '')).toBe(plain.replace(/since [^\n]+/, ''));
+    const withoutColour = stripVTControlCharacters(coloured);
+    const lastPass = /^Last pass: succeeded, \d+[sm] ago$/m;
+    expect(plain).toMatch(lastPass);
+    expect(withoutColour).toMatch(lastPass);
+    expect(withoutColour.replace(/since [^\n]+/, '').replace(lastPass, 'Last pass: succeeded, <age> ago'))
+      .toBe(plain.replace(/since [^\n]+/, '').replace(lastPass, 'Last pass: succeeded, <age> ago'));
   });
 
   it('colours list on a colour terminal: the header strong and each state in its tone', async () => {
