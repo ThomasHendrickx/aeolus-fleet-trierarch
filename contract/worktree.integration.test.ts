@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { z } from 'zod';
 
+import { stopProcess } from '../scripts/support/test-process.js';
 import { aCrewingMachine, isRunning, sessionOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
@@ -28,8 +29,6 @@ const git = (folder: string, ...args: string[]): string => execFileSync('git', [
 let fleet: Fleet;
 let machine: Machine;
 let scout: ShipId;
-/** The processes a test started, each stopped after it by its pid. */
-let started: number[] = [];
 
 beforeEach(async () => {
   fleet = await aFleet();
@@ -42,10 +41,6 @@ afterEach(async ({ task }) => {
   if (task.result?.state === 'fail') {
     console.log(`The service's log:\n${machine.serviceLog()}`);
   }
-  for (const pid of started.filter(isRunning)) {
-    process.kill(pid, 'SIGKILL');
-  }
-  started = [];
   await machine.remove();
   await fleet.close();
 });
@@ -114,8 +109,16 @@ function aStrayWithAProcess(at: { path: readonly string[]; make: (folder: string
   mkdirSync(folder, { recursive: true });
   const child = spawn('sleep', ['600'], { cwd: folder, detached: true, stdio: 'ignore' });
   child.unref();
-  const pid = child.pid ?? 0;
-  started.push(pid);
+  const pid = child.pid;
+  if (pid === undefined) throw new Error('sleep did not start');
+  const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+  const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+  onTestFinished(() => {
+    try {
+      const current = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      if (current.slice(current.lastIndexOf(')') + 2).split(' ')[19] === start) stopProcess(pid, process.pid);
+    } catch { /* The process already ended. */ }
+  });
   at.make(folder);
   return { folder, pid };
 }

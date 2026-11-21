@@ -7,7 +7,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { aCrewingMachine, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
+import { aCrewingMachine, crash, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine } from './support/machine.js';
 
@@ -78,8 +78,8 @@ function withoutLastFailure(text: string): string {
 }
 
 /** The ship's session ended, as a crash ends it. */
-function crash(shipName: string): void {
-  process.kill(sessionOf(machine, shipName).starts().at(-1)?.pid ?? 0, 'SIGKILL');
+function crashSessionOf(shipName: string): void {
+  crash(sessionOf(machine, shipName).starts().at(-1));
 }
 
 function crashedAfterSix(shipId: ShipId, at: { tail: string; lastStart?: string }): string {
@@ -128,7 +128,7 @@ describe('a session crashed', () => {
     await withFiveRestarts(scout);
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 
-    crash('scout');
+    crashSessionOf('scout');
 
     const [notice] = await told(1);
 
@@ -145,7 +145,7 @@ describe('a session crashed', () => {
     await withFiveRestarts(scout);
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 
-    crash('scout');
+    crashSessionOf('scout');
 
     const [notice] = await told(1);
 
@@ -163,7 +163,7 @@ describe('a session crashed', () => {
     await withFiveRestarts(scout);
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 
-    crash('scout');
+    crashSessionOf('scout');
 
     const [notice] = await told(1);
 
@@ -176,9 +176,9 @@ describe('a session crashed', () => {
   it('names why its last start failed, when the model it started with was refused', async () => {
     const scout = await fleet.commission('scout');
     await aRunning(scout, { options: { model: 'claude-sonnet-5' } });
-    const pid = sessionOf(machine, 'scout').starts().at(-1)?.pid ?? 0;
+    const started = sessionOf(machine, 'scout').starts().at(-1);
     await machine.trierarch(['stop']);
-    process.kill(pid, 'SIGKILL');
+    crash(started);
     machine.refuseModel('claude-sonnet-5');
     await machine.trierarch(['start']);
     await withFiveRestarts(scout, (entry) => {

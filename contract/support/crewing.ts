@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { z } from 'zod';
 
+import { killRecorded } from '../../scripts/support/test-process.js';
 import type { Fleet } from './fleet.js';
 import type { Machine } from './machine.js';
 
@@ -27,7 +28,7 @@ export async function aCrewingMachine(at: { fleet: Fleet; machine: Machine; as?:
   writeFileSync(join(machine.trierarchHome, 'model-token'), 'contract-model-token-not-real\n', { mode: 0o600 });
 }
 
-const startSchema = z.object({ args: z.array(z.string()), env: z.record(z.string(), z.string()), pid: z.number() });
+const startSchema = z.object({ args: z.array(z.string()), env: z.record(z.string(), z.string()), pid: z.number(), start: z.string().optional() });
 const turnSchema = z.object({ prompt: z.string(), context: z.string() });
 
 function linesOf<T>(file: string, schema: z.ZodType<T>): T[] {
@@ -48,6 +49,12 @@ function savedFolderOf(machine: Machine, shipName: string): string | undefined {
     return undefined;
   }
   return Object.values(savedSchema.parse(JSON.parse(readFileSync(file, 'utf8'))).entries).find((entry) => entry.shipName === shipName)?.folder;
+}
+
+/** Ends a session's start as a crash ends it: by its recorded PID, only while that PID still names the start. */
+export function crash(start: { readonly pid: number; readonly start?: string | undefined } | undefined): void {
+  if (start?.start === undefined) throw new Error('the session did not record its start');
+  killRecorded({ pid: start.pid, start: start.start });
 }
 
 /**

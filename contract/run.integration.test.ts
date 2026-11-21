@@ -6,7 +6,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, crash, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine } from './support/machine.js';
 
@@ -48,6 +48,15 @@ afterEach(async ({ task }) => {
 });
 
 describe('run with the reconciler', () => {
+  it('records the hold pid when it starts', async () => {
+    await aRunningScout();
+    const pidFile = join(machine.trierarchHome, 'sessions', scout, 'hold.pid');
+    const recorded = join(machine.machine, 'hold-started-pids');
+    await expect.poll(() => existsSync(pidFile), { timeout: CREWED_WITHIN_MS }).toBe(true);
+    const pid = readFileSync(pidFile, 'utf8').trim();
+    await expect.poll(() => existsSync(recorded) ? readFileSync(recorded, 'utf8').split('\n').some((line) => line.startsWith(`${pid} `)) : false).toBe(true);
+  });
+
   it("crews an assigned request: the ship's lease is held and its session starts in a worktree of the repository", async () => {
     const session = sessionOf(machine, 'scout');
 
@@ -98,7 +107,7 @@ describe('run with the reconciler', () => {
     await aRunningScout();
 
     // The session the trierarch started for this test ends, by its own pid, as a crash ends it.
-    process.kill(session.starts()[0]?.pid ?? 0, 'SIGKILL');
+    crash(session.starts()[0]);
 
     await expect.poll(() => session.starts().length, { timeout: CREWED_WITHIN_MS }).toBe(2);
     await expect.poll(() => listedEntryOf(machine, scout), { timeout: CREWED_WITHIN_MS }).toMatchObject({ state: 'running', restarts: 1 });

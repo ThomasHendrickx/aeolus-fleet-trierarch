@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,10 +8,11 @@ import { fileURLToPath } from 'node:url';
 
 import type { ShipId } from '@aeolus-fleet/common';
 import type { FastifyInstance } from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type ShipCaller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
 
+import { recordTestProcess, stopProcess } from '../../../scripts/support/test-process.js';
 import { scriptEnvironment } from './script-environment.js';
 
 // The aeolus-fleet plugin's scripts against a real fleet (#819): the watcher and the
@@ -154,36 +155,44 @@ let folder: string;
 let home: string;
 
 beforeEach(async () => {
+  if (process.env.PROCESS_CLEANUP_SETUP === '1') {
+    onTestFinished(() => { writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify(fleet.server.listening)); });
+  }
   const databaseUrl = await createMigratedDatabase();
   database = createPrismaClient(databaseUrl);
+  const client = database;
+  onTestFinished(() => client.$disconnect());
   useCases = createUseCases({ prisma: database });
   argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
   const scout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
   shipId = scout.shipId;
   secret = secretOf(scout.secret);
   fleet = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false });
+  const server = fleet;
+  onTestFinished(async () => { await server.close(); });
   fleetUrl = await fleet.listen({ host: '127.0.0.1', port: 0 });
+  if (process.env.PROCESS_CLEANUP_SETUP === '1') throw new Error('the fixture setup failed');
   door = await startLossyDoor(fleetUrl);
+  const openedDoor = door;
+  onTestFinished(() => openedDoor.close());
   data = mkdtempSync(join(tmpdir(), 'aeolus-data-'));
+  const dataFolder = data;
+  onTestFinished(() => { rmSync(dataFolder, { recursive: true, force: true }); });
   home = mkdtempSync(join(tmpdir(), 'aeolus-home-'));
+  const homeFolder = home;
+  onTestFinished(() => { rmSync(homeFolder, { recursive: true, force: true }); });
   folder = mkdtempSync(join(tmpdir(), 'aeolus-folder-'));
+  const sessionFolder = folder;
+  onTestFinished(() => { rmSync(sessionFolder, { recursive: true, force: true }); });
 });
 
-afterEach(async () => {
-  await door.close();
-  await fleet.close();
-  await database.$disconnect();
-  rmSync(data, { recursive: true, force: true });
-  rmSync(home, { recursive: true, force: true });
-  rmSync(folder, { recursive: true, force: true });
-});
-
-/** Runs a script in its own process group, so a test can kill it with all it started, as a session dies. */
+/** Runs a script until it ends, or stops its recorded process tree at test teardown. */
 function start(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}) {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     detached: true,
     env: scriptEnvironment({ HOME: home, AEOLUS_HARNESS: 'claude-code', AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', ...options.env }),
   });
+  recordTestProcess(child.pid);
   child.stdin.end(options.stdin ?? '');
   let stdout = '';
   child.stdout.on('data', (chunk: Buffer) => {
@@ -195,9 +204,13 @@ function start(script: string, options: { args?: string[]; env?: Record<string, 
     });
   });
   const kill = () => {
-    if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
   };
-  return { done, kill };
+  onTestFinished(async () => {
+    kill();
+    await done;
+  });
+  return { done, kill, pid: child.pid };
 }
 
 /** A hook as Claude Code runs it: the payload on stdin, the plugin's variables and the project folder set, no AEOLUS_ ones. */
@@ -360,4 +373,23 @@ describe('the plugin on a real fleet: a delivery the fleet refuses is dropped, a
     await expectTheNextMessageReachesTheModel();
     expect(await store()).not.toContain(refused);
   });
+});
+
+// Run in a separate Vitest process by the process cleanup contract.
+it.skipIf(process.env.PROCESS_CLEANUP_PLUGIN !== '1')('plugin process cleanup fixture', async () => {
+  const running = start('../test/fixtures/process-cleanup/sleep.sh');
+  expect(running.pid).toBeDefined();
+  const childFile = process.env.PROCESS_CLEANUP_CHILD ?? '';
+  await expect.poll(() => existsSync(childFile)).toBe(true);
+  const descendant = Number(readFileSync(childFile, 'utf8'));
+  const recorded = [process.pid, running.pid, descendant].map((pid) => {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    return { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+  });
+  writeFileSync(process.env.PROCESS_CLEANUP_PIDS ?? '', JSON.stringify(recorded));
+  if (process.env.PROCESS_CLEANUP_ENDING === 'timeout') {
+    await new Promise((resolve) => setTimeout(resolve, 120_000));
+  } else {
+    throw new Error('the fixture test failed');
+  }
 });

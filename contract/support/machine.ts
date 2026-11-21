@@ -1,10 +1,13 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 
+import { onTestFinished, TestRunner } from 'vitest';
+
+import { descendantsOf, PROCESS_RECORD_VARIABLE, recordTestProcess, stopDescendants, stopProcess } from '../../scripts/support/test-process.js';
 import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
 /**
@@ -95,36 +98,79 @@ const GIT_ENV = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GI
 export const CLAUDE_CODE_VERSION = '2.1.306';
 /** How long the stand-in systemd waits for a stopped trierarch to end. */
 const STOP_WAIT_SECONDS = 10;
+/** How long teardown gives uninstall before stopping its command. */
+const UNINSTALL_WAIT_MS = 15_000;
 
-/** Stop only a proxy whose command names this machine's private folder. */
-async function stopProxy(home: string): Promise<void> {
-  const folder = join(home, '.aeolus', 'trierarch', 'proxy');
-  const owned = (): number[] => readdirSync('/proc').flatMap((entry) => {
-    if (!/^\d+$/.test(entry)) return [];
+/** A recorded PID and its start time, so a reused PID is never signalled. */
+interface RecordedProcess { readonly pid: number; readonly start: string }
+
+function recordProcess(pid: number | undefined): RecordedProcess | undefined {
+  if (pid === undefined || !Number.isInteger(pid) || pid <= 1) return undefined;
+  try {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const start = fields[19];
+    return fields[0] === 'Z' || start === undefined ? undefined : { pid, start };
+  } catch { return undefined; }
+}
+
+/** Stops only the same process the machine recorded. */
+async function stopRecorded(recorded: RecordedProcess | undefined): Promise<void> {
+  if (recorded === undefined) return;
+  const isRunning = (): boolean => recordProcess(recorded.pid)?.start === recorded.start;
+  if (!isRunning()) return;
+  try { process.kill(recorded.pid, 'SIGTERM'); } catch { return; }
+  for (let attempt = 0; attempt < 100 && isRunning(); attempt++) await wait(50);
+  if (isRunning()) {
+    try { process.kill(recorded.pid, 'SIGKILL'); } catch { return; }
+  }
+  for (let attempt = 0; attempt < 100 && isRunning(); attempt++) await wait(50);
+}
+
+/** Stops a recorded process and its descendants only while its PID still names it. */
+function stopRecordedTree(recorded: RecordedProcess): void {
+  try {
+    const stat = readFileSync(`/proc/${String(recorded.pid)}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    if (fields[19] === recorded.start) stopProcess(recorded.pid, Number(fields[1]));
+  } catch { /* The process already ended. */ }
+}
+
+/** Stops holds whose PID files and command lines identify this machine's sessions. */
+function stopHolds(home: string): void {
+  const sessions = join(home, '.aeolus', 'trierarch', 'sessions');
+  if (!existsSync(sessions)) return;
+  for (const entry of readdirSync(sessions)) {
     try {
-      const words = readFileSync(join('/proc', entry, 'cmdline'), 'utf8').split('\0');
-      return words.includes('proxy') && words.includes('--folder') && words[words.indexOf('--folder') + 1] === folder ? [Number(entry)] : [];
-    } catch {
-      return [];
-    }
-  });
-  for (const pid of owned()) {
-    try { process.kill(pid, 'SIGTERM'); } catch { /* Already ended. */ }
+      const pid = Number(readFileSync(join(sessions, entry, 'hold.pid'), 'utf8'));
+      const recorded = recordProcess(pid);
+      if (recorded === undefined) continue;
+      const words = readFileSync(`/proc/${String(pid)}/cmdline`, 'utf8').split('\0');
+      if (!words.includes('hold') || words[words.indexOf('--sessions') + 1] !== sessions) continue;
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      if (fields[19] === recorded.start) stopProcess(pid, Number(fields[1]));
+    } catch { /* The hold already ended or has no PID file. */ }
   }
-  for (let attempt = 0; attempt < 100 && owned().length > 0; attempt++) await wait(50);
-  const remaining = owned();
-  for (const pid of remaining) {
-    try { process.kill(pid, 'SIGKILL'); } catch { /* Already ended. */ }
-  }
-  for (let attempt = 0; attempt < 100 && owned().length > 0; attempt++) await wait(50);
-  if (owned().length > 0) throw new Error('the test machine model proxy did not stop');
+}
+
+/** Ends what a test started once it finishes; outside a test, such as a script making a machine, its caller ends it. */
+function whenTestFinishes(end: () => unknown): void {
+  if (TestRunner.getCurrentTest() !== undefined) onTestFinished(async () => { await end(); });
 }
 
 /** Runs a program to its end, never blocking this process: the fleet in it must answer meanwhile. */
-export function runProgram(command: readonly string[], at: { cwd: string; env: Readonly<Record<string, string>>; input?: string }): Promise<CommandOutcome> {
+export function runProgram(command: readonly string[], at: { cwd: string; env: Readonly<Record<string, string>>; input?: string; onStarted?: (child: ChildProcess) => void; shouldRegisterCleanup?: boolean }): Promise<CommandOutcome> {
   const [program = '', ...args] = command;
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, { cwd: at.cwd, env: at.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    recordTestProcess(child.pid);
+    at.onStarted?.(child);
+    if (at.shouldRegisterCleanup !== false) {
+      whenTestFinishes(() => {
+        if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
+      });
+    }
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
@@ -159,6 +205,15 @@ function linkSystemPrograms(tools: string): void {
       }
     }
   }
+}
+
+/**
+ * The shell line that adds a process to the run's record, none when the run keeps none. The stand-ins run in a clean
+ * environment, so the record's path is written into them rather than passed on.
+ */
+function runRecordLine(pid: string, start: string): string {
+  const record = process.env[PROCESS_RECORD_VARIABLE] ?? '';
+  return record === '' ? '' : `printf '%s %s\\n' ${pid} ${start} >> '${record}'`;
 }
 
 function script(path: string, text: string): void {
@@ -291,6 +346,44 @@ exec /usr/bin/id "$@"
 `;
 }
 
+/** Records the exact proxy and hold PIDs as this machine launches them. */
+function shStandIn(at: { machine: string; home: string }): string {
+  const proxy = join(at.home, '.aeolus', 'trierarch', 'proxy');
+  const sessions = join(at.home, '.aeolus', 'trierarch', 'sessions');
+  const proxyRecords = join(at.machine, 'proxy-started-pids');
+  const holdRecords = join(at.machine, 'hold-started-pids');
+  return `#!/bin/bash
+if [ "$1" = -c ] && [ "$2" = '"$@" < /dev/null > /dev/null 2>&1 &' ]; then
+  is_proxy=false; is_folder=false; is_hold=false; is_sessions=false; previous=
+  for word; do
+    [ "$word" = proxy ] && is_proxy=true
+    [ "$word" = hold ] && is_hold=true
+    [ "$previous" = --folder ] && [ "$word" = '${proxy}' ] && is_folder=true
+    [ "$previous" = --sessions ] && [ "$word" = '${sessions}' ] && is_sessions=true
+    previous="$word"
+  done
+  recorded=
+  if $is_proxy && $is_folder; then recorded='${proxyRecords}'; fi
+  if $is_hold && $is_sessions; then recorded='${holdRecords}'; fi
+  if [ -n "$recorded" ]; then
+    shift 3
+    "$@" < /dev/null > /dev/null 2>&1 &
+    pid=$!
+    if IFS= read -r stat < "/proc/$pid/stat"; then
+      stat="\${stat##*) }"
+      set -- $stat
+      if [ "$2" = "$$" ]; then
+        printf '%s %s\\n' "$pid" "\${20}" >> "$recorded"
+        ${runRecordLine('"$pid"', '"${20}"')}
+      fi
+    fi
+    exit 0
+  fi
+fi
+exec /bin/sh "$@"
+`;
+}
+
 /**
  * `systemctl --user` for the trierarch's unit, as systemd runs it: restart
  * and start run the unit's ExecStart with its Environment, detached, in a
@@ -307,7 +400,21 @@ echo "$*" >> "$state/calls.txt"
 command="$1"; shift
 unit="\${1:-aeolus-trierarch.service}"
 file='${join(at.home, '.config', 'systemd', 'user')}'/"$unit"
-pid() { [ -f "$state/pid" ] && kill -0 "$(cat "$state/pid")" 2>/dev/null && cat "$state/pid"; }
+start_time() {
+  local stat
+  [ -r "/proc/$1/stat" ] || return 1
+  IFS= read -r stat < "/proc/$1/stat"
+  stat="\${stat##*) }"
+  set -- $stat
+  printf '%s' "\${20}"
+}
+pid() {
+  local running started
+  [ -f "$state/pid" ] && [ -f "$state/started" ] || return 1
+  running="$(cat "$state/pid")"
+  started="$(start_time "$running")" || return 1
+  grep -qxF "$running $started" "$state/started" && kill -0 "$running" 2>/dev/null && echo "$running"
+}
 stop() {
   local running; running="$(pid)" || return 0
   kill -TERM "$running"
@@ -316,7 +423,7 @@ stop() {
 }
 start() {
   [ -f "$file" ] || { echo "Unit $unit not found." >&2; exit 5; }
-  local line words=() environment=(HOME='${at.home}' USER="$USER" LANG=C.UTF-8 HTTPS_PROXY='${NO_NETWORK_PROXY}'${at.nodeOptions === undefined ? '' : ` NODE_OPTIONS='${at.nodeOptions}'`})
+  local line words=() environment=(HOME='${at.home}' PATH='${join(at.machine, 'bin')}:${join(at.machine, 'tools')}' USER="$USER" LANG=C.UTF-8 HTTPS_PROXY='${NO_NETWORK_PROXY}'${at.nodeOptions === undefined ? '' : ` NODE_OPTIONS='${at.nodeOptions}'`})
   while IFS= read -r line; do
     case "$line" in
       ExecStart=*) eval "words=(\${line#ExecStart=})" ;;
@@ -325,7 +432,11 @@ start() {
   done < "$file"
   cd '${at.home}' || exit 1
   env -i "\${environment[@]}" setsid "\${words[@]}" < /dev/null >> "$state/trierarch.log" 2>&1 &
-  echo $! > "$state/pid"
+  local running=$!
+  echo "$running" > "$state/pid"
+  local started; started="$(start_time "$running")"
+  printf '%s %s\n' "$running" "$started" >> "$state/started"
+  ${runRecordLine('"$running"', '"$started"')}
 }
 case "$command" in
   daemon-reload|enable) ;;
@@ -433,6 +544,8 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   const others = at.others ?? [];
   // In the run's short folder: the ship sockets under the machine's home are within the system's limit only for a short path.
   const root = aShortFolder();
+  let remove: () => Promise<void> = () => { rmSync(root, { recursive: true, force: true }); return Promise.resolve(); };
+  whenTestFinishes(() => remove());
   const home = join(root, 'h');
   const machine = join(root, 'machine');
   const bin = join(machine, 'bin');
@@ -443,6 +556,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   const pluginData = join(home, '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   const codexPluginData = join(home, '.codex', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   script(join(bin, 'claude'), claudeStandIn({ machine, home, pluginData }));
+  script(join(bin, 'sh'), shStandIn({ machine, home }));
   script(join(bin, 'systemctl'), systemctlStandIn({ machine, home, ...(at.shouldDiagnoseHolds === true && { nodeOptions: `--import="${fileURLToPath(new URL('./hold-diagnostics.ts', import.meta.url))}"` }) }));
   script(join(bin, 'journalctl'), journalctlStandIn({ machine }));
   script(join(bin, 'ssh'), sshStandIn());
@@ -490,12 +604,14 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
     copyFileSync(program, installed);
     chmodSync(installed, 0o755);
   }
-  const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> } = {}) =>
-    runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }) });
-  const running = new Set<RunningCommand>();
+  const programs = new Set<ChildProcess>();
+  const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>>; shouldRegisterCleanup?: boolean } = {}) =>
+    runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }), ...(at.shouldRegisterCleanup === false && { shouldRegisterCleanup: false }), onStarted: (child) => { programs.add(child); child.once('close', () => programs.delete(child)); } });
+  const running = new Set<{ stop(): Promise<number> }>();
   const start = (words: readonly string[]): RunningCommand => {
     const [program = '', ...args] = [...underTest, ...words];
     const child = spawn(program, args, { cwd: home, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    recordTestProcess(child.pid);
     let stdout = '';
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -505,16 +621,90 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
         resolve(code ?? 1);
       });
     });
-    const command: RunningCommand = {
-      stdout: () => stdout,
-      interrupt: () => {
-        child.kill('SIGINT');
+    const command = {
+      stop: () => {
+        if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
         return ended;
+      },
+      stdout: () => stdout,
+      interrupt: async () => {
+        const descendants = child.pid === undefined ? [] : descendantsOf(child.pid);
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGINT');
+        const status = await Promise.race([ended, wait(1_000).then(() => undefined)]);
+        if (status === undefined && child.pid !== undefined && child.exitCode === null && child.signalCode === null) stopProcess(child.pid, process.pid);
+        stopDescendants(descendants);
+        return status ?? ended;
       },
     };
     running.add(command);
     void ended.then(() => running.delete(command));
     return command;
+  };
+  let removing: Promise<void> | undefined;
+  remove = () => {
+    removing ??= (async () => {
+      const proxyFile = join(home, '.aeolus', 'trierarch', 'proxy', 'proxy.pid');
+      const proxyPid = (): RecordedProcess | undefined => {
+        const pid = existsSync(proxyFile) ? Number(readFileSync(proxyFile, 'utf8')) : 0;
+        const recorded = recordProcess(pid);
+        if (recorded === undefined) return undefined;
+        try {
+          const words = readFileSync(`/proc/${String(pid)}/cmdline`, 'utf8').split('\0');
+          const folder = join(home, '.aeolus', 'trierarch', 'proxy');
+          return words.includes('proxy') && words[words.indexOf('--folder') + 1] === folder ? recorded : undefined;
+        } catch { return undefined; }
+      };
+      const started = join(machine, 'systemd', 'started');
+      const proxy = proxyPid();
+      try {
+        await Promise.all([...running].map((command) => command.stop()));
+        await Promise.all([...programs].map(async (child) => {
+          const isGoing = (): boolean => child.pid !== undefined && child.exitCode === null && child.signalCode === null;
+          if (!isGoing()) return;
+          const ended = new Promise<void>((resolve) => { child.once('exit', () => { resolve(); }); });
+          if (child.pid !== undefined) stopProcess(child.pid, process.pid);
+          await ended;
+        }));
+        const uninstall = trierarch(['uninstall'], { shouldRegisterCleanup: false });
+        let timer: NodeJS.Timeout | undefined;
+        try {
+          const didFinish = await Promise.race([
+            uninstall.then(() => true),
+            new Promise<false>((resolve) => { timer = setTimeout(() => { resolve(false); }, UNINSTALL_WAIT_MS); }),
+          ]);
+          if (!didFinish) {
+            for (const child of programs) if (child.pid !== undefined) stopProcess(child.pid, process.pid);
+            await uninstall;
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      } finally {
+        const services = existsSync(started) ? readFileSync(started, 'utf8').trim().split('\n').flatMap((line) => {
+          const [pid = '', start = ''] = line.split(' ');
+          const recorded = recordProcess(Number(pid));
+          return recorded?.start === start ? [recorded] : [];
+        }) : [];
+        await Promise.all(services.map(stopRecorded));
+        const holdRecords = join(machine, 'hold-started-pids');
+        const holds = existsSync(holdRecords) ? readFileSync(holdRecords, 'utf8').trim().split('\n').flatMap((line) => {
+          const [pid = '', start = ''] = line.split(' ');
+          const recorded = recordProcess(Number(pid));
+          return recorded?.start === start ? [recorded] : [];
+        }) : [];
+        for (const hold of holds) stopRecordedTree(hold);
+        stopHolds(home);
+        const proxyRecords = join(machine, 'proxy-started-pids');
+        const proxies = existsSync(proxyRecords) ? readFileSync(proxyRecords, 'utf8').trim().split('\n').flatMap((line) => {
+          const [pid = '', start = ''] = line.split(' ');
+          const recorded = recordProcess(Number(pid));
+          return recorded?.start === start ? [recorded] : [];
+        }) : [];
+        await Promise.all([...proxies, proxy, proxyPid()].map(stopRecorded));
+        rmSync(root, { recursive: true, force: true });
+      }
+    })();
+    return removing;
   };
   return {
     home,
@@ -565,26 +755,6 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
       readFileSync(join(machine, `${harness}-calls.txt`), { encoding: 'utf8', flag: 'a+' })
         .split('\n')
         .filter((line) => line !== ''),
-    remove: async () => {
-      // uninstall stops every session and the service, as it does on a machine; the service's pid is ended too when it did not.
-      try {
-        await Promise.all([...running].map((command) => command.interrupt()));
-        await trierarch(['uninstall']);
-        const pid = servicePid();
-        if (pid !== undefined) {
-          try {
-            process.kill(pid, 'SIGKILL');
-          } catch {
-            // Ended already.
-          }
-        }
-      } finally {
-        try {
-          await stopProxy(home);
-        } finally {
-          rmSync(root, { recursive: true, force: true });
-        }
-      }
-    },
+    remove,
   };
 }

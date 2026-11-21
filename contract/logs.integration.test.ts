@@ -1,10 +1,13 @@
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
-import { aMachine, type Machine, type RunningCommand } from './support/machine.js';
+import { aMachine, runProgram, type Machine, type RunningCommand } from './support/machine.js';
 
 // `aeolus-trierarch logs`: the last lines of the trierarch's log, which on Linux is the journal of its systemd user unit (docs/trierarch.md, "Logs"), and with --follow each line written after (#177).
 
@@ -70,6 +73,253 @@ async function withFollower(following: RunningCommand, check: () => Promise<void
 }
 
 describe('logs', () => {
+  it('leaves an unrelated process named by a stale proxy pid file running', async () => {
+    const child = spawn('sleep', ['60']);
+    const ended = once(child, 'exit');
+    const folder = join(machine.trierarchHome, 'proxy');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'proxy.pid'), String(child.pid));
+    try {
+      isRemoved = true;
+      await machine.remove();
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await ended;
+    }
+  });
+
+  it('leaves an unrelated process named by a stale service pid file running', async () => {
+    const child = spawn('sleep', ['60']);
+    const ended = once(child, 'exit');
+    const state = join(machine.machine, 'systemd');
+    const units = join(machine.home, '.config', 'systemd', 'user');
+    mkdirSync(state, { recursive: true });
+    mkdirSync(units, { recursive: true });
+    writeFileSync(join(state, 'pid'), String(child.pid));
+    writeFileSync(join(units, 'aeolus-trierarch.service'), '[Service]\nExecStart=/bin/true\n');
+    try {
+      isRemoved = true;
+      await machine.remove();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await ended;
+    }
+  });
+
+  it('leaves an unrelated process named by a stale hold pid file running', async () => {
+    const child = spawn('sleep', ['60']);
+    const ended = once(child, 'exit');
+    const folder = join(machine.trierarchHome, 'sessions', 'test-ship');
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, 'hold.pid'), String(child.pid));
+    try {
+      isRemoved = true;
+      await machine.remove();
+      expect(child.signalCode).toBeNull();
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await ended;
+    }
+  });
+
+  it('stops a proxy that never wrote its pid file', async () => {
+    const marker = join(machine.machine, 'proxy-started');
+    const folder = join(machine.trierarchHome, 'proxy');
+    const env = { HOME: machine.home, PATH: `${join(machine.machine, 'bin')}:${join(machine.machine, 'tools')}` };
+    const program = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+    let recorded: { pid: number; start: string | undefined } | undefined;
+    try {
+      const started = await runProgram(['sh', '-c', '"$@" < /dev/null > /dev/null 2>&1 &', 'sh', process.execPath, '-e', program, marker, 'proxy', '--folder', folder], { cwd: machine.home, env });
+      expect(started.status, started.stderr).toBe(0);
+      await expect.poll(() => existsSync(marker)).toBe(true);
+      const pid = Number(readFileSync(marker, 'utf8'));
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      recorded = { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+      isRemoved = true;
+      await machine.remove();
+      const current = existsSync(`/proc/${String(pid)}/stat`) ? readFileSync(`/proc/${String(pid)}/stat`, 'utf8') : '';
+      const fields = current.slice(current.lastIndexOf(')') + 2).split(' ');
+      expect(current === '' || fields[0] === 'Z' || fields[19] !== recorded.start).toBe(true);
+    } finally {
+      if (recorded !== undefined) {
+        try {
+          const stat = readFileSync(`/proc/${String(recorded.pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === recorded.start) process.kill(recorded.pid, 'SIGKILL');
+        } catch { /* The proxy already ended. */ }
+      }
+    }
+  });
+
+  it('stops every proxy it started even when none wrote a pid file', async () => {
+    const folder = join(machine.trierarchHome, 'proxy');
+    const env = { HOME: machine.home, PATH: `${join(machine.machine, 'bin')}:${join(machine.machine, 'tools')}` };
+    const program = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+    const recorded: { pid: number; start: string | undefined }[] = [];
+    try {
+      for (const name of ['first', 'second']) {
+        const marker = join(machine.machine, name);
+        const started = await runProgram(['sh', '-c', '"$@" < /dev/null > /dev/null 2>&1 &', 'sh', process.execPath, '-e', program, marker, 'proxy', '--folder', folder], { cwd: machine.home, env });
+        expect(started.status, started.stderr).toBe(0);
+        await expect.poll(() => existsSync(marker)).toBe(true);
+        const pid = Number(readFileSync(marker, 'utf8'));
+        const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+        recorded.push({ pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] });
+      }
+      isRemoved = true;
+      await machine.remove();
+      for (const { pid, start } of recorded) {
+        const stat = existsSync(`/proc/${String(pid)}/stat`) ? readFileSync(`/proc/${String(pid)}/stat`, 'utf8') : '';
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        expect(stat === '' || fields[0] === 'Z' || fields[19] !== start).toBe(true);
+      }
+    } finally {
+      for (const { pid, start } of recorded) {
+        try {
+          const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === start) process.kill(pid, 'SIGKILL');
+        } catch { /* The proxy already ended. */ }
+      }
+    }
+  });
+
+  it('stops a hold that never wrote its pid file', async () => {
+    const marker = join(machine.machine, 'hold-started');
+    const sessions = join(machine.trierarchHome, 'sessions');
+    const env = { HOME: machine.home, PATH: `${join(machine.machine, 'bin')}:${join(machine.machine, 'tools')}` };
+    const program = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+    let recorded: { pid: number; start: string | undefined } | undefined;
+    try {
+      const started = await runProgram(['sh', '-c', '"$@" < /dev/null > /dev/null 2>&1 &', 'sh', process.execPath, '-e', program, marker, 'hold', 'test-ship', '--sessions', sessions], { cwd: machine.home, env });
+      expect(started.status, started.stderr).toBe(0);
+      await expect.poll(() => existsSync(marker)).toBe(true);
+      const pid = Number(readFileSync(marker, 'utf8'));
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      recorded = { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+      isRemoved = true;
+      await machine.remove();
+      const current = existsSync(`/proc/${String(pid)}/stat`) ? readFileSync(`/proc/${String(pid)}/stat`, 'utf8') : '';
+      const fields = current.slice(current.lastIndexOf(')') + 2).split(' ');
+      expect(current === '' || fields[0] === 'Z' || fields[19] !== recorded.start).toBe(true);
+    } finally {
+      if (recorded !== undefined) {
+        try {
+          const stat = readFileSync(`/proc/${String(recorded.pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === recorded.start) process.kill(recorded.pid, 'SIGKILL');
+        } catch { /* The hold already ended. */ }
+      }
+    }
+  });
+
+  it('stops a command and its child when the machine is removed', async () => {
+    const pidFile = join(machine.machine, 'command.pid');
+    const program = "const child = require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); require('node:fs').writeFileSync(process.argv[1], JSON.stringify([process.pid, child.pid])); setInterval(() => {}, 1000)";
+    const command = machine.trierarch([], { as: [process.execPath, '-e', program, pidFile] });
+    await expect.poll(() => existsSync(pidFile)).toBe(true);
+    const pids = z.array(z.number()).parse(JSON.parse(readFileSync(pidFile, 'utf8')));
+    const recorded = pids.map((pid) => {
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      return { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+    });
+    try {
+      isRemoved = true;
+      await machine.remove();
+      for (const { pid, start } of recorded) {
+        const stat = existsSync(`/proc/${String(pid)}/stat`) ? readFileSync(`/proc/${String(pid)}/stat`, 'utf8') : '';
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        expect(stat === '' || fields[0] === 'Z' || fields[19] !== start).toBe(true);
+      }
+    } finally {
+      for (const { pid, start } of recorded) {
+        try {
+          const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === start) process.kill(pid, 'SIGKILL');
+        } catch { /* The command already ended. */ }
+      }
+      await command;
+    }
+  });
+
+  it('stops every service process it started when a restart leaves the old one running', async () => {
+    const state = join(machine.machine, 'systemd');
+    const units = join(machine.home, '.config', 'systemd', 'user');
+    mkdirSync(units, { recursive: true });
+    const program = `process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)`;
+    writeFileSync(join(units, 'aeolus-trierarch.service'), `[Service]\nExecStart=${process.execPath} -e "${program}"\n`);
+    const systemctl = join(machine.machine, 'bin', 'systemctl');
+    const env = { HOME: machine.home, USER: 'test', PATH: `${join(machine.machine, 'bin')}:${join(machine.machine, 'tools')}` };
+    let processes: { pid: number; start: string }[] = [];
+    try {
+      expect((await runProgram([systemctl, '--user', 'start'], { cwd: machine.home, env })).status).toBe(0);
+      await wait(200);
+      expect((await runProgram([systemctl, '--user', 'restart'], { cwd: machine.home, env })).status).toBe(0);
+      processes = readFileSync(join(state, 'started'), 'utf8').trim().split('\n').map((line) => {
+        const [pid = '', start = ''] = line.split(' ');
+        return { pid: Number(pid), start };
+      });
+      expect(processes).toHaveLength(2);
+      isRemoved = true;
+      await machine.remove();
+      for (const { pid, start } of processes) {
+        const stat = existsSync(`/proc/${String(pid)}/stat`) ? readFileSync(`/proc/${String(pid)}/stat`, 'utf8') : '';
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        expect(stat === '' || fields[0] === 'Z' || fields[19] !== start).toBe(true);
+      }
+    } finally {
+      if (processes.length === 0 && existsSync(join(state, 'started'))) {
+        processes = readFileSync(join(state, 'started'), 'utf8').trim().split('\n').map((line) => {
+          const [pid = '', start = ''] = line.split(' ');
+          return { pid: Number(pid), start };
+        });
+      }
+      for (const { pid, start } of processes) {
+        try {
+          const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === start) process.kill(pid, 'SIGKILL');
+        } catch { /* The service already ended. */ }
+      }
+    }
+  });
+
+  it('finishes teardown when the service manager does not answer', async () => {
+    const units = join(machine.home, '.config', 'systemd', 'user');
+    const pidFile = join(machine.machine, 'hung.pid');
+    const marker = join(machine.machine, 'hung');
+    mkdirSync(units, { recursive: true });
+    writeFileSync(join(units, 'aeolus-trierarch.service'), '[Service]\nExecStart=/bin/true\n');
+    writeFileSync(join(machine.machine, 'bin', 'systemctl'), `#!/bin/bash\nif [ ! -e '${marker}' ]; then touch '${marker}'; echo $$ > '${pidFile}'; exec sleep 120; fi\nexit 0\n`);
+    const sessions = join(machine.trierarchHome, 'sessions');
+    const holdFolder = join(sessions, 'test-ship');
+    mkdirSync(holdFolder, { recursive: true });
+    const hold = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', 'hold', '--sessions', sessions], { stdio: 'ignore' });
+    const holdEnded = once(hold, 'exit');
+    if (hold.pid === undefined) throw new Error('the test hold did not start');
+    writeFileSync(join(holdFolder, 'hold.pid'), String(hold.pid));
+    isRemoved = true;
+    const removing = machine.remove();
+    let recorded: { pid: number; start: string | undefined } | undefined;
+    try {
+      await expect.poll(() => existsSync(pidFile)).toBe(true);
+      const pid = Number(readFileSync(pidFile, 'utf8'));
+      const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+      recorded = { pid, start: stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] };
+      expect(await Promise.race([removing.then(() => true), wait(20_000).then(() => false)])).toBe(true);
+      await expect.poll(() => hold.signalCode).toBe('SIGKILL');
+    } finally {
+      if (hold.exitCode === null && hold.signalCode === null) hold.kill('SIGKILL');
+      await holdEnded;
+      if (recorded !== undefined) {
+        try {
+          const stat = readFileSync(`/proc/${String(recorded.pid)}/stat`, 'utf8');
+          if (stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] === recorded.start) process.kill(recorded.pid, 'SIGKILL');
+        } catch { /* The service manager already ended. */ }
+      }
+      await removing;
+    }
+  });
+
   it('stops a follower when its assertion fails', async () => {
     written(['ready']);
     const following = machine.start(['logs', '--follow']);
