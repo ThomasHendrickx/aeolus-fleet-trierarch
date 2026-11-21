@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/ended"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
 	"io"
 	"io/fs"
@@ -78,11 +79,7 @@ type Session struct {
 }
 
 // Activity is the latest event's kind and tool, never its content.
-type Activity struct {
-	Kind string `json:"kind"`
-	Tool string `json:"tool,omitempty"`
-	At   string `json:"at"`
-}
+type Activity = ended.Activity
 
 // Process names a process, when it started and its masked command.
 type Process struct {

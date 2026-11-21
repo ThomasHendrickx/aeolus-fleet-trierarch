@@ -694,6 +694,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return nil, err
 	}
 	pass := runpass.Pass{
+		Paths:             at,
 		EndPermissions:    func(ship string) { permissionChannel.End(ship, logLine) },
 		Fleet:             client,
 		Sessions:          running,

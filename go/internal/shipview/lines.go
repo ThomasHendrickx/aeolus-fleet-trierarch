@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/ended"
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
@@ -11,12 +12,7 @@ import (
 )
 
 // Line is a whole, masked event with its timestamp and harness reading, when present.
-type Line struct {
-	At   string `json:"at"`
-	Kind string `json:"kind"`
-	Tool string `json:"tool,omitempty"`
-	Line string `json:"line"`
-}
+type Line = ended.Line
 
 // lastLines matches the activity reader's 200-line window (design D14).
 const lastLines = 200

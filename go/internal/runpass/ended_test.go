@@ -3,10 +3,12 @@ package runpass
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -62,18 +64,21 @@ func TestExitedSessionKeepsMaskedEndBeforeRestartAndReplacesOnlyAtNextEnd(t *tes
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("end mode: %v %v", info, err)
 	}
+	p.fleet.requests = []reconciler.Request{aRequest("restarting")}
+	p.pass.Now = func() time.Time { return now.Add(5 * time.Second) }
 	p.run(t)
 	after, err := os.ReadFile(path)
 	if err != nil || string(after) != string(kept) {
 		t.Fatalf("new start changed last end: %s, %v", after, err)
 	}
+	p.fleet.requests = []reconciler.Request{aRequest("running")}
 	p.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited", ExitReason: "exit status 2"}}
 	p.run(t)
 	after, err = os.ReadFile(path)
 	if err != nil || !strings.Contains(string(after), "exit status 2") {
 		t.Fatalf("next end not kept: %s, %v", after, err)
 	}
-	p.fleet.requests = nil
+	p.fleet.requests = []reconciler.Request{aRequest("releasing")}
 	p.run(t)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("released end still exists: %v", err)
@@ -96,6 +101,9 @@ func TestFailedEndWriteIsLoggedAndSessionStillRestarts(t *testing.T) {
 	if !strings.Contains(strings.Join(p.logged, "\n"), "keep last end") {
 		t.Fatalf("missing end failure log: %q", p.logged)
 	}
+	p.fleet.requests = []reconciler.Request{aRequest("restarting")}
+	p.pass.Now = func() time.Time { return now.Add(5 * time.Second) }
+	p.run(t)
 	if p.store.state.Entries[scout].State != "running" {
 		t.Fatalf("restart state = %s", p.store.state.Entries[scout].State)
 	}
