@@ -24,6 +24,8 @@ const (
 
 // Model holds the last facts read; View performs no I/O.
 type Model struct {
+	readAt   time.Time
+	hasRead  bool
 	source   Source
 	request  uint64
 	from     screen
@@ -43,6 +45,9 @@ type Model struct {
 // View renders the current screen, clipping after the reader has masked every line.
 func (m Model) View() string {
 	var lines []string
+	if m.source != nil && !m.hasRead && len(m.machine.Ships) == 0 && m.failure == "" {
+		return "aeolus-trierarch\nReading local ship facts…\nq quit"
+	}
 	if m.screen == listScreen {
 		lines = m.listView()
 	} else {
@@ -53,6 +58,10 @@ func (m Model) View() string {
 	}
 	if m.notice != "" {
 		lines = append([]string{m.notice}, lines...)
+	}
+	if len(lines) > m.height && m.height > 0 {
+		keep := min(3, m.height)
+		lines = append(lines[:m.height-keep], lines[len(lines)-keep:]...)
 	}
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, max(1, m.width), "…")
@@ -68,6 +77,9 @@ func (m Model) label(name, value string) string {
 	return m.look.Tone(style.Strong, fmt.Sprintf("%-12s", name)) + value
 }
 func (m Model) readTime() string {
+	if !m.readAt.IsZero() {
+		return m.readAt.Format("15:04:05")
+	}
 	if m.now.IsZero() {
 		return "--:--:--"
 	}
@@ -208,6 +220,11 @@ func (m Model) shipView() []string {
 }
 
 func (m Model) withLines(lines []string, events []shipview.Line, failure string, footer []string) []string {
+	// Keep the lines and footer usable when the terminal cannot fit all places.
+	if budget := m.height - len(footer) - 4; len(lines) > budget && budget >= 2 {
+		heading := lines[len(lines)-1]
+		lines = append(lines[:budget], m.rule(), heading)
+	}
 	available := max(1, m.height-len(lines)-len(footer)-1)
 	if failure != "" {
 		lines = append(lines, failure)

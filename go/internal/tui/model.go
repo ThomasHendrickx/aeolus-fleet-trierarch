@@ -58,6 +58,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = max(1, msg.Width)
 		m.height = max(1, msg.Height)
 	case tickMsg:
+		if m.readAt.IsZero() {
+			m.readAt = m.now
+		}
 		m.now = time.Time(msg)
 		m.request++
 		return m, tea.Batch(m.load(), nextTick())
@@ -66,6 +69,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if errors.Is(msg.err, shipview.ErrShipUnknown) && m.screen != listScreen {
+			m.hasRead = true
+			m.readAt = m.now
 			m.notice = m.ship.ShipName + " is no longer crewed here"
 			m.screen = listScreen
 			m.offset = 0
@@ -83,6 +88,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			id = m.machine.Ships[m.selected].ShipID
 		}
 		m.machine = msg.machine
+		m.hasRead = true
+		m.readAt = m.now
 		m.failure = ""
 		m.selected = min(m.selected, max(0, len(m.machine.Ships)-1))
 		for i, row := range m.machine.Ships {
