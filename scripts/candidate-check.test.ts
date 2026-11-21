@@ -73,12 +73,24 @@ describe('the candidate a release publishes', () => {
   });
 });
 
- describe('the candidate binaries a release publishes', () => {
-  it.each(BINARIES)('refuses missing, changed or wrongly versioned %s', (name) => {
+describe('the candidate binaries a release publishes', () => {
+  it.each(BINARIES)('refuses a missing manifest entry for %s', (name) => {
     expect(refusal({ manifest: MANIFEST.filter((file) => file.name !== name) })).toBe(`The candidate has no ${name}`);
+  });
+
+  it.each(BINARIES)('refuses changed bytes for %s', (name) => {
     expect(refusal({ downloaded: { ...DOWNLOADED, [name]: 'sha512-changed' } })).toBe(`${name} is not the file the candidate packed: its integrity differs`);
+  });
+
+  it.each(BINARIES)('refuses a missing download for %s', (name) => {
     expect(refusal({ downloaded: Object.fromEntries(Object.entries(DOWNLOADED).filter(([filename]) => filename !== name)) })).toBe(`The download has no ${name}`);
+  });
+
+  it.each(BINARIES)('refuses a wrong version for %s', (name) => {
     expect(refusal({ manifest: MANIFEST.map((file) => file.name === name ? { ...file, version: '0.28.4' } : file) })).toBe(`The candidate holds ${name} 0.28.4, not ${VERSION}`);
+  });
+
+  it.each(BINARIES)('refuses a wrong filename for %s', (name) => {
     expect(refusal({ manifest: MANIFEST.map((file) => file.name === name ? { ...file, filename: 'other' } : file) })).toBe(`The candidate names other, not ${name}`);
   });
 });
