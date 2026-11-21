@@ -10,13 +10,21 @@ import (
 	"time"
 )
 
+// NoPassYet is the warning shown before any pass has completed.
+const NoPassYet = "no pass yet: nothing below is current."
+
 // Standing describes whether the local observations are current.
 type Standing struct {
-	Service     string                  `json:"service"`
-	LastPassAt  *string                 `json:"lastPassAt"`
+	// Service is the local service manager's running state.
+	Service string `json:"service"`
+	// LastPassAt is the last successful pass time in the local time zone.
+	LastPassAt *string `json:"lastPassAt"`
+	// PassFailure describes the last failed pass, if any.
 	PassFailure *reconciler.PassFailure `json:"passFailure"`
-	IsCurrent   bool                    `json:"isCurrent"`
-	Says        []string                `json:"says"`
+	// IsCurrent says whether the observations have no standing warnings.
+	IsCurrent bool `json:"isCurrent"`
+	// Says lists independent warnings in service, failure and age order.
+	Says []string `json:"says"`
 }
 
 // ReadStanding combines the pass files with the service manager's fact.
@@ -66,7 +74,7 @@ func ReadStanding(at paths.Paths, now time.Time, isRunning bool) (Standing, []Un
 		s.Says = append(s.Says, fmt.Sprintf("unreadable: %s: %s", source.Path, source.Error))
 	}
 	if s.LastPassAt == nil && len(v.Unreadable) == 0 {
-		s.Says = append(s.Says, "no pass yet: nothing below is current.")
+		s.Says = append(s.Says, NoPassYet)
 	}
 	s.IsCurrent = len(s.Says) == 0
 	return s, v.Unreadable

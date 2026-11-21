@@ -5,6 +5,7 @@ import (
 
 	"fmt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipview"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,7 +122,7 @@ func TestShipStandingKeepsOtherFactsWhenAPassOrServiceCannotBeRead(t *testing.T)
 		t.Run(kind, func(t *testing.T) {
 			machine, at := aShipStatus(t)
 			path := filepath.Join(at.Home, "seen.json")
-			want := "no pass yet"
+			want := shipview.NoPassYet
 			switch kind {
 			case "missing":
 				if err := os.Remove(path); err != nil {

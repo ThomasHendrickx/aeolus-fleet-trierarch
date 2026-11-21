@@ -51,8 +51,9 @@ type StatusReport struct {
 	Orphans          []string       `json:"orphans"`
 	// PassFailure is why the last pass failed and since when; none when it succeeded.
 	PassFailure *reconciler.PassFailure `json:"passFailure,omitempty"`
-	LastPassAt  string                  `json:"lastPassAt,omitempty"`
-	readAt      time.Time
+	// LastPassAt is the last successful pass time in the local time zone.
+	LastPassAt string `json:"lastPassAt,omitempty"`
+	readAt     time.Time
 }
 
 // StatusFleet is the fleet and the trierarch's own lease: valid, ended or unreachable.
