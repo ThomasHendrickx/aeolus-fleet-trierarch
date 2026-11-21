@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/ended"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/style"
 	"github.com/charmbracelet/lipgloss"
 	"strings"
@@ -154,5 +155,64 @@ func TestScreenFooterAndLinesStayInsideAShortTerminal(t *testing.T) {
 				t.Fatalf("View(70x18, %v) = %s, want footer", screen, got)
 			}
 		})
+	}
+}
+
+func TestLastEndViewMatchesTheApprovedScreen(t *testing.T) {
+	m := aScreen()
+	m.screen = endScreen
+	m.ship.ShipName = "docs-writer"
+	m.ship.LastEnd = &ended.End{EndedAt: "2026-11-20T13:58:40Z", StartedAt: "2026-11-20T13:54:28Z", ExitReason: "exit status 101", Harness: "codex", SessionID: "old-session", Activity: &ended.Activity{Kind: "error", At: "2026-11-20T13:58:40Z"}, Lines: []ended.Line{{At: "2026-11-20T13:58:40Z", Kind: "error", Line: "stream disconnected [masked: crew token]"}}}
+	want := `aeolus-trierarch > docs-writer > last end read 14:02:31
+Ended 13:58:40, exit status 101, after running 4m 12s
+Session codex, session old-session
+Activity error, at 13:58:40
+Kept until the next session of docs-writer ends, or its folder goes
+Its last lines up/down scroll
+13:58:40 error stream disconnected [masked: crew token]
+esc back q quit`
+	if got := screenWords(m.View()); got != want {
+		t.Fatalf("View(last end) =\n%s\nwant\n%s", got, want)
+	}
+	m.screen = shipScreen
+	if got := screenWords(m.View()); !strings.Contains(got, "Last end 13:58:40, exit status 101 (e to read it)") {
+		t.Fatalf("View(ship) = %s, want kept end", got)
+	}
+}
+
+func TestLastEndViewNamesMissingUnreadableAndSuppressedEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		end        *ended.End
+		unreadable []shipview.Unreadable
+		want       string
+	}{
+		{name: "none", want: "none kept: no session of this ship ended since it was crewed here"},
+		{name: "unreadable", unreadable: []shipview.Unreadable{{Fact: "last end", Path: "/ended/one.json", Error: "unexpected end of JSON input"}}, want: "unreadable: /ended/one.json: unexpected end of JSON input"},
+		{name: "suppressed", end: &ended.End{LinesError: "cannot read secret to mask it"}, want: "cannot read secret to mask it"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := aScreen()
+			m.screen = endScreen
+			m.ship.LastEnd = test.end
+			m.ship.Unreadable = test.unreadable
+			if got := m.View(); !strings.Contains(got, test.want) {
+				t.Fatalf("View(last end %s) = %s, want %s", test.name, got, test.want)
+			}
+		})
+	}
+}
+
+func TestStandingBannerAppearsAboveEveryScreen(t *testing.T) {
+	for _, screen := range []screen{listScreen, shipScreen, endScreen} {
+		m := aScreen()
+		m.screen = screen
+		m.machine.Ships[0].Trierarch.Says = []string{"The service is down.", "The last pass was 3h ago: what is shown is stale."}
+		m.ship.Trierarch = m.machine.Ships[0].Trierarch
+		// List standing is supplied with every row by the local source.
+		got := m.View()
+		if !strings.HasPrefix(got, "! The service is down.\n! The last pass was 3h ago: what is shown is stale.\n") {
+			t.Fatalf("View(%v) = %s, want ordered banners", screen, got)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -86,5 +87,21 @@ func TestLiveAndPlainStatusShareWholeMaskedLinesBeforeTheTerminalCut(t *testing.
 		if strings.Contains(out, "SECRET-CREW-TOKEN") {
 			t.Fatal("status/tui(fake credential) exposed value, want masked")
 		}
+	}
+}
+
+func TestLiveSourceReadsStandingAndKeptEnd(t *testing.T) {
+	machine, at := aShipStatus(t)
+	writeStatusFile(t, filepath.Join(at.Home, "ended", "shp_one.json"), `{"exitReason":"exit status 101","lines":[]}`)
+	source := localViews{at: at}
+	rows, ship, err := source.Read(context.Background(), "shp_one", machine.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ship.LastEnd == nil || ship.LastEnd.ExitReason != "exit status 101" {
+		t.Fatalf("Read end = %+v, want exit status 101", ship.LastEnd)
+	}
+	if ship.Trierarch.Service != "not running" || len(rows.Ships[0].Trierarch.Says) == 0 {
+		t.Fatalf("Read standing = %+v, rows %+v, want service warning", ship.Trierarch, rows.Ships)
 	}
 }

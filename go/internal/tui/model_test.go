@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/ended"
 	"strings"
 	"testing"
 	"time"
@@ -221,5 +223,26 @@ func TestOpeningAShipShowsLoadingBeforeItsFactsArrive(t *testing.T) {
 	m = readResult(t, m, cmd)
 	if got := m.View(); strings.Contains(got, "Reading local ship facts…") || !strings.Contains(got, "Processes") {
 		t.Fatalf("View(opened ship) = %s, want its loaded facts", got)
+	}
+}
+
+func TestLastEndScrollUsesKeptLinesInsteadOfCurrentLines(t *testing.T) {
+	m := aScreen()
+	m.screen = endScreen
+	m.height = 18
+	m.ship.Lines = nil
+	m.ship.LastEnd = &ended.End{}
+	for i := range 200 {
+		m.ship.LastEnd.Lines = append(m.ship.LastEnd.Lines, ended.Line{Line: fmt.Sprintf("kept line %d", i)})
+	}
+	for range 250 {
+		m, _ = press(t, m, "j")
+	}
+	if got := m.View(); !strings.Contains(got, "kept line 199") {
+		t.Fatalf("View(scrolled end) = %s, want final kept line", got)
+	}
+	m, _ = press(t, m, "esc")
+	if m.screen != listScreen {
+		t.Fatal("esc from end opened on list must return to list")
 	}
 }
