@@ -701,7 +701,10 @@ func (i Init) waitForService() error {
 			case running.Version != Version:
 				reason = fmt.Errorf("service version %s does not match %s", running.Version, Version)
 			case !running.FirstReportAccepted:
-				reason = errors.New("the first report was not accepted")
+				reason = errors.New("first report pending")
+				if running.FirstReportRefusal != "" {
+					reason = fmt.Errorf("first report not accepted: %s", running.FirstReportRefusal)
+				}
 			case at.Sub(stableSince) < 10*time.Second:
 				reason = errors.New("service did not keep one process for 10 seconds")
 			default:

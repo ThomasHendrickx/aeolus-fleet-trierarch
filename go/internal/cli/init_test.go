@@ -567,15 +567,26 @@ func TestInitFailsWhenTheLeaseEndsDuringTheWait(t *testing.T) {
 	}
 }
 
-func TestInitFailsWhenTheFirstReportWasNotAccepted(t *testing.T) {
-	machine := newMachine(t)
-	machine.service.write = func() {
-		_ = os.MkdirAll(machine.init.Paths.Home, 0o700)
-		_ = os.WriteFile(machine.init.Paths.Running, []byte(`{"pid":41,"version":"0.0.0"}`), 0o644)
-	}
-	_, err := machine.init.Run(setupLine())
-	if err == nil || !strings.Contains(err.Error(), "report") {
-		t.Errorf("Run() error = %v, want the missing report", err)
+func TestInitDistinguishesAPendingFirstReportFromARefusedOne(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		running string
+		want    string
+	}{
+		{"pending", `{"pid":41,"version":"0.0.0"}`, "first report pending"},
+		{"refused", `{"pid":41,"version":"0.0.0","firstReportRefusal":"FORBIDDEN: scope missing"}`, "first report not accepted: FORBIDDEN: scope missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := newMachine(t)
+			machine.service.write = func() {
+				_ = os.MkdirAll(machine.init.Paths.Home, 0o700)
+				_ = os.WriteFile(machine.init.Paths.Running, []byte(tc.running), 0o644)
+			}
+			_, err := machine.init.Run(setupLine())
+			if err == nil || err.Error() != tc.want {
+				t.Errorf("Run() error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 
