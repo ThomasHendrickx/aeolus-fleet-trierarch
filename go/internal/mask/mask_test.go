@@ -54,13 +54,13 @@ func TestEveryKnownCredentialIsMaskedAsWrittenAndJSONEscaped(t *testing.T) {
 			for _, value := range []string{example.value, string(encoded[1 : len(encoded)-1])} {
 				want := "before [masked: " + example.which + "] after"
 				if got := m.Line("before " + value + " after"); got != want {
-					t.Fatalf("masked line = %q, want %q", got, want)
+					t.Fatalf("Line(%q) = %q, want %q", "before "+value+" after", got, want)
 				}
 			}
 		})
 	}
 	if got := m.Line("sk-unknown-credential-shaped-value"); got != "sk-unknown-credential-shaped-value" {
-		t.Fatal("masked an unknown value by shape")
+		t.Fatalf("Line(%q) = %q, want %q", "sk-unknown-credential-shaped-value", got, "sk-unknown-credential-shaped-value")
 	}
 }
 
@@ -73,7 +73,7 @@ func TestMaskingReplacesTheLongestValueBeforeItsPrefixWithoutRemaskingLabels(t *
 		t.Fatal(err)
 	}
 	if got := m.Line("fake-prefix-long fake-prefix crew token"); got != "[masked: crew token] [masked: crew token] [masked: model token]" {
-		t.Fatalf("masked line = %q", got)
+		t.Fatalf("Line(%q) = %q, want %q", "fake-prefix-long fake-prefix crew token", got, "[masked: crew token] [masked: crew token] [masked: model token]")
 	}
 }
 
@@ -86,7 +86,7 @@ func (f deniedFiles) Open(path string) (fs.File, error) {
 	return os.Open(path)
 }
 
-func TestUnreadableOrMalformedCredentialSourcesRefuseAllContent(t *testing.T) {
+func TestUnreadableCredentialSourcesRefuseAllContent(t *testing.T) {
 	for _, name := range []string{"state.json", "crew-token", "model-token", "keys", "keys/codex", "sealing-key", "mcp-configuration.json", "sessions", "sessions/other", "sessions/other/proxy-token", "sessions/other/mcp-access", "sessions/other/mcp-config.json", "sessions/other/secret-env.json"} {
 		t.Run(name, func(t *testing.T) {
 			at := paths.Of(t.TempDir(), "")
@@ -96,21 +96,26 @@ func TestUnreadableOrMalformedCredentialSourcesRefuseAllContent(t *testing.T) {
 			path := filepath.Join(at.Home, filepath.FromSlash(name))
 			m, err := (Loader{Files: deniedFiles{path}}).Load(context.Background(), at)
 			if err == nil || !strings.Contains(err.Error(), "cannot read "+path+" to mask it (permission denied)") {
-				t.Fatalf("Load error = %v", err)
+				t.Fatalf("Load(denied %q) error = %v, want cannot read source: permission denied", path, err)
 			}
 			if got := m.Line("fake-should-never-appear"); got != "" {
-				t.Fatalf("failed masker returned content: %q", got)
+				t.Fatalf("Line(%q) after denied %q = %q, want empty content", "fake-should-never-appear", path, got)
 			}
 		})
 	}
+}
+
+func TestMalformedCredentialSourcesRefuseAllContent(t *testing.T) {
 	for _, malformed := range []string{`{"secrets":`, `{"secrets":{"name":12}}`} {
-		at := paths.Of(t.TempDir(), "")
-		keep(t, at.State, `{"entries":{}}`)
-		keep(t, at.McpConfiguration, malformed)
-		m, err := Load(context.Background(), at)
-		if err == nil || m.Line("fake-value") != "" {
-			t.Fatal("malformed credential source allowed content")
-		}
+		t.Run(malformed, func(t *testing.T) {
+			at := paths.Of(t.TempDir(), "")
+			keep(t, at.State, `{"entries":{}}`)
+			keep(t, at.McpConfiguration, malformed)
+			m, err := Load(context.Background(), at)
+			if err == nil || m.Line("fake-value") != "" {
+				t.Fatalf("Load(MCP configuration %q) = (Line(%q) %q, %v), want empty content and invalid credential JSON error", malformed, "fake-value", m.Line("fake-value"), err)
+			}
+		})
 	}
 }
 
