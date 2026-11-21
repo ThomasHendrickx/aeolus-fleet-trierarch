@@ -257,7 +257,7 @@ jobs:
           integration=$(changed "${shared[@]}" "${integration[@]}")
           printf 'contract=%s\nintegration=%s\n' "$contract" "$integration" >> "$GITHUB_OUTPUT"
 
-  contract-go-shard:
+  contract-go:
     # Run each part once; the aggregate below retains the required check name.
     name: Contract tests on the Go trierarch (${{ matrix.shard }}/3)
     strategy:
@@ -299,9 +299,9 @@ jobs:
         env:
           AEOLUS_TEST_PROCESS_RECORD: ${{ runner.temp }}/test-processes
 
-  contract-go:
+  contract-go-result:
     name: Contract tests on the Go trierarch
-    needs: [changed-paths, contract-go-shard]
+    needs: [changed-paths, contract-go]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -309,7 +309,7 @@ jobs:
         env:
           PATHS_RESULT: ${{ needs.changed-paths.result }}
           CONTRACT_CHANGED: ${{ needs.changed-paths.outputs.contract }}
-          SHARDS_RESULT: ${{ needs.contract-go-shard.result }}
+          SHARDS_RESULT: ${{ needs.contract-go.result }}
         run: |
           if [[ "$PATHS_RESULT" != success ]]; then exit 1; fi
           if [[ "$CONTRACT_CHANGED" == true && "$SHARDS_RESULT" != success ]]; then exit 1; fi
