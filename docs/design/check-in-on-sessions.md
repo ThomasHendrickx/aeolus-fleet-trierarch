@@ -86,7 +86,7 @@ Thomas answered each question on 20 Nov, one card each, in the order they were a
 - **D10. Staying current** (Q10, option 1): the live mode reads the files again on a fixed interval of about one pass.
 - **D11. Where the turn shown comes from** (Q11, option 1): each pass writes the turn it read through the plugin's scripts, with the marker's since, into `seen.json` beside each inbox; the tool shows it with its age.
 - **D12. How old is stale** (Q12, option 2): the banner calls the facts stale when the last pass is older than 1 minute.
-- **D13. How a line is shown** (Q13, option 1): a line of `events.jsonl` is shown as written, masked, after its time and the kind and tool the harness's existing reader gives it; cut to the width in `tui`, whole in `status <ship>`.
+- **D13. How a line is shown** (Q13, option 1): a line of `events.jsonl` is shown as written, masked, after its time and the kind and tool the harness's existing reader gives it; cut to the width in `tui`, whole in `status <ship>`. A line with its own timestamp shows that time. A line with no time of its own shows `--:--:--` in the time column and an empty `at` in JSON (Thomas, card 60f0a260, option 1).
 - **D14. How many lines** (Q14, option 1): 200 lines are shown and kept, as many as the pass already reads for activity (`activity.eventLines`).
 - **D15. Plain `status`** (Q15, option 2): `status` with no ship says the last pass's age, for example `Last pass: succeeded, 4s ago`, from `seen.json`.
 - **D16. Where a dead session's end is kept** (Q16, option 1): in `~/.aeolus/trierarch/ended/<shipId>.json`, beside `ships/`, mode 600.

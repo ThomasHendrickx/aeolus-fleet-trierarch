@@ -83,7 +83,7 @@ func describeShip(view shipview.View, now time.Time) string {
 	} else {
 		text = append(text, "Last lines:")
 		for _, line := range view.Lines {
-			stamp := "unknown time"
+			stamp := "--:--:--"
 			if at, err := time.Parse(time.RFC3339Nano, line.At); err == nil {
 				stamp = at.Format("15:04:05")
 			}
