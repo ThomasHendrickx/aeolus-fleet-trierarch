@@ -25,6 +25,7 @@ func TestShipStandingReportsEachConditionAndTheExactMinuteBoundary(t *testing.T)
 	}{
 		{"current", false, false, 4 * time.Second, []string{}},
 		{"one minute", false, false, time.Minute, []string{}},
+		{"three hours", false, false, 3 * time.Hour, []string{"The last pass was 3h ago: what is shown is stale."}},
 		{"over one minute", false, false, time.Minute + time.Second, []string{"The last pass was 1m ago: what is shown is stale."}},
 		{"service down", true, false, 4 * time.Second, []string{"The trierarch's service is not running (aeolus-trierarch start): nothing below is current."}},
 		{"failed", false, true, 4 * time.Second, []string{"The last pass failed, failing since 13:41:10: fleet unreachable: nothing below is current."}},
