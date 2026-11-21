@@ -3,6 +3,7 @@ package seen
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -39,18 +40,21 @@ type File struct{ Path string }
 // Save replaces the whole snapshot; a failed write leaves the last one intact.
 func (f File) Save(snapshot Snapshot) error {
 	if err := os.MkdirAll(filepath.Dir(f.Path), 0700); err != nil {
-		return err
+		return fmt.Errorf("save seen snapshot: %w", err)
 	}
 	text, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("save seen snapshot: %w", err)
 	}
 	temporary := f.Path + ".tmp"
 	if err := os.WriteFile(temporary, append(text, '\n'), 0600); err != nil {
-		return err
+		return fmt.Errorf("save seen snapshot: %w", err)
 	}
 	if err := os.Chmod(temporary, 0600); err != nil {
-		return err
+		return fmt.Errorf("save seen snapshot: %w", err)
 	}
-	return os.Rename(temporary, f.Path)
+	if err := os.Rename(temporary, f.Path); err != nil {
+		return fmt.Errorf("save seen snapshot: %w", err)
+	}
+	return nil
 }
