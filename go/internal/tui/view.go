@@ -113,6 +113,9 @@ func (m Model) listView() []string {
 	rows := [][]string{{"SHIP", "STATE", "HARNESS", "TURN", "ACTIVITY", "INBOX", "RESTARTS"}}
 	for _, row := range m.machine.Ships {
 		turn := "-"
+		if row.Session.Status == "running" {
+			turn = "unknown"
+		}
 		if t := row.Session.Turn; t != nil {
 			turn = t.State + " " + elapsed(m.now, t.Since)
 		}
