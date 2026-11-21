@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/style"
 	"github.com/charmbracelet/lipgloss"
 	"strings"
 	"testing"
@@ -126,5 +128,31 @@ func TestShipViewShowsPartialAndMaskingFailures(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("View(partial) = %s, want %q", got, want)
 		}
+	}
+}
+
+func TestNewViewShowsLoadingUntilTheFirstReadCompletes(t *testing.T) {
+	m := New(&localFacts{}, style.Plain)
+	got := m.View()
+	if !strings.Contains(got, "Reading local ship facts…") || strings.Contains(got, "No ship is crewed here") {
+		t.Fatalf("View(before first read) = %s, want loading without an empty result", got)
+	}
+}
+
+func TestScreenFooterAndLinesStayInsideAShortTerminal(t *testing.T) {
+	for _, screen := range []screen{listScreen, shipScreen} {
+		t.Run(fmt.Sprint(screen), func(t *testing.T) {
+			m := aScreen()
+			m.screen = screen
+			m.width = 70
+			m.height = 18
+			got := m.View()
+			if rows := len(strings.Split(got, "\n")); rows > 18 {
+				t.Fatalf("View(70x18, %v) = %d rows, want <=18", screen, rows)
+			}
+			if !strings.Contains(got, "q quit") || !strings.Contains(got, "To act on") {
+				t.Fatalf("View(70x18, %v) = %s, want footer", screen, got)
+			}
+		})
 	}
 }

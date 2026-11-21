@@ -200,3 +200,13 @@ func TestWindowResizeChangesTheViewWidth(t *testing.T) {
 		t.Fatalf("Update(resize) = %dx%d, want 50x20", m.width, m.height)
 	}
 }
+
+func TestAReadFailureKeepsTheLastReadTime(t *testing.T) {
+	m := aScreen()
+	m.source = &localFacts{err: errors.New("cannot read state")}
+	next, cmd := m.Update(tickMsg(m.now.Add(time.Minute)))
+	m = readResult(t, next.(Model), cmd)
+	if got := m.View(); !strings.Contains(got, "read 14:02:31") {
+		t.Fatalf("View(failed read at 14:03:31) = %s, want read 14:02:31", got)
+	}
+}
