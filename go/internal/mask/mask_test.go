@@ -111,3 +111,13 @@ func TestUnreadableOrMalformedCredentialSourcesRefuseAllContent(t *testing.T) {
 		}
 	}
 }
+
+func TestOverlappingCredentialsNeverExposeEitherTail(t *testing.T) {
+ at := paths.Of(t.TempDir(), "")
+ keep(t, at.State, `{"entries":{"one":{"crewToken":"fake-abcdef"},"two":{"crewToken":"def-fake-tail"}}}`)
+ m, err := Load(at)
+ if err != nil { t.Fatal(err) }
+ input := "before fake-abcdef-fake-tail after"
+ want := "before [masked: crew token] after"
+ if got := m.Line(input); got != want { t.Fatalf("Line(%q) = %q, want %q", input, got, want) }
+}
