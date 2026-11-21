@@ -276,4 +276,3 @@ in the tried harness. The question names the same native rule as the result. Rul
 A process restarted with `--continue` asks again. A Bash rule carries the exact
 command, but a command with redirection (`echo test > a.txt`) still asks again
 in the tried harness. Claude Code lists refused actions in `permission_denials`.
-
