@@ -24,6 +24,9 @@ const (
 
 // Model holds the last facts read; View performs no I/O.
 type Model struct {
+	source   Source
+	request  uint64
+	from     screen
 	machine  shipview.Machine
 	ship     shipview.View
 	screen   screen
