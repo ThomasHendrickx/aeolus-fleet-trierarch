@@ -2,6 +2,9 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -109,4 +112,57 @@ func TestPlainStatusReportsTheLastSuccessfulPassAge(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestShipStandingKeepsOtherFactsWhenAPassOrServiceCannotBeRead(t *testing.T) {
+	for _, kind := range []string{"missing", "malformed", "unreadable", "service"} {
+		t.Run(kind, func(t *testing.T) {
+			machine, at := aShipStatus(t)
+			path := filepath.Join(at.Home, "seen.json")
+			want := "no pass yet"
+			switch kind {
+			case "missing":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+			case "malformed":
+				writeStatusFile(t, path, `{"passAt":`)
+				want = "unreadable: " + path
+			case "unreadable":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0700); err != nil {
+					t.Fatal(err)
+				}
+				want = "unreadable: " + path
+			case "service":
+				machine.Service = func(paths.Paths) ServiceManager { return &anUnreadableStandingService{} }
+				want = "unreadable: /unit: service unavailable"
+			}
+			out, code := Main([]string{"status", "shp_one"}, machine)
+			if code != 0 || !strings.Contains(out, "Ship: design-tri-271c") || !strings.Contains(out, "Trierarch: ") || !strings.Contains(out, want) {
+				t.Fatalf("status = %d %s, want %s and ship facts", code, out, want)
+			}
+			out, code = Main([]string{"status", "shp_one", "--json"}, machine)
+			var got struct {
+				Trierarch struct {
+					IsCurrent  bool
+					LastPassAt *string
+				}
+			}
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatal(err)
+			}
+			if code != 0 || got.Trierarch.IsCurrent || (kind == "missing" && got.Trierarch.LastPassAt != nil) {
+				t.Fatalf("JSON = %d %s", code, out)
+			}
+		})
+	}
+}
+
+type anUnreadableStandingService struct{ anInstalledService }
+
+func (*anUnreadableStandingService) Status() (service.Status, error) {
+	return service.Status{File: "/unit"}, errors.New("service unavailable")
 }
