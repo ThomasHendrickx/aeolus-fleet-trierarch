@@ -25,6 +25,19 @@ type Loader struct{ Files Files }
 // Masker holds replacements privately. Its zero value suppresses all content.
 type Masker struct{ replacer *strings.Replacer }
 
+// SourceError names the credential source that prevents safe content output.
+type SourceError struct {
+	Path string
+	Err  error
+}
+
+func (e *SourceError) Error() string {
+	return fmt.Sprintf("cannot read %s to mask it (%s)", e.Path, e.Err)
+}
+
+// Unwrap preserves the underlying file failure.
+func (e *SourceError) Unwrap() error { return e.Err }
+
 // Line replaces known values, as written or JSON-escaped, without cutting content.
 func (m Masker) Line(text string) string {
 	if m.replacer == nil {
@@ -225,5 +238,5 @@ func cannotRead(path string, err error) error {
 	if errors.As(err, &failure) {
 		err = failure.Err
 	}
-	return fmt.Errorf("cannot read %s to mask it (%w)", path, err)
+	return &SourceError{Path: path, Err: err}
 }

@@ -42,7 +42,7 @@ func (e unknownShip) Error() string {
 }
 func (e unknownShip) Unwrap() error { return ErrShipUnknown }
 
-// View contains facts only. Session content and credentials have no fields here.
+// View contains local facts and masked session lines, never credential values.
 type View struct {
 	ShipID      string       `json:"shipId"`
 	ShipName    string       `json:"shipName"`
@@ -53,6 +53,7 @@ type View struct {
 	Restarts    int          `json:"restarts"`
 	Places      Places       `json:"places"`
 	Session     Session      `json:"session"`
+	Lines       []Line       `json:"lines"`
 	Unreadable  []Unreadable `json:"unreadable"`
 }
 
@@ -200,6 +201,7 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 		ShipID: one.ShipID, ShipName: one.ShipName, Harness: one.Harness,
 		State: one.State, Since: localTime(one.Since, now.Location()),
 		Unreadable: []Unreadable{},
+		Lines:      []Line{},
 		Session:    Session{Status: "exited", Processes: []Process{}},
 		Places: Places{
 			ShipFolder: one.Folder, SubRepositories: map[string]string{},
@@ -252,23 +254,17 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 	if reason == "" && view.Session.HoldPID > 0 && processproof.Runs(view.Session.HoldPID, "hold", one.ShipID, "--sessions", at.Sessions) {
 		view.Session.Status = "running"
 	}
-	readers := map[string]func([]string) (activity.Reading, bool){"claude-code": claudecode.ActivityIn, "codex": codex.ActivityIn, "copilot": copilot.ActivityIn}
-	if reader := readers[one.Harness]; reader != nil {
-		file, err := files.Open(held.Events)
-		view.record("activity", held.Events, err)
-		if err == nil {
-			latest, ok, err := activity.OfFile(file, func(line string) (activity.Reading, bool) { return reader([]string{line}) })
-			_ = file.Close()
-			view.record("activity", held.Events, err)
-			if ok && err == nil {
-				view.Session.Activity = &Activity{latest.Kind, latest.Tool, latest.At.In(now.Location()).Format(time.RFC3339)}
-			}
+	masker, maskErr := (mask.Loader{Files: files}).Load(at)
+	if maskErr != nil {
+		var source *mask.SourceError
+		if errors.As(maskErr, &source) {
+			view.Unreadable = append(view.Unreadable, Unreadable{Fact: "masking", Path: source.Path, Error: source.Err.Error()})
 		}
 	}
+	readers := map[string]func([]string) (activity.Reading, bool){"claude-code": claudecode.ActivityIn, "codex": codex.ActivityIn, "copilot": copilot.ActivityIn}
+	view.readEvents(files, held.Events, readers[one.Harness], masker, now)
 	if view.Session.Status == "running" {
-		masker, maskErr := (mask.Loader{Files: files}).Load(at)
 		if maskErr != nil {
-			view.record("processes", at.State, maskErr)
 			return view, nil
 		}
 		processes := r.Processes
