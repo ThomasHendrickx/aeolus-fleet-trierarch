@@ -146,7 +146,7 @@ The inbox's facts without the fleet (D5), the turn (D11), and the time of the la
 
 - At the end of each pass that succeeded, the run pass writes `seen.json` whole, as `state.json` is written: `passAt`, and per ship it watched the inbox it read (waiting, forced) with when it read it, and the turn it read through the plugin's scripts, idle or busy, with the marker's own since and when it read it (D11).
 - An inbox is watched only while the ship's session runs (#473), so a ship with no running session has no inbox line: the tool says `not watched while no session runs`, never a count of zero.
-- A pass that fails writes no `seen.json`: the last one stays, with its older `passAt`, and the banner says so (part 5).
+- A pass that fails writes no `seen.json`: the last one stays, with its older `passAt`, and the banner says so (part 5). A failed write of `seen.json` is a failed pass: it returns the error, keeps the last snapshot whole, and records `passFailure` for the banner (part 5).
 
 ### 5. The trierarch's standing
 
