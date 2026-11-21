@@ -72,10 +72,13 @@ func ReadStanding(at paths.Paths, now time.Time, isRunning bool) (Standing, []Un
 	return s, v.Unreadable
 }
 
-// Age rounds elapsed time to seconds below a minute and minutes above it.
+// Age rounds elapsed time to seconds, minutes or hours.
 func Age(elapsed time.Duration) string {
 	if elapsed < time.Minute {
 		return fmt.Sprintf("%ds", max(0, int(elapsed.Round(time.Second)/time.Second)))
 	}
-	return fmt.Sprintf("%dm", int(elapsed.Round(time.Minute)/time.Minute))
+	if elapsed < time.Hour {
+		return fmt.Sprintf("%dm", int(elapsed.Round(time.Minute)/time.Minute))
+	}
+	return fmt.Sprintf("%dh", int(elapsed.Round(time.Hour)/time.Hour))
 }
