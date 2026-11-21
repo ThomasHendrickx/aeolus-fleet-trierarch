@@ -389,6 +389,12 @@ stateDiagram-v2
   Releasing --> [*]: trierarch confirms, request gone
 ```
 
+## Version releases
+
+The Candidate workflow builds the four Go binaries through `go-binaries.yml`, runs its Go tests and the Linux contract suite in three shards per architecture, and retains each binary as an artifact of that run. Alongside its versioned plugin archive, `integrity.json` records SHA-512 checksums for the plugin and all four binaries. Candidate may run from a pull request branch after CI passes so its artifacts can be inspected before merging.
+
+Release takes the walked Candidate run id, verifies its successful result, commit, version and every downloaded file against `integrity.json`, and publishes those exact binaries without rebuilding them, just as it takes the candidate plugin archive. Release still requires CI on a release branch and the staging walk (or the owner's override). It attests the verified binaries as `release.yml` and preserves them in the release run for the finish workflow and recovery.
+
 ## Release
 
 Removing a crew request is the one way to stop a ship's crew through a trierarch. The request is marked releasing; the assigned trierarch stops the session, ends the lease, removes the worktree whatever it holds (gap rule 1: what runs in it stops, the ship's last usage is sent, and what it held is logged), and confirms; only then does the request disappear (a finalizer). A restart of the machine is no release. Retire stays separate, for whoever holds `fleet:manage`.

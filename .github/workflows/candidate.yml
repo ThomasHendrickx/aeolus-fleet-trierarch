@@ -1,4 +1,4 @@
-# Builds the versioned aeolus-fleet plugin candidate for the staging gate.
+# Builds the versioned plugin and tested Go binaries for the staging gate.
 name: Candidate
 
 on:
@@ -18,8 +18,15 @@ env:
   NEXT_TELEMETRY_DISABLED: '1'
 
 jobs:
+  binaries:
+    name: Go binaries ${{ inputs.version }}
+    uses: ./.github/workflows/go-binaries.yml
+    with:
+      version: ${{ inputs.version }}
+
   candidate:
     name: Candidate ${{ inputs.version }}
+    needs: binaries
     runs-on: ubuntu-latest
     steps:
       - name: Check the version
@@ -56,33 +63,45 @@ jobs:
 
       - run: npm ci
 
-      # The release's own gate: a candidate is only what may be released.
-      - name: Check the commit is on a release branch and passed CI
+      # Branch candidates can be inspected before merging; release keeps its branch gate.
+      - name: Check the commit passed CI
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --event push --json status,conclusion,url \
-            | node scripts/release-gate.ts "$GITHUB_REF" "$GITHUB_SHA"
+          gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --json status,conclusion,url \
+            | jq --exit-status '.[0] | .status == "completed" and .conclusion == "success"'
 
       - name: Set the version on the trierarch and the aeolus-fleet plugin
         env:
           VERSION: ${{ inputs.version }}
         run: npm run set-version -- "$VERSION"
 
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: aeolus-trierarch-*
+          path: ${{ runner.temp }}/candidate
+          merge-multiple: true
+
       - name: Pack the aeolus-fleet plugin
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          mkdir "$RUNNER_TEMP/candidate"
+          mkdir -p "$RUNNER_TEMP/candidate"
           tar --exclude=test -czf "$RUNNER_TEMP/candidate/aeolus-fleet-plugin-$VERSION.tgz" plugins/aeolus-fleet .claude-plugin .agents/plugins
           node --input-type=module -e '
             import { createHash } from "node:crypto";
-            import { readFileSync, writeFileSync } from "node:fs";
+            import { readFileSync, readdirSync, writeFileSync } from "node:fs";
             const version = process.env.VERSION;
             const filename = `aeolus-fleet-plugin-${version}.tgz`;
             const folder = `${process.env.RUNNER_TEMP}/candidate`;
-            const integrity = `sha512-${createHash("sha512").update(readFileSync(`${folder}/${filename}`)).digest("base64")}`;
-            writeFileSync(`${folder}/integrity.json`, JSON.stringify([{ name: "aeolus-fleet-plugin", version, filename, integrity }], null, 2) + "\n");
+            const manifest = readdirSync(folder).sort().map((file) => ({
+              name: file === filename ? "aeolus-fleet-plugin" : file,
+              version,
+              filename: file,
+              integrity: `sha512-${createHash("sha512").update(readFileSync(`${folder}/${file}`)).digest("base64")}`,
+            }));
+            writeFileSync(`${folder}/integrity.json`, JSON.stringify(manifest, null, 2) + "\n");
           '
 
       - name: Name the candidate

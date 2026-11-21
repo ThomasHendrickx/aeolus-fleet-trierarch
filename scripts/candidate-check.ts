@@ -1,6 +1,6 @@
 /**
  * Checks a passed candidate run of the released commit and the versioned plugin
- * archive's integrity before the release changes anything.
+ * archive and Go binaries' integrity before the release changes anything.
  * Usage: gh run view <run id> --json workflowName,conclusion,headSha
  *   | node scripts/candidate-check.ts <version> <sha> <candidate folder>
  */
@@ -34,7 +34,7 @@ export function candidateRefusal(check: {
   if (check.run.headSha !== check.sha) {
     return `The candidate is of ${check.run.headSha}, not of the released commit ${check.sha}`;
   }
-  for (const name of ['aeolus-fleet-plugin']) {
+  for (const name of ['aeolus-fleet-plugin', 'aeolus-trierarch-linux-amd64', 'aeolus-trierarch-linux-arm64', 'aeolus-trierarch-darwin-arm64', 'aeolus-trierarch-darwin-amd64']) {
     const tarball = check.manifest.find((packed) => packed.name === name);
     if (tarball === undefined) {
       return `The candidate has no ${name}`;
@@ -42,7 +42,7 @@ export function candidateRefusal(check: {
     if (tarball.version !== check.version) {
       return `The candidate holds ${name} ${tarball.version}, not ${check.version}`;
     }
-    const filename = `aeolus-fleet-plugin-${check.version}.tgz`;
+    const filename = name === 'aeolus-fleet-plugin' ? `aeolus-fleet-plugin-${check.version}.tgz` : name;
     if (tarball.filename !== filename) {
       return `The candidate names ${tarball.filename}, not ${filename}`;
     }
@@ -51,7 +51,7 @@ export function candidateRefusal(check: {
       return `The download has no ${tarball.filename}`;
     }
     if (downloaded !== tarball.integrity) {
-      return `${tarball.filename} is not the tarball the candidate packed: its integrity differs`;
+      return `${tarball.filename} is not the file the candidate packed: its integrity differs`;
     }
   }
   return undefined;

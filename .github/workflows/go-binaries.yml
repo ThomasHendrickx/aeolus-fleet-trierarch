@@ -4,8 +4,8 @@
 # the binary on Linux (the suite runs core on Testcontainers Postgres and has a
 # systemd stand-in: macOS runners have no Docker, and launchd has no stand-in).
 # Each binary is uploaded as the Actions artifact of its asset name,
-# aeolus-trierarch-<goos>-<goarch>, the name upgrade reads. release.yml calls
-# it, then attests and publishes the binaries itself: upgrade takes only an
+# aeolus-trierarch-<goos>-<goarch>, the name upgrade reads. candidate.yml calls
+# it; release.yml verifies the candidate checksums, then attests and publishes the binaries itself: upgrade takes only an
 # attestation signed by release.yml.
 name: Go binaries
 
