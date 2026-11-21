@@ -22,6 +22,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/seen"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
@@ -210,6 +211,7 @@ type aHarness struct {
 	marksNoLaunches bool
 	pluginMissing   bool
 	notOffered      string
+	turnSince       string
 	turns           map[string]string
 	holding         map[string]bool
 	handed          []string
@@ -254,11 +256,11 @@ func (h *aHarness) WriteIdentity(entry reconciler.Entry, identity plugin.Identit
 	h.sockets.events = append(h.sockets.events, "identity "+identity.Socket)
 	return nil
 }
-func (h *aHarness) Turn(entry reconciler.Entry) string {
+func (h *aHarness) Turn(entry reconciler.Entry) plugin.Turn {
 	if turn, ok := h.turns[entry.Folder]; ok {
-		return turn
+		return plugin.Turn{State: turn, Since: h.turnSince}
 	}
-	return reconciler.TurnUnknown
+	return plugin.Turn{State: reconciler.TurnUnknown}
 }
 func (h *aHarness) IsHolding(entry reconciler.Entry) bool { return h.holding[entry.Folder] }
 func (h *aHarness) HandOver(entry reconciler.Entry) (bool, error) {
