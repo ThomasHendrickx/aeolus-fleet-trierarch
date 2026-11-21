@@ -235,6 +235,6 @@ func (h Harness) DeleteIdentity(entry reconciler.Entry) error {
 
 func (h Harness) SessionDied(entry reconciler.Entry) error { return h.Plugin.SessionDied(entry.Folder) }
 
-func (h Harness) Turn(entry reconciler.Entry) string { return h.Plugin.Turn(entry.Folder) }
+func (h Harness) Turn(entry reconciler.Entry) plugin.Turn { return h.Plugin.ReadTurn(entry.Folder) }
 
 func (h Harness) IsHolding(entry reconciler.Entry) bool { return h.Plugin.IsHolding(entry.Folder) }

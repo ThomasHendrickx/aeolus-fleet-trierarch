@@ -184,13 +184,22 @@ func (p Plugin) DeleteIdentity(folder string) error {
 }
 
 // Turn is the session's turn as its plugin marks it: busy, idle, or unknown before one is marked.
-func (p Plugin) Turn(folder string) string {
+func (p Plugin) Turn(folder string) string { return p.ReadTurn(folder).State }
+
+// Turn holds the plugin's turn marker, including when that turn began.
+type Turn struct {
+	State string `json:"state"`
+	Since string `json:"since"`
+}
+
+// ReadTurn reads the turn and its original timestamp through the plugin's script.
+func (p Plugin) ReadTurn(folder string) Turn {
 	marked, err := p.run("aeolus-identity.sh", folder, "", "turn")
-	state, _, _ := strings.Cut(strings.TrimSpace(marked), " ")
+	state, since, _ := strings.Cut(strings.TrimSpace(marked), " ")
 	if err != nil || (state != "busy" && state != "idle") {
-		return "unknown"
+		return Turn{State: "unknown"}
 	}
-	return state
+	return Turn{State: state, Since: since}
 }
 
 // toHand are the states of a store entry the trierarch hands over (#756): received, handed and not confirmed, or to hand once more.
