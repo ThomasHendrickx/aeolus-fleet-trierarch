@@ -36,9 +36,12 @@ func TestExitedSessionKeepsMaskedEndBeforeRestartAndReplacesOnlyAtNextEnd(t *tes
 	if err := os.WriteFile(filepath.Join(folder, "session-id"), []byte("session-first"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(folder, "secret-env.json"), []byte(`{"END_SECRET":"fake-end-secret"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	var events strings.Builder
 	for i := 1; i <= 201; i++ {
-		fmt.Fprintf(&events, "line %03d aeolus_ct_v1_scout\n", i)
+		fmt.Fprintf(&events, "line %03d aeolus_ct_v1_scout fake-end-secret\n", i)
 	}
 	if err := os.WriteFile(filepath.Join(folder, "events.jsonl"), []byte(events.String()), 0600); err != nil {
 		t.Fatal(err)
@@ -57,7 +60,7 @@ func TestExitedSessionKeepsMaskedEndBeforeRestartAndReplacesOnlyAtNextEnd(t *tes
 	if err := json.Unmarshal(kept, &end); err != nil {
 		t.Fatal(err)
 	}
-	if end.ExitReason != "exit status 101 [masked: crew token]" || end.SessionID != "session-first" || end.StartedAt == "" || end.EndedAt == "" || len(end.Lines) != 200 || end.Lines[0].Line != "line 002 [masked: crew token]" || end.Lines[199].Line != "line 201 [masked: crew token]" || strings.Contains(string(kept), "aeolus_ct_v1_scout") {
+	if end.ExitReason != "exit status 101 [masked: crew token]" || end.SessionID != "session-first" || end.StartedAt == "" || end.EndedAt == "" || len(end.Lines) != 200 || end.Lines[0].Line != "line 002 [masked: crew token] [masked: secret variable END_SECRET]" || end.Lines[199].Line != "line 201 [masked: crew token] [masked: secret variable END_SECRET]" || (strings.Contains(string(kept), "aeolus_ct_v1_scout") || strings.Contains(string(kept), "fake-end-secret")) {
 		t.Fatalf("kept end = %s", kept)
 	}
 	info, err := os.Stat(path)
@@ -66,7 +69,20 @@ func TestExitedSessionKeepsMaskedEndBeforeRestartAndReplacesOnlyAtNextEnd(t *tes
 	}
 	p.fleet.requests = []reconciler.Request{aRequest("restarting")}
 	p.pass.Now = func() time.Time { return now.Add(5 * time.Second) }
+	p.sessions.beforeStop = func(shipID string) {
+		if shipID != scout {
+			t.Fatalf("stopping %s, want %s", shipID, scout)
+		}
+		snapshot, err := os.ReadFile(path)
+		if err != nil || string(snapshot) != string(kept) {
+			t.Fatalf("evidence missing before hold removal: %v", err)
+		}
+		if err := os.RemoveAll(folder); err != nil {
+			t.Fatal(err)
+		}
+	}
 	p.run(t)
+	p.sessions.beforeStop = nil
 	after, err := os.ReadFile(path)
 	if err != nil || string(after) != string(kept) {
 		t.Fatalf("new start changed last end: %s, %v", after, err)

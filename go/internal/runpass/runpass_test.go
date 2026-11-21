@@ -168,14 +168,18 @@ func (s *someSockets) Close(shipID string, shipFolder string) {
 
 // aSessions holds the sessions that run, as the harness's launches start them.
 type aSessions struct {
-	observed []sessions.Observed
-	stopped  []string
+	beforeStop func(string)
+	observed   []sessions.Observed
+	stopped    []string
 	// stopFails makes every Stop fail, as a session that does not end.
 	stopFails bool
 }
 
 func (s *aSessions) List() ([]sessions.Observed, error) { return s.observed, nil }
 func (s *aSessions) Stop(shipID string) error {
+	if s.beforeStop != nil {
+		s.beforeStop(shipID)
+	}
 	if s.stopFails {
 		return errors.New("the session did not stop")
 	}
