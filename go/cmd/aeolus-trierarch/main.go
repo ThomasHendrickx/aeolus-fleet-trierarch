@@ -695,6 +695,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return nil, err
 	}
 	pass := runpass.Pass{
+		Paths:             at,
 		Seen:              seen.File{Path: filepath.Join(at.Home, "seen.json")},
 		EndPermissions:    func(ship string) { permissionChannel.End(ship, logLine) },
 		Fleet:             client,
