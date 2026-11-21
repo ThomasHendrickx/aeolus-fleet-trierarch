@@ -21,6 +21,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/seen"
@@ -174,6 +175,8 @@ type Store interface {
 type SeenStore interface{ Save(seen.Snapshot) error }
 
 type Pass struct {
+	// Paths locates local session evidence; an empty Home disables keeping ends.
+	Paths paths.Paths
 	// Seen keeps the last successful pass on the machine.
 	Seen SeenStore
 	// EndPermissions finishes a stopped ship's withdrawals before its identity or lease ends.
@@ -506,6 +509,9 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed, snaps
 		statusOf[session.ShipID] = session.Status
 		if session.Status == reconciler.SessionExited {
 			observed.FailureReasons[session.ShipID] = session.ExitReason
+			if entry, ok := state.Entries[session.ShipID]; ok && (entry.State == "running" || entry.State == "crewing") {
+				p.keepEnd(entry, session.ExitReason)
+			}
 		}
 	}
 	for _, shipID := range sortedIDs(state.Entries) {
@@ -1078,6 +1084,9 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 		}
 	}
 	if err := p.deleteIdentity(entry); err != nil {
+		return err
+	}
+	if err := p.removeEnd(entry.ShipID); err != nil {
 		return err
 	}
 	if !isWorktree {

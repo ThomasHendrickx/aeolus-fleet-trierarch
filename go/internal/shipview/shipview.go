@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/ended"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
 	"io"
 	"io/fs"
@@ -46,6 +47,7 @@ func (e unknownShip) Unwrap() error { return ErrShipUnknown }
 // View contains local facts and masked session lines, never credential values.
 type View struct {
 	Trierarch   Standing     `json:"trierarch"`
+	LastEnd     *ended.End   `json:"lastEnd"`
 	ShipID      string       `json:"shipId"`
 	ShipName    string       `json:"shipName"`
 	Harness     string       `json:"harness"`
@@ -82,11 +84,7 @@ type Session struct {
 }
 
 // Activity is the latest event's kind and tool, never its content.
-type Activity struct {
-	Kind string `json:"kind"`
-	Tool string `json:"tool,omitempty"`
-	At   string `json:"at"`
-}
+type Activity = ended.Activity
 
 // Process names a process, when it started and its masked command.
 type Process struct {
@@ -214,6 +212,24 @@ func (r Reader) Ship(ctx context.Context, at paths.Paths, ship string, now time.
 			Hold:   held.Folder, Events: held.Events,
 		},
 	}
+	endPath := ended.Path(at.Home, one.ShipID)
+	endData, endErr := readFile(files, endPath)
+	if endErr == nil {
+		var last ended.End
+		endErr = json.Unmarshal(endData, &last)
+		if endErr == nil {
+			last.EndedAt = localTime(last.EndedAt, now.Location())
+			last.StartedAt = localTime(last.StartedAt, now.Location())
+			if last.Activity != nil {
+				last.Activity.At = localTime(last.Activity.At, now.Location())
+			}
+			for i := range last.Lines {
+				last.Lines[i].At = localTime(last.Lines[i].At, now.Location())
+			}
+			view.LastEnd = &last
+		}
+	}
+	view.record("last end", endPath, endErr)
 	for _, exit := range one.Exits {
 		if ended, err := time.Parse(time.RFC3339, exit); err == nil && now.Sub(ended) >= 0 && now.Sub(ended) < time.Hour {
 			view.Restarts++

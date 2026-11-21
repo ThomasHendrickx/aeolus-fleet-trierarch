@@ -41,6 +41,7 @@ Everything of the trierarch lives under `~/.aeolus/trierarch/`.
 | With the container runtime, the machine's long-lived model token (`claude setup-token`), mode 600, handed to each container (decision 0039); never in the configuration | `~/.aeolus/trierarch/model-token` | The operator |
 | Each harness's API key, one file per harness (`claude-code`, `codex`), mode 600 in a folder of mode 700, written only once the vendor took it; never in the configuration, a report, a log or the fleet (api keys K5, K7) | `~/.aeolus/trierarch/keys/<harness>` | `aeolus-trierarch login <harness> --api-key` |
 | State, mode 600: entries saved as crewing, runtime state and crew token per ship, what argo was told the machine is low on. Declared state lives in the fleet; written atomically. The ship view uses its own decoder with no crew token field | `~/.aeolus/trierarch/state.json` | The trierarch |
+| The last end of each ship's session, mode 600: reason, end and start times, harness and session id, latest activity and up to 200 whole lines, masked before the hold files go. Replaced at the next end, kept across starts, removed with the ship | `~/.aeolus/trierarch/ended/<shipId>.json` | The run pass, before cleanup |
 | What the last successful pass saw: `passAt`, and watched ships' inbox counts and turns with their observation times, mode 600, written whole and atomically; no message content or credential | `~/.aeolus/trierarch/seen.json` | The trierarch, at the end of a successful pass |
 | What detection found per harness: its version, when it was detected and its models last confirmed, and its options (#365) | `~/.aeolus/trierarch/detected.json` | The trierarch: `init`, a start after a harness updated, `aeolus-trierarch detect` |
 | The running trierarch's pid and version, so `status` tells the running version from the installed one | `~/.aeolus/trierarch/running.json` | The trierarch, as it starts |
@@ -276,3 +277,5 @@ in the tried harness. The question names the same native rule as the result. Rul
 A process restarted with `--continue` asks again. A Bash rule carries the exact
 command, but a command with redirection (`echo test > a.txt`) still asks again
 in the tried harness. Claude Code lists refused actions in `permission_denials`.
+
+`internal/ended` atomically keeps the last end beside `ships/`. The pass captures it while the exited hold's token files remain, using the same masked lines as `shipview`. A failure is logged without blocking restart. The reader includes the kept end even after the hold files are gone; a malformed or unreadable end leaves the remaining facts available.
