@@ -94,7 +94,7 @@ func TestShipStatusShowsLocalFactsByNameOrIDWithoutCredentials(t *testing.T) {
 					}
 				} else {
 					want := "Ship: design-tri-271c (shp_one), claude-code, on the host\nState: running since 2026-11-20T13:30:12+01:00, 0 restarts\nActivity: tool Bash, 12s ago\nProcesses: none\nPlaces: ship folder " + filepath.Join(at.Ships, "shp_one", "repositories") + ", hold " + filepath.Join(at.Sessions, "shp_one")
-					want += "\nLast lines:\n  unknown time tool Bash {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"[masked: crew token]\"}}]}}"
+					want += "\nLast lines:\n  --:--:-- tool Bash {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Bash\",\"input\":{\"command\":\"[masked: crew token]\"}}]}}"
 					if out != want {
 						t.Fatalf("status = %s\nwant %s", out, want)
 					}
