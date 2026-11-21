@@ -624,18 +624,27 @@ func TestStatusSaysTheRestartCountAndLastError(t *testing.T) {
 	}
 }
 
-func TestStatusShowsWhenTheFirstReportHasNotBeenAccepted(t *testing.T) {
-	machine, _, _ := aMain(t)
-	if output, code := Main(setupWords(), machine); code != 0 {
-		t.Fatalf("init = %q, %d", output, code)
-	}
-	at := paths.Of(machine.HomeDirectory, "")
-	if err := os.WriteFile(at.Running, []byte(`{"pid":41,"version":"0.0.0"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	output, code := Main([]string{"status"}, machine)
-	if code != 0 || !strings.Contains(output, "first report") {
-		t.Errorf("status = %q, %d; want the missing first report", output, code)
+func TestStatusDistinguishesAPendingFirstReportFromARefusedOne(t *testing.T) {
+	for _, tc := range []struct {
+		name, running, want string
+	}{
+		{"pending", `{"pid":41,"version":"0.0.0"}`, "first report pending"},
+		{"refused", `{"pid":41,"version":"0.0.0","firstReportRefusal":"FORBIDDEN: scope missing"}`, "first report not accepted: FORBIDDEN: scope missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine, _, _ := aMain(t)
+			if output, code := Main(setupWords(), machine); code != 0 {
+				t.Fatalf("init = %q, %d", output, code)
+			}
+			at := paths.Of(machine.HomeDirectory, "")
+			if err := os.WriteFile(at.Running, []byte(tc.running), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			output, code := Main([]string{"status"}, machine)
+			if code != 0 || !strings.Contains(output, tc.want) {
+				t.Errorf("status = %q, %d; want %q", output, code, tc.want)
+			}
+		})
 	}
 }
 

@@ -788,6 +788,12 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 			return err
 		}
 		if err := reporter.Report(isKeyCutOff); err != nil {
+			var refusal *fleet.Refusal
+			if errors.As(err, &refusal) {
+				if writeErr := cli.ReportRefused(at.Running, os.Getpid(), refusal.Error()); writeErr != nil {
+					logLine(fmt.Sprintf("record refused report: %v", writeErr))
+				}
+			}
 			return err
 		}
 		if err := cli.ReportAccepted(at.Running, os.Getpid()); err != nil {
