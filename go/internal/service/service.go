@@ -177,7 +177,7 @@ func (s Systemd) Status() (Status, error) {
 	}
 	shown, err := s.systemctl("show", Unit, "-p", "ActiveState", "-p", "MainPID", "-p", "NRestarts")
 	if err != nil {
-		return Status{}, err
+		return Status{File: file}, err
 	}
 	pid := 0
 	if match := pidPattern.FindStringSubmatch(shown); match != nil {
