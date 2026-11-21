@@ -13,7 +13,7 @@ import (
 // Standing describes whether the local observations are current.
 type Standing struct {
 	Service     string                  `json:"service"`
-	LastPassAt  string                  `json:"lastPassAt"`
+	LastPassAt  *string                 `json:"lastPassAt"`
 	PassFailure *reconciler.PassFailure `json:"passFailure"`
 	IsCurrent   bool                    `json:"isCurrent"`
 	Says        []string                `json:"says"`
@@ -37,7 +37,10 @@ func ReadStanding(at paths.Paths, now time.Time, isRunning bool) (Standing, []Un
 	s.PassFailure = saved.PassFailure
 	var snapshot seen.Snapshot
 	read(filepath.Join(at.Home, "seen.json"), &snapshot)
-	s.LastPassAt = localTime(snapshot.PassAt, now.Location())
+	if snapshot.PassAt != "" {
+		stamp := localTime(snapshot.PassAt, now.Location())
+		s.LastPassAt = &stamp
+	}
 	if !isRunning {
 		s.Service = "not running"
 		s.Says = append(s.Says, "The trierarch's service is not running (aeolus-trierarch start): nothing below is current.")
@@ -49,10 +52,18 @@ func ReadStanding(at paths.Paths, now time.Time, isRunning bool) (Standing, []Un
 		}
 		s.Says = append(s.Says, fmt.Sprintf("The last pass failed, failing since %s: %s: nothing below is current.", since, s.PassFailure.Reason))
 	}
-	if stamp, err := time.Parse(time.RFC3339, s.LastPassAt); err == nil && now.Sub(stamp) > time.Minute {
-		s.Says = append(s.Says, "The last pass was "+Age(now.Sub(stamp))+" ago: what is shown is stale.")
+	if s.LastPassAt != nil {
+		if stamp, err := time.Parse(time.RFC3339, *s.LastPassAt); err == nil && now.Sub(stamp) > time.Minute {
+			s.Says = append(s.Says, "The last pass was "+Age(now.Sub(stamp))+" ago: what is shown is stale.")
+		}
 	}
-	s.IsCurrent = len(s.Says) == 0 && len(v.Unreadable) == 0
+	for _, source := range v.Unreadable {
+		s.Says = append(s.Says, fmt.Sprintf("unreadable: %s: %s", source.Path, source.Error))
+	}
+	if s.LastPassAt == nil && len(v.Unreadable) == 0 {
+		s.Says = append(s.Says, "no pass yet: nothing below is current.")
+	}
+	s.IsCurrent = len(s.Says) == 0
 	return s, v.Unreadable
 }
 

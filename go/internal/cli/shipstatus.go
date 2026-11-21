@@ -19,16 +19,35 @@ func shipStatus(at paths.Paths, machine Machine, ship string) (answer, error) {
 		return answer{}, err
 	}
 	isRunning := false
+	var serviceFailure *shipview.Unreadable
 	if machine.Service != nil {
-		service, err := machine.Service(at).Status()
+		manager, err := machine.Service(at).Status()
 		if err != nil {
-			return answer{}, err
+			serviceFailure = &shipview.Unreadable{Fact: "standing", Path: manager.File, Error: err.Error()}
+		} else {
+			isRunning = manager.IsRunning
 		}
-		isRunning = service.IsRunning
 	}
-	standing, unreadable := shipview.ReadStanding(at, now, isRunning)
+	standing, unreadable := shipview.ReadStanding(at, now, isRunning || serviceFailure != nil)
+	if serviceFailure != nil {
+		standing.Service = "unreadable"
+		standing.IsCurrent = false
+		standing.Says = append([]string{fmt.Sprintf("unreadable: %s: %s", serviceFailure.Path, serviceFailure.Error)}, standing.Says...)
+		unreadable = append(unreadable, *serviceFailure)
+	}
 	view.Trierarch = standing
-	view.Unreadable = append(view.Unreadable, unreadable...)
+	for _, source := range unreadable {
+		duplicate := false
+		for _, existing := range view.Unreadable {
+			if existing.Path == source.Path && existing.Error == source.Error {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			view.Unreadable = append(view.Unreadable, source)
+		}
+	}
 	return answer{data: view, text: describeShip(view, now)}, nil
 }
 
@@ -75,14 +94,14 @@ func describeShip(view shipview.View, now time.Time) string {
 		fmt.Sprintf("Places: ship folder %s, hold %s", view.Places.ShipFolder, view.Places.Hold),
 	}
 	for _, unreadable := range view.Unreadable {
-		if unreadable.Fact == "activity" || unreadable.Fact == "processes" || unreadable.Fact == "masking" || unreadable.Fact == "seen" {
+		if unreadable.Fact == "activity" || unreadable.Fact == "processes" || unreadable.Fact == "masking" || unreadable.Fact == "seen" || unreadable.Fact == "standing" {
 			continue
 		}
 		text = append(text, fmt.Sprintf("Unreadable: %s: %s", unreadable.Path, unreadable.Error))
 	}
 	standing := strings.Join(view.Trierarch.Says, " ")
 	if view.Trierarch.IsCurrent {
-		stamp, _ := time.Parse(time.RFC3339, view.Trierarch.LastPassAt)
+		stamp, _ := time.Parse(time.RFC3339, *view.Trierarch.LastPassAt)
 		standing = "current, last pass " + age(now.Sub(stamp)) + " ago"
 	}
 	text = append(text, "Trierarch: "+standing)
@@ -142,7 +161,7 @@ func seenText(view shipview.View, now time.Time) (string, string) {
 		}
 	}
 	for _, unreadable := range view.Unreadable {
-		if unreadable.Fact == "seen" {
+		if unreadable.Fact == "seen" || unreadable.Fact == "standing" {
 			value := fmt.Sprintf("unreadable: %s: %s", unreadable.Path, unreadable.Error)
 			return value, value
 		}

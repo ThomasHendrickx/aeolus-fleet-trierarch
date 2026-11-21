@@ -121,7 +121,7 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	}
 	standing, _ := shipview.ReadStanding(at, now(), manager.IsRunning)
 	report := StatusReport{
-		LastPassAt: standing.LastPassAt, readAt: now(),
+		readAt:            now(),
 		Version:           Version,
 		Plugins:           map[string]*string{},
 		ModelsConfirmedAt: map[string]*string{},
@@ -137,6 +137,9 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 		Kept:        keptOf(saved.Kept),
 		Orphans:     orphansOf(saved.Orphans),
 		PassFailure: saved.PassFailure,
+	}
+	if standing.LastPassAt != nil {
+		report.LastPassAt = *standing.LastPassAt
 	}
 	if current, ok := mcpconfiguration.ReadFile(at.McpConfiguration); ok {
 		_, report.McpNotReachable = (mcpservers.Checker{}).Check(context.Background(), current.Servers)

@@ -274,3 +274,5 @@ in the tried harness. The question names the same native rule as the result. Rul
 A process restarted with `--continue` asks again. A Bash rule carries the exact
 command, but a command with redirection (`echo test > a.txt`) still asks again
 in the tried harness. Claude Code lists refused actions in `permission_denials`.
+
+The ship standing combines the service manager with local pass files through `shipview.ReadStanding`, shared by the status commands. It produces independent warnings in service, failure, stale order, and marks passes older than one minute stale. The plain status command uses the same snapshot time for the last success age.
