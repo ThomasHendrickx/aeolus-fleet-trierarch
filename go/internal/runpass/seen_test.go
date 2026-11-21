@@ -11,9 +11,15 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
-type seenPasses struct{ snapshots []seen.Snapshot }
+type seenPasses struct {
+	snapshots []seen.Snapshot
+	failure   error
+}
 
 func (s *seenPasses) Save(snapshot seen.Snapshot) error {
+	if s.failure != nil {
+		return s.failure
+	}
 	s.snapshots = append(s.snapshots, snapshot)
 	return nil
 }
@@ -80,5 +86,26 @@ func TestAPassDropsObservationsForSessionsThatDoNotRun(t *testing.T) {
 				t.Fatalf("snapshots = %+v, inbox reads = %d", saved.snapshots, len(p.fleet.asked))
 			}
 		})
+	}
+}
+
+func TestAFailedSnapshotWriteFailsThePassAndKeepsItsReasonUntilSuccess(t *testing.T) {
+	p := aRunPass(t)
+	p.crewed(t)
+	saved := &seenPasses{}
+	p.pass.Seen = saved
+	p.run(t)
+	saved.failure = errors.New("seen snapshot unwritable")
+	err := p.pass.Run()
+	if !errors.Is(err, saved.failure) {
+		t.Fatalf("Run = %v, want %v", err, saved.failure)
+	}
+	if len(saved.snapshots) != 1 || p.store.state.PassFailure == nil || p.store.state.PassFailure.Reason != "seen snapshot unwritable" || p.store.state.PassFailure.Since != "2026-11-04T12:00:00.000Z" {
+		t.Fatalf("snapshots = %+v, pass failure = %+v", saved.snapshots, p.store.state.PassFailure)
+	}
+	saved.failure = nil
+	p.run(t)
+	if len(saved.snapshots) != 2 || p.store.state.PassFailure != nil {
+		t.Fatalf("snapshots = %+v, pass failure = %+v", saved.snapshots, p.store.state.PassFailure)
 	}
 }
