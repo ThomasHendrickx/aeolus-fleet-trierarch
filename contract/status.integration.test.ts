@@ -110,7 +110,7 @@ describe('status', () => {
     // When the models were confirmed is the time of the machine's detection.
     const lines = (await statusText())
       .split('\n')
-      .map((line) => line.replace(/(?<=^Service: .*since ).+$/, '<since>').replace(/(?<=^Models confirmed: claude-code ).+$/, '<confirmed>'));
+      .map((line) => line.replace(/(?<=^Service: .*since ).+$/, '<since>').replace(/(?<=^Models confirmed: claude-code ).+$/, '<confirmed>').replace(/^Last pass: succeeded, \d+[sm] ago$/, 'Last pass: succeeded, <age> ago'));
 
     expect(lines).toEqual([
       `Version: ${report.version}`,
@@ -120,7 +120,7 @@ describe('status', () => {
       `Service: running, pid ${String(report.service.pid)}, since <since>`,
       `Fleet: ${fleet.url}, the lease of ${fleet.trierarchShip.shipId} is valid`,
       `Caps: 1 of ${String(report.caps.ships.cap)} ships crewed here, 1 of ${String(report.caps.running.cap)} sessions running`,
-      'Last pass: succeeded',
+      'Last pass: succeeded, <age> ago',
       'Entries: running 1',
       'Kept worktrees: none',
       'Orphans: none',
@@ -162,7 +162,7 @@ describe('status', () => {
     expect(text).toContain('Orphans: /worktrees/aeolus-fleet/stray\n');
   });
 
-  it('says why the last pass failed and since when', async () => {
+  it('keeps the failure reason in JSON and says the last success age in text', async () => {
     await withState((state) => {
       state.passFailure = { reason: 'the fleet cannot be reached', since: '2026-10-06T08:00:00.000Z' };
     });
@@ -170,7 +170,7 @@ describe('status', () => {
     const report = await statusReport();
 
     expect(report.passFailure).toEqual({ reason: 'the fleet cannot be reached', since: '2026-10-06T08:00:00.000Z' });
-    expect(await statusText()).toContain('Last pass: failing since 2026-10-06T08:00:00.000Z: the fleet cannot be reached\n');
+    expect(await statusText()).toMatch(/Last pass: failed \(last success \d+[sm] ago\)\n/);
   });
 
   it("says the trierarch's lease ended once its ship was released", async () => {

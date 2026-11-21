@@ -105,6 +105,8 @@ The secret lives only in the trierarch's memory, between getting the starting pr
 
 `status <ship>` reads these files through `internal/shipview`: the state for identity, state, restart times and workspace paths; the configuration's runtime for host or container; `hold.pid`, `session-id` and `exit-reason` for the session; the hold's `events.jsonl` through the harness activity reader; and `seen.json` for the inbox counts and turn marker with their observation times. One scan retains its last 200 lines and latest activity. Host working folders come through `folderprocess`, container processes through `container`, with pids, elapsed times and whole commands. `internal/mask` alone reads credential values, including those of every other local ship, and returns masked text; a failed credential read suppresses lines and commands. It opens no hold socket and writes nothing. Unreadable sources stay attached to their facts, with path and error; only the state prevents the whole read. See [Reading one ship](trierarch.md#reading-one-ship-on-this-machine) for credential sources and masking limits.
 
+The ship standing combines the service manager with local pass files through `shipview.ReadStanding`, shared by the status commands. It produces independent warnings in service, failure, stale order, and marks passes older than one minute stale. The plain status command uses the same snapshot time for the last success age.
+
 ### A session dies, and the machine restarts
 
 ```mermaid

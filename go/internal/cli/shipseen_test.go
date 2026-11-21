@@ -61,6 +61,11 @@ func TestARunningSessionWithoutAnObservationSaysNotSeenYet(t *testing.T) {
 	for _, snapshot := range []string{"missing", `{"passAt":"2026-11-20T13:02:28Z","ships":{}}`} {
 		t.Run(snapshot, func(t *testing.T) {
 			machine, at, _ := aRunningShipStatus(t)
+			if snapshot == "missing" {
+				if err := os.Remove(filepath.Join(at.Home, "seen.json")); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if snapshot != "missing" {
 				writeStatusFile(t, filepath.Join(at.Home, "seen.json"), snapshot)
 			}
@@ -89,6 +94,9 @@ func TestAnUnreadableSnapshotLeavesTheOtherShipFactsAvailable(t *testing.T) {
 			machine, at, _ := aRunningShipStatus(t)
 			path := filepath.Join(at.Home, "seen.json")
 			if content == "directory" {
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.Mkdir(path, 0700); err != nil {
 					t.Fatal(err)
 				}

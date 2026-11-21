@@ -240,7 +240,7 @@ func (l Launchd) Status() (Status, error) {
 	status := Status{File: file, IsInstalled: true}
 	if runs, ok := runsOf(printed); ok {
 		if status.Restarts, err = l.restartsOf(runs); err != nil {
-			return Status{}, err
+			return status, err
 		}
 	}
 	if match := launchdPIDPattern.FindStringSubmatch(printed); match != nil {

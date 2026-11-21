@@ -46,6 +46,7 @@ func (e unknownShip) Unwrap() error { return ErrShipUnknown }
 
 // View contains local facts and masked session lines, never credential values.
 type View struct {
+	Trierarch   Standing     `json:"trierarch"`
 	LastEnd     *ended.End   `json:"lastEnd"`
 	ShipID      string       `json:"shipId"`
 	ShipName    string       `json:"shipName"`

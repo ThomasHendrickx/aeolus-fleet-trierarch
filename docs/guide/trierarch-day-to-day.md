@@ -46,7 +46,8 @@ aeolus-trierarch logs --follow
 ```
 
 - `list` shows each ship on this computer: its state, harness, workspace, since when it is in that state, and its restarts within the last hour.
-- `status` counts the ships by state, shows the caps in use, and says whether the trierarch's last pass succeeded or how it fails, such as when it cannot reach the fleet.
+- `status` counts the ships by state, shows the caps in use, and says whether the last pass succeeded or failed, with the last successful pass age when available (or no success yet after a failure).
+- `status <ship>` adds a `Trierarch` line: current and the pass age, or independent service-down, failed-pass and stale-pass warnings. A pass is stale only when older than one minute.
 - `status <ship>` finds one ship by name or id and shows its local session facts, the last observed turn and inbox counts with how long ago each was seen, masked process commands and the last 200 whole, masked session lines. `Last end` names the last exited session's time and reason; `--json` includes its masked lines and metadata in `lastEnd` even after its hold files go. That end stays across new starts until the next end replaces it or release removes it. It works without the fleet or the service. An inbox without a running session says `not watched while no session runs`; a running session not observed yet says `not seen yet`. `--json` also includes the session status, hold pid and session id, all its paths, and the same masked commands and lines. An unreadable source is named while the rest stays visible; an unreadable credential source suppresses lines and commands because they cannot be safely masked. An unknown ship exits 1 and names the ships crewed here. See [Reading one ship](../trierarch.md#reading-one-ship-on-this-machine), including which credentials are known and the limit on masking secrets found elsewhere.
 - `logs` shows each thing the trierarch does, and after a failure, what it does next.
 
@@ -187,7 +188,7 @@ On the computer, `aeolus-trierarch status` shows whether the service runs and wh
 | releasing | The request was removed | Nothing; the folder goes |
 | The computer offers no harness | 3 ships' starts failed in a row | Fix the cause named; it tries again after 10 minutes |
 | Silent on the Trierarchs page | The trierarch has not reported for 5 minutes | `aeolus-trierarch status` and `logs` on the computer |
-| `Last pass: failing since …` in `status` | The trierarch cannot do its pass, such as no fleet in reach | Fix what it names; the next pass that succeeds clears it |
+| `Last pass: failed (last success … ago)` or `failed (no success yet)` in `status` | The latest pass failed; the age names the last success | Read `status <ship>` for the failure reason, then fix it; the next successful pass clears it |
 
 ## Next
 
