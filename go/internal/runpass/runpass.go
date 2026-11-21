@@ -23,6 +23,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/seen"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
@@ -83,7 +84,7 @@ type Harness interface {
 	DeleteIdentity(entry reconciler.Entry) error
 	SessionDied(entry reconciler.Entry) error
 	// Turn is the session's turn as its plugin marks it: busy, idle or unknown.
-	Turn(entry reconciler.Entry) string
+	Turn(entry reconciler.Entry) plugin.Turn
 	// IsHolding is whether the session's store holds a message to hand.
 	IsHolding(entry reconciler.Entry) bool
 	// HandOver hands one message over to the idle session (#756); false when nothing is handed.
@@ -169,7 +170,12 @@ type Store interface {
 	Save(state reconciler.State) error
 }
 
+// SeenStore saves what the successful pass read of its watched sessions.
+type SeenStore interface{ Save(seen.Snapshot) error }
+
 type Pass struct {
+	// Seen keeps the last successful pass on the machine.
+	Seen SeenStore
 	// EndPermissions finishes a stopped ship's withdrawals before its identity or lease ends.
 	EndPermissions func(string)
 	Fleet          Fleet
@@ -307,7 +313,8 @@ func (p Pass) Run() error {
 		return err
 	}
 	state = p.reportUsageLimits(state)
-	next, actions, err := p.reconcile(state)
+	snapshot := seen.Snapshot{Ships: map[string]seen.Ship{}}
+	next, actions, err := p.reconcile(state, &snapshot)
 	if err != nil {
 		p.Log(fmt.Sprintf("The pass failed: %v; %s", err, nextAfterFailure))
 		since := p.Now().UTC().Format(isoMillis)
@@ -343,6 +350,18 @@ func (p Pass) Run() error {
 	p.tidyRepositories()
 	p.emptyTrash()
 	p.writeActivities(next)
+	if p.Seen != nil {
+		snapshot.PassAt = p.Now().UTC().Format(isoMillis)
+		if err := p.Seen.Save(snapshot); err != nil {
+			p.Log(fmt.Sprintf("The pass failed: %v; %s", err, nextAfterFailure))
+			since := p.Now().UTC().Format(isoMillis)
+			if state.PassFailure != nil {
+				since = state.PassFailure.Since
+			}
+			next.PassFailure = &reconciler.PassFailure{Reason: err.Error(), Since: since}
+			return errors.Join(err, p.Store.Save(next))
+		}
+	}
 	return nil
 }
 
@@ -479,7 +498,7 @@ func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) re
 }
 
 // observe is what runs: the sessions, what each in its launch window did, and for each entry whose session runs its inbox and turn. An inbox is watched only while its session runs, a crewing one from the moment its session runs (#473); its socket is opened again, as after the trierarch stopped, since its session keeps running and calls over it (decision 0026).
-func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reconciler.Observed, map[string]string, error) {
+func (p Pass) observe(state reconciler.State, running []sessions.Observed, snapshot *seen.Snapshot) (reconciler.Observed, map[string]string, error) {
 	observed := reconciler.Observed{Sessions: []reconciler.Session{}, Launches: map[string]reconciler.LaunchSeen{}, Ships: map[string]reconciler.Seen{}, StartProblems: map[string]string{}, FailureReasons: map[string]string{}}
 	versions := map[string]string{}
 	statusOf := map[string]string{}
@@ -529,7 +548,7 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 			}
 			observed.Launches[shipID] = launch
 		}
-		isWatched := (entry.State == "running" || (entry.State == "crewing" && hasSession)) && status != reconciler.SessionExited
+		isWatched := (entry.State == "running" || entry.State == "crewing") && status == reconciler.SessionRunning
 		// Its identity is looked at too while the trierarch would report on its behalf, as when its session exits in this pass (#664). An entry with no crew token is crewed again, so its identity says nothing.
 		holdsIdentity := entry.State == "running" || entry.State == "restarting" || entry.State == "crashed"
 		if (!isWatched && !holdsIdentity) || entry.CrewToken == "" {
@@ -546,14 +565,19 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 			return observed, versions, err
 		}
 		turn := harness.Turn(entry)
+		turnAt := p.Now().UTC().Format(isoMillis)
 		// The store is asked only when a hand-over could follow.
-		isHolding := turn == reconciler.TurnIdle && harness.IsHolding(entry)
+		isHolding := turn.State == reconciler.TurnIdle && harness.IsHolding(entry)
 		inbox, err := p.Fleet.Inbox(entry.CrewToken)
 		if err != nil {
 			return observed, versions, err
 		}
 		isKeyNotReady := entry.Login == "apiKey" && p.Logins != nil && !p.Logins.IsKeyReady(entry.Harness)
-		observed.Ships[shipID] = reconciler.Seen{Inbox: inbox, Turn: turn, IsHolding: isHolding, IsKeyNotReady: isKeyNotReady}
+		snapshot.Ships[shipID] = seen.Ship{
+			Inbox: seen.Inbox{Waiting: inbox.Waiting, Forced: inbox.Forced, SeenAt: p.Now().UTC().Format(isoMillis)},
+			Turn:  seen.Turn{State: turn.State, Since: turn.Since, SeenAt: turnAt},
+		}
+		observed.Ships[shipID] = reconciler.Seen{Inbox: inbox, Turn: turn.State, IsHolding: isHolding, IsKeyNotReady: isKeyNotReady}
 	}
 	return observed, versions, nil
 }
@@ -1280,7 +1304,7 @@ func (p Pass) tellKeysNotReady(state reconciler.State) (reconciler.State, error)
 }
 
 // reconcile reads the requests, what runs and the ships' inboxes, saves what the reconciler made of them and answers the actions to carry out. It answers the latest state it saved, or was given, with the error.
-func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.Action, error) {
+func (p Pass) reconcile(state reconciler.State, snapshot *seen.Snapshot) (reconciler.State, []reconciler.Action, error) {
 	requests, err := p.Fleet.AssignedRequests()
 	if err != nil {
 		return state, nil, err
@@ -1293,7 +1317,7 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 	if err != nil {
 		return state, nil, err
 	}
-	observed, versions, err := p.observe(state, running)
+	observed, versions, err := p.observe(state, running, snapshot)
 	if err != nil {
 		return state, nil, err
 	}

@@ -332,7 +332,9 @@ func (h Harness) SessionDied(entry reconciler.Entry) error {
 	return h.pluginOf(entry).SessionDied(entry.Folder)
 }
 
-func (h Harness) Turn(entry reconciler.Entry) string { return h.pluginOf(entry).Turn(entry.Folder) }
+func (h Harness) Turn(entry reconciler.Entry) plugin.Turn {
+	return h.pluginOf(entry).ReadTurn(entry.Folder)
+}
 
 func (h Harness) IsHolding(entry reconciler.Entry) bool {
 	return h.pluginOf(entry).IsHolding(entry.Folder)
