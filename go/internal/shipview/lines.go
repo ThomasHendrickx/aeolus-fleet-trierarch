@@ -2,6 +2,7 @@ package shipview
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"time"
 
@@ -20,7 +21,11 @@ type Line struct {
 // lastLines matches the activity reader's 200-line window (design D14).
 const lastLines = 200
 
-func (v *View) readEvents(files Files, path string, read func([]string) (activity.Reading, bool), masker mask.Masker, now time.Time) {
+func (v *View) readEvents(ctx context.Context, files Files, path string, read func([]string) (activity.Reading, bool), masker mask.Masker, now time.Time) {
+	if err := ctx.Err(); err != nil {
+		v.record("activity", path, err)
+		return
+	}
 	file, err := files.Open(path)
 	v.record("activity", path, err)
 	if err != nil {
@@ -36,6 +41,10 @@ func (v *View) readEvents(files Files, path string, read func([]string) (activit
 	lines := bufio.NewScanner(file)
 	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	for lines.Scan() {
+		if err := ctx.Err(); err != nil {
+			v.record("activity", path, err)
+			return
+		}
 		if len(tail) == lastLines {
 			tail = tail[1:]
 		}

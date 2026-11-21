@@ -3,6 +3,7 @@ package mask
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,11 +80,14 @@ type disk struct{}
 func (disk) Open(path string) (fs.File, error) { return os.Open(path) }
 
 // Load reads all credential sources on this computer, without changing any file.
-func Load(at paths.Paths) (Masker, error) { return (Loader{}).Load(at) }
+func Load(ctx context.Context, at paths.Paths) (Masker, error) { return (Loader{}).Load(ctx, at) }
 
 // Load refuses content if a present credential source cannot be read or decoded.
 // Absent optional sources hold no credential and do not prevent masking.
-func (l Loader) Load(at paths.Paths) (Masker, error) {
+func (l Loader) Load(ctx context.Context, at paths.Paths) (Masker, error) {
+	if err := ctx.Err(); err != nil {
+		return Masker{}, err
+	}
 	files := l.Files
 	if files == nil {
 		files = disk{}
@@ -109,7 +113,7 @@ func (l Loader) Load(at paths.Paths) (Masker, error) {
 		}
 	}
 	read := func(path string, target any) error {
-		data, err := readFile(files, path)
+		data, err := readFile(ctx, files, path)
 		if errors.Is(err, fs.ErrNotExist) && path != at.State {
 			return nil
 		}
@@ -146,7 +150,7 @@ func (l Loader) Load(at paths.Paths) (Masker, error) {
 		}
 		add(value, source.which)
 	}
-	keys, err := directory(files, at.Keys)
+	keys, err := directory(ctx, files, at.Keys)
 	if err != nil {
 		return Masker{}, err
 	}
@@ -166,7 +170,7 @@ func (l Loader) Load(at paths.Paths) (Masker, error) {
 	for _, name := range sortedKeys(configuration.Secrets) {
 		add(configuration.Secrets[name], "MCP secret "+name)
 	}
-	sessions, err := directory(files, at.Sessions)
+	sessions, err := directory(ctx, files, at.Sessions)
 	if err != nil {
 		return Masker{}, err
 	}
@@ -176,7 +180,7 @@ func (l Loader) Load(at paths.Paths) (Masker, error) {
 		}
 		folder := filepath.Join(at.Sessions, session.Name())
 		// Check the directory itself too: inability to enumerate it must fail closed.
-		if _, err := directory(files, folder); err != nil {
+		if _, err := directory(ctx, files, folder); err != nil {
 			return Masker{}, err
 		}
 		for _, source := range []struct{ name, which string }{{"proxy-token", "model proxy token"}, {"mcp-access", "MCP token"}} {
@@ -227,16 +231,22 @@ func sortedKeys[V any](values map[string]V) []string {
 	return names
 }
 
-func readFile(files Files, path string) ([]byte, error) {
+func readFile(ctx context.Context, files Files, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	file, err := files.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	return io.ReadAll(file)
+	return io.ReadAll(contextReader{ctx: ctx, reader: file})
 }
 
-func directory(files Files, path string) ([]fs.DirEntry, error) {
+func directory(ctx context.Context, files Files, path string) ([]fs.DirEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	file, err := files.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -248,6 +258,9 @@ func directory(files Files, path string) ([]fs.DirEntry, error) {
 	dir, ok := file.(fs.ReadDirFile)
 	if !ok {
 		return nil, cannotRead(path, errors.New("not a readable directory"))
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	entries, err := dir.ReadDir(-1)
 	if err != nil {
@@ -263,4 +276,16 @@ func cannotRead(path string, err error) error {
 		err = failure.Err
 	}
 	return &SourceError{Path: path, Err: err}
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
