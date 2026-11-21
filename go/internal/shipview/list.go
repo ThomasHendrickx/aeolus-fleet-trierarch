@@ -70,6 +70,12 @@ func (r Reader) List(ctx context.Context, at paths.Paths, now time.Time) (Machin
 	result.PassAt = localTime(snapshot.PassAt, now.Location())
 	result.Unreadable = facts.Unreadable
 	masker, maskErr := (mask.Loader{Files: files}).Load(ctx, at)
+	if maskErr != nil {
+		var source *mask.SourceError
+		if errors.As(maskErr, &source) {
+			facts.Unreadable = append(facts.Unreadable, Unreadable{Fact: "masking", Path: source.Path, Error: source.Err.Error()})
+		}
+	}
 	readers := map[string]func([]string) (activity.Reading, bool){"claude-code": claudecode.ActivityIn, "codex": codex.ActivityIn, "copilot": copilot.ActivityIn}
 	for id, one := range saved.Entries {
 		if err := ctx.Err(); err != nil {
@@ -101,7 +107,12 @@ func (r Reader) List(ctx context.Context, at paths.Paths, now time.Time) (Machin
 		row.record("activity", held.Events, err)
 		if err == nil {
 			if read := readers[one.Harness]; read != nil {
-				latest, ok, err := activity.OfFile(file, func(line string) (activity.Reading, bool) { return read([]string{line}) })
+				var latest activity.Activity
+				var ok bool
+				tail, err := activityTail(ctx, file)
+				if err == nil {
+					latest, ok, err = activity.OfFile(tail, func(line string) (activity.Reading, bool) { return read([]string{line}) })
+				}
 				row.record("activity", held.Events, err)
 				if ok && maskErr == nil {
 					row.Session.Activity = &Activity{Kind: latest.Kind, Tool: masker.Line(latest.Tool), At: latest.At.In(now.Location()).Format(time.RFC3339)}
