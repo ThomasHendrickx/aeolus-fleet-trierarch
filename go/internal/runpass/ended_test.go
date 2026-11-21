@@ -3,7 +3,6 @@ package runpass
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,10 +10,17 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
-func TestExitedSessionKeepsMaskedEndBeforeRestartAndReplacesOnlyAtNextEnd(t *testing.T) {
+type keptEnd struct {
+	ExitReason, SessionID, StartedAt, EndedAt string
+	Lines                                     []struct{ Line string }
+}
+
+func anExitedSession(t *testing.T, beforeStop ...func(*aPass, string)) (*aPass, string, string, []byte, keptEnd) {
+	t.Helper()
 	p := aRunPass(t)
 	p.crewed(t)
 	at := paths.Of(t.TempDir(), "")
@@ -46,6 +52,9 @@ func TestExitedSessionKeepsMaskedEndBeforeRestartAndReplacesOnlyAtNextEnd(t *tes
 	if err := os.WriteFile(filepath.Join(folder, "events.jsonl"), []byte(events.String()), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if len(beforeStop) > 0 {
+		p.sessions.beforeStop = func(id string) { beforeStop[0](p, id) }
+	}
 	p.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited", ExitReason: "exit status 101 aeolus_ct_v1_scout"}}
 	p.run(t)
 	path := filepath.Join(at.Home, "ended", scout+".json")
@@ -53,51 +62,118 @@ func TestExitedSessionKeepsMaskedEndBeforeRestartAndReplacesOnlyAtNextEnd(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	var end struct {
-		ExitReason, SessionID, StartedAt, EndedAt string
-		Lines                                     []struct{ Line string }
-	}
+	var end keptEnd
 	if err := json.Unmarshal(kept, &end); err != nil {
 		t.Fatal(err)
 	}
-	if end.ExitReason != "exit status 101 [masked: crew token]" || end.SessionID != "session-first" || end.StartedAt == "" || end.EndedAt == "" || len(end.Lines) != 200 || end.Lines[0].Line != "line 002 [masked: crew token] [masked: secret variable END_SECRET]" || end.Lines[199].Line != "line 201 [masked: crew token] [masked: secret variable END_SECRET]" || (strings.Contains(string(kept), "aeolus_ct_v1_scout") || strings.Contains(string(kept), "fake-end-secret")) {
-		t.Fatalf("kept end = %s", kept)
+	return p, folder, path, kept, end
+}
+
+func TestExitedSessionMasksEnd(t *testing.T) {
+	_, _, _, kept, end := anExitedSession(t)
+	if end.ExitReason != "exit status 101 [masked: crew token]" {
+		t.Errorf("exit reason = %q, want masked exit status", end.ExitReason)
 	}
+	for _, secret := range []string{"aeolus_ct_v1_scout", "fake-end-secret"} {
+		if strings.Contains(string(kept), secret) {
+			t.Errorf("kept end contains %q, want masked", secret)
+		}
+	}
+}
+
+func TestExitedSessionKeepsLast200Lines(t *testing.T) {
+	_, _, _, _, end := anExitedSession(t)
+	if len(end.Lines) != 200 {
+		t.Fatalf("line count = %d, want 200", len(end.Lines))
+	}
+	for i, want := range map[int]string{0: "line 002 [masked: crew token] [masked: secret variable END_SECRET]", 199: "line 201 [masked: crew token] [masked: secret variable END_SECRET]"} {
+		if got := end.Lines[i].Line; got != want {
+			t.Errorf("line %d = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestExitedSessionKeepsSessionFacts(t *testing.T) {
+	_, _, _, _, end := anExitedSession(t)
+	if end.SessionID != "session-first" {
+		t.Errorf("session ID = %q, want session-first", end.SessionID)
+	}
+	if end.StartedAt == "" || end.EndedAt == "" {
+		t.Errorf("times = %q, %q, want both populated", end.StartedAt, end.EndedAt)
+	}
+}
+
+func TestExitedSessionKeepsPrivateEnd(t *testing.T) {
+	_, _, path, _, _ := anExitedSession(t)
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("end mode: %v %v", info, err)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Errorf("mode of %s = %o, want 600", path, got)
+	}
+}
+
+func restartExitedSession(t *testing.T, p *aPass) {
+	t.Helper()
 	p.fleet.requests = []reconciler.Request{aRequest("restarting")}
 	p.pass.Now = func() time.Time { return now.Add(5 * time.Second) }
-	p.sessions.beforeStop = func(shipID string) {
+	p.run(t)
+}
+
+func TestEndExistsBeforeHoldRemoval(t *testing.T) {
+	called := false
+	p, _, _, _, _ := anExitedSession(t, func(p *aPass, shipID string) {
+		called = true
 		if shipID != scout {
 			t.Fatalf("stopping %s, want %s", shipID, scout)
 		}
-		snapshot, err := os.ReadFile(path)
-		if err != nil || string(snapshot) != string(kept) {
-			t.Fatalf("evidence missing before hold removal: %v", err)
+		path := filepath.Join(p.pass.Paths.Home, "ended", scout+".json")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("stat end before stop = %v, want file", err)
 		}
-		if err := os.RemoveAll(folder); err != nil {
-			t.Fatal(err)
-		}
-	}
+	})
+	p.fleet.requests = []reconciler.Request{aRequest("releasing")}
 	p.run(t)
-	p.sessions.beforeStop = nil
-	after, err := os.ReadFile(path)
-	if err != nil || string(after) != string(kept) {
-		t.Fatalf("new start changed last end: %s, %v", after, err)
+	if !called {
+		t.Fatal("stop called = false, want true")
 	}
+}
+
+func TestEndIsKeptAcrossRestart(t *testing.T) {
+	p, _, path, kept, _ := anExitedSession(t)
+	restartExitedSession(t, p)
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(kept) {
+		t.Errorf("end after restart = %s, want %s", after, kept)
+	}
+}
+
+func TestNextEndReplacesPreviousEnd(t *testing.T) {
+	p, _, path, _, _ := anExitedSession(t)
+	restartExitedSession(t, p)
 	p.fleet.requests = []reconciler.Request{aRequest("running")}
 	p.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited", ExitReason: "exit status 2"}}
 	p.run(t)
-	after, err = os.ReadFile(path)
-	if err != nil || !strings.Contains(string(after), "exit status 2") {
-		t.Fatalf("next end not kept: %s, %v", after, err)
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if !strings.Contains(string(after), "exit status 2") {
+		t.Errorf("next end = %s, want exit status 2", after)
+	}
+}
+
+func TestReleaseRemovesEnd(t *testing.T) {
+	p, _, path, _, _ := anExitedSession(t)
+	restartExitedSession(t, p)
 	p.fleet.requests = []reconciler.Request{aRequest("releasing")}
 	p.run(t)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("released end still exists: %v", err)
+		t.Errorf("stat released end %s = %v, want not exist", path, err)
 	}
 }
 

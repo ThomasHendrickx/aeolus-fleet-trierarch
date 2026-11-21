@@ -4,8 +4,11 @@ package ended
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 )
 
 // Line is a whole masked event with its harness reading and own timestamp.
@@ -43,25 +46,16 @@ func Path(home, shipID string) string { return filepath.Join(home, "ended", ship
 func Write(home, shipID string, end End) error {
 	path := Path(home, shipID)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
+		return fmt.Errorf("create ended directory: %w", err)
 	}
 	data, err := json.Marshal(end)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal last end: %w", err)
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".end-*")
-	if err != nil {
-		return err
+	if err := secrets.WritePrivate(path, data); err != nil {
+		return fmt.Errorf("write last end: %w", err)
 	}
-	defer os.Remove(file.Name())
-	if _, err = file.Write(data); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err = file.Close(); err != nil {
-		return err
-	}
-	return os.Rename(file.Name(), path)
+	return nil
 }
 
 // Remove forgets the last end when the ship leaves this machine.

@@ -36,7 +36,7 @@ func (p Pass) writeEnd(entry reconciler.Entry, reason string) error {
 		end.ExitReason = masker.Line(reason)
 		view, err := shipview.Ship(p.Paths, entry.ShipID, now)
 		if err != nil {
-			return err
+			return fmt.Errorf("read ship view for last end: %w", err)
 		}
 		end.SessionID = view.Session.SessionID
 		end.Activity = view.Session.Activity
