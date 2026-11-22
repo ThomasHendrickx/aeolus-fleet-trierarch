@@ -4,15 +4,18 @@ Every fixed timing and limit of the trierarch and the aeolus-fleet plugin, for d
 
 A default that configuration may change names its setting.
 
+`AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR`, a whole number above one, is a setting only the contract suite uses: it divides each timing below that names it, and the service's environment carries it from where `init` ran. Without it, or with any other value, every timing is its production value.
+
 ## Trierarch
 
 | Value | What it guards | Set in | Behind |
 | --- | --- | --- | --- |
 | 1 minute | A session's launch window: a tool call within it, or it is stopped and given back (or counted as a failed start) | [`cli`](../go/internal/cli) `LAUNCH_WINDOW_MS` | [trierarch.md](trierarch.md#crewing-a-ship), ThomasHendrickx/aeolus-fleet#382, ThomasHendrickx/aeolus-fleet#397, ThomasHendrickx/aeolus-fleet#473 |
 | 10 minutes (coming, not built yet) | The oldest delivery waiting while a session runs, before argo is told the session is waiting on chat | not built yet | ThomasHendrickx/aeolus-fleet#586 |
-| 5 s, 30 s, 2 min, then 10 min | The wait before each restart of a session that died | [`reconciler`](../go/internal/reconciler) `RESTART_DELAYS_MS` | [architecture.md](architecture.md), [0026](decisions/0026-trierarch.md) |
+| 5 s, 30 s, 2 min, then 10 min | The wait before each restart of a session that died; the contract suite's `AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR` divides the first | [`reconciler`](../go/internal/reconciler) `RestartDelays`, the first divided in [`timings`](../go/internal/timings) | [architecture.md](architecture.md), [0026](decisions/0026-trierarch.md) |
 | 5 restarts within 60 minutes | The restart budget; past it the crew is crashed and argo told | [`reconciler`](../go/internal/reconciler) `RESTART_BUDGET`, `RESTART_WINDOW_MS` | [0026](decisions/0026-trierarch.md), ThomasHendrickx/aeolus-fleet#397, ThomasHendrickx/aeolus-fleet#469 |
-| 5 s | A pass: restarts, wakes, releases and the launch window run at most this often; also the pause after a failure | [`cli`](../go/internal/cli) `PASS_INTERVAL_MS` | ThomasHendrickx/aeolus-fleet#250 |
+| 5 s | A pass: restarts, wakes, releases and the launch window run at most this often; also the pause after a failure; the contract suite's `AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR` divides it | [`timings`](../go/internal/timings) `PassInterval` | ThomasHendrickx/aeolus-fleet#250 |
+| 10 s | `init` waits for the service to keep one process this long before it reports success; the contract suite's `AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR` divides it | [`timings`](../go/internal/timings) `InitStability` | none recorded |
 | 10 minutes | Each ship folder measured at most this often, outside the pass | [`workspace`](../go/internal/workspace) `SHIP_SIZE_INTERVAL_MS` | [disk design](design/disk-under-control.md), #351 |
 | `shipSizeBytes` in the machine configuration, absent by default | A ship folder size in bytes above which its owner is told once per crossing | [`config`](../go/internal/config) `trierarchConfigurationSchema` | [disk design](design/disk-under-control.md), #351 |
 | Off unless configured; `cacheSizeBytes` bytes | The host sessions' shared cache size; checked at most hourly, with units modified within the last hour kept | [`trash`](../go/internal/trash) `HOUR_MS`; [`config`](../go/internal/config) | [disk design](design/disk-under-control.md), #349 |
