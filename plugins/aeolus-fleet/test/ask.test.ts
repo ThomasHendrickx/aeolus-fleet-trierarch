@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  askInputSchema,
   QUESTION_CONTENT_TYPE,
   REPLACEMENT_CONTENT_TYPE,
   WITHDRAWAL_CONTENT_TYPE,
@@ -127,6 +128,21 @@ const aQuestion = [
 ];
 
 describe('aeolus-ask.sh ask', () => {
+  it('asks the selected ship and tracks it through replacement and withdrawal', async () => {
+    fleet = await startRoutedStubFleet({ '/api/v1/ship/ask': [sent], [SEND_PATH]: [sent, sent] });
+    expect((await runWith('aeolus-identity.sh', { args: ['write', fleet.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN })).status).toBe(0);
+    const selector = { kind: 'ship', name: 'decider' };
+    const asked = await run('aeolus-ask.sh', ['ask', '--selector', JSON.stringify(selector), ...aQuestion]);
+    expect(asked.status).toBe(0);
+    const input = askInputSchema.parse(JSON.parse(fleet.calls[0]?.body ?? ''));
+    expect(input.selector).toEqual(selector);
+    const replaced = await run('aeolus-ask.sh', ['replace', input.id, ...aQuestion]);
+    const replacement = replacementSchema.parse(sendsOf(fleet)[0]?.payload);
+    const withdrawn = await run('aeolus-ask.sh', ['withdraw', replacement.question.id, '--model', 'claude-opus-5-5']);
+    expect([replaced.status, withdrawn.status]).toEqual([0, 0]);
+    expect(sendsOf(fleet).map(({ selector: recipient }) => recipient)).toEqual([selector, selector]);
+  });
+
   it('reads the permission context from stdin without putting it in an argument', async () => {
     fleet = await crewedAt([sent]);
     const context = 'Ship scout\nTool input: {"command":"npm install"}\n';
