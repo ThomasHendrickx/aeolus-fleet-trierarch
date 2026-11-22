@@ -8,7 +8,7 @@
 #   aeolus-fleet.sh register <fleetUrl> <shipId> <secret> <location> [<squadronId>]
 #       location: DEVICE, CLOUD, SERVER or OTHER:<a few words>; the harness is
 #       the one aeolus_stated_harness tells, none when it cannot (aeolus-fleet#1408)
-#   aeolus-fleet.sh receive|send|report|inbox|setStatement [<json input>|-]   - reads the input from stdin
+#   aeolus-fleet.sh receive|send|ask|report|inbox|setStatement [<json input>|-]   - reads the input from stdin
 #   aeolus-fleet.sh ack|pong <deliveryId>
 #   aeolus-fleet.sh delivery <deliveryId>   - a delivery the crew acknowledged, read again whole (#342)
 #   aeolus-fleet.sh openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern
@@ -210,7 +210,7 @@ if [ "$command" = protocol ]; then
 fi
 
 case "$command" in
-  receive|send|report|inbox|setStatement|pushReceive|handed|turn \
+  receive|send|ask|report|inbox|setStatement|pushReceive|handed|turn \
     | openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern \
     | addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting)
     input="${2:-}"
@@ -241,11 +241,11 @@ case "$command" in
     ;;
 esac
 
-# A send, an open and an add state the model a hook recorded, when one did (an
+# A send, an ask, an open and an add state the model a hook recorded, when one did (an
 # open's and an add's notices state it): it is added last, so it wins over a
 # model the input states (the last of two keys counts).
 model_file="$(aeolus_model_file)"
-if { [ "$command" = send ] || [ "$command" = openMeeting ] || [ "$command" = addToMeeting ]; } && model="$(head -n 1 "$model_file" 2>/dev/null)"; then
+if { [ "$command" = send ] || [ "$command" = ask ] || [ "$command" = openMeeting ] || [ "$command" = addToMeeting ]; } && model="$(head -n 1 "$model_file" 2>/dev/null)"; then
   model="$(aeolus_json_escape "$model")"
   input="$(printf '%s' "$input" | sed -e ':a' -e '$!{N;ba' -e '}' -e 's/[[:space:]]*$//')"
   if printf '%s' "$input" | grep -Eq '^[[:space:]]*\{[[:space:]]*\}$'; then

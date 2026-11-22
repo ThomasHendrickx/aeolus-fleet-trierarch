@@ -32,6 +32,7 @@ const OWNER_ID = 'shp_01m3tbfspe96yf1rnr4ank9h1d';
 const sent = { status: 200, body: { messageId: MESSAGE_ID } };
 const WHOAMI_PATH = '/api/v1/ship/whoami';
 const SEND_PATH = '/api/v1/ship/send';
+const ASK_PATH = '/api/v1/ship/ask';
 /** whoami of a ship a person owns. */
 const ownedByThomas = { status: 200, body: { shipId: SHIP_ID, fleetId: 'flt_01m3tbfspe96yf1rnr4ank9h1e', name: 'scout', type: 'reviewer', ownerShipId: OWNER_ID, ownerName: 'thomas' } };
 
@@ -94,7 +95,7 @@ function hook(script: string, payload: unknown): void {
 
 /** A crewed folder whose fleet answers whoami as the ship's owner says, and each send as the answers say. */
 async function crewedAt(answers: readonly StubAnswer[], whoami: StubAnswer = ownedByThomas): Promise<StubFleet> {
-  const started = await startRoutedStubFleet({ [WHOAMI_PATH]: [whoami, whoami], [SEND_PATH]: answers });
+  const started = await startRoutedStubFleet({ [WHOAMI_PATH]: [whoami, whoami], [SEND_PATH]: answers, [ASK_PATH]: answers });
   expect((await runWith('aeolus-identity.sh', { args: ['write', started.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN })).status).toBe(0);
   return started;
 }
@@ -109,13 +110,17 @@ const sendSchema = z.object({
 
 /** The sends the stub fleet received, their payloads read as JSON. */
 function sendsOf(stub: StubFleet) {
-  return stub.calls.filter(({ path }) => path === SEND_PATH).map(({ body }) => sendSchema.parse(JSON.parse(body)));
+  return stub.calls.filter(({ path }) => path === SEND_PATH || path === ASK_PATH).map(({ path, body }) => {
+    if (path === SEND_PATH) return sendSchema.parse(JSON.parse(body));
+    const input = askInputSchema.parse(JSON.parse(body));
+    return { ...input, contentType: QUESTION_CONTENT_TYPE, payload: input, model: input.model ?? '' };
+  });
 }
 
 /** The one send the stub fleet received, after whoami named the owner. */
 function theSend(stub: StubFleet) {
-  expect(stub.calls.map(({ path }) => path)).toEqual([WHOAMI_PATH, SEND_PATH]);
-  return sendSchema.parse(JSON.parse(stub.calls[1]?.body ?? ''));
+  expect(stub.calls.map(({ path }) => path)).toEqual([WHOAMI_PATH, stub.calls[1]?.path]);
+  return sendsOf(stub)[0];
 }
 
 const aQuestion = [
@@ -137,10 +142,10 @@ describe('aeolus-ask.sh ask', () => {
     const input = askInputSchema.parse(JSON.parse(fleet.calls[0]?.body ?? ''));
     expect(input.selector).toEqual(selector);
     const replaced = await run('aeolus-ask.sh', ['replace', input.id, ...aQuestion]);
-    const replacement = replacementSchema.parse(sendsOf(fleet)[0]?.payload);
+    const replacement = replacementSchema.parse(sendsOf(fleet)[1]?.payload);
     const withdrawn = await run('aeolus-ask.sh', ['withdraw', replacement.question.id, '--model', 'claude-opus-5-5']);
     expect([replaced.status, withdrawn.status]).toEqual([0, 0]);
-    expect(sendsOf(fleet).map(({ selector: recipient }) => recipient)).toEqual([selector, selector]);
+    expect(sendsOf(fleet).slice(1).map(({ selector: recipient }) => recipient)).toEqual([selector, selector]);
   });
 
   it('reads the permission context from stdin without putting it in an argument', async () => {
@@ -148,7 +153,7 @@ describe('aeolus-ask.sh ask', () => {
     const context = 'Ship scout\nTool input: {"command":"npm install"}\n';
     const result = await runWith('aeolus-ask.sh', { args: ['ask', '--title', 'Run npm install', '--context-stdin', '--option', 'Deny', 'Refuse', '--pick', '1', 'nothing runs without your yes', '--model', 'claude-opus-5-5'], stdin: context });
     expect(result.status).toBe(0);
-    expect(questionSchema.parse(theSend(fleet).payload).context).toBe(context);
+    expect(questionSchema.parse(theSend(fleet)?.payload).context).toBe(context);
   });
 
   it("sends the ship's owner, as whoami names it, the question as the question content type, with a uuid of its own and the options numbered from 1, and says its uuid and message", async () => {
@@ -158,8 +163,9 @@ describe('aeolus-ask.sh ask', () => {
 
     expect(result.status).toBe(0);
     const send = theSend(fleet);
+    expect(send).toBeDefined();
     expect(send).toMatchObject({ selector: { kind: 'ship', shipId: OWNER_ID }, contentType: QUESTION_CONTENT_TYPE, model: 'claude-opus-5-5' });
-    const question = questionSchema.parse(send.payload);
+    const question = questionSchema.parse(send?.payload);
     expect(question).toEqual({
       id: question.id,
       title: 'Which port does the console use in development?',
@@ -194,7 +200,7 @@ describe('aeolus-ask.sh ask', () => {
 
     await run('aeolus-ask.sh', ['ask', '--title', 'Port?', '--context', context, '--option', 'Keep', '', '--pick', '1', 'It "works".', '--model', 'm']);
 
-    expect(questionSchema.parse(theSend(fleet).payload)).toMatchObject({ context, options: [{ key: 1, label: 'Keep', detail: '' }], pick: { why: 'It "works".' } });
+    expect(questionSchema.parse(theSend(fleet)?.payload)).toMatchObject({ context, options: [{ key: 1, label: 'Keep', detail: '' }], pick: { why: 'It "works".' } });
   });
 
   it.each([
@@ -222,7 +228,7 @@ describe('aeolus-ask.sh ask', () => {
     hook('aeolus-model.sh', payload);
     await run('aeolus-ask.sh', ['ask', '--title', 'Port?', '--option', 'Keep', '', '--pick', '1', 'Fewest changes.']);
 
-    expect(theSend(fleet).model).toBe('gpt-5.5');
+    expect(theSend(fleet)?.model).toBe('gpt-5.5');
   });
 
   it("asks argo by name when the ship has no owner, as argo's own ship has none", async () => {
@@ -230,7 +236,7 @@ describe('aeolus-ask.sh ask', () => {
 
     await run('aeolus-ask.sh', ['ask', ...aQuestion]);
 
-    expect(theSend(fleet).selector).toEqual({ kind: 'ship', name: 'argo' });
+    expect(theSend(fleet)?.selector).toEqual({ kind: 'ship', name: 'argo' });
   });
 
   it("says the fleet's refusal of whoami with its exit code, and sends nothing, as it cannot know the owner", async () => {
@@ -261,8 +267,9 @@ describe('aeolus-ask.sh withdraw', () => {
 
     expect(result.status).toBe(0);
     const send = theSend(fleet);
+    expect(send).toBeDefined();
     expect(send).toMatchObject({ selector: { kind: 'ship', shipId: OWNER_ID }, contentType: WITHDRAWAL_CONTENT_TYPE });
-    expect(withdrawalSchema.parse(send.payload)).toEqual({ questionId: QUESTION_ID });
+    expect(withdrawalSchema.parse(send?.payload)).toEqual({ questionId: QUESTION_ID });
   });
 
   it('refuses a question id that is not a uuid, and sends nothing', async () => {
@@ -283,8 +290,9 @@ describe('aeolus-ask.sh replace', () => {
 
     expect(result.status).toBe(0);
     const send = theSend(fleet);
+    expect(send).toBeDefined();
     expect(send).toMatchObject({ selector: { kind: 'ship', shipId: OWNER_ID }, contentType: REPLACEMENT_CONTENT_TYPE });
-    const replacement = replacementSchema.parse(send.payload);
+    const replacement = replacementSchema.parse(send?.payload);
     expect(replacement).toMatchObject({ questionId: QUESTION_ID, question: { title: 'Which port does the console use in development?', pick: { option: 2 } } });
     expect(result.stdout).toContain(replacement.question.id);
   });
@@ -306,7 +314,7 @@ describe('a question withdrawn or replaced after the ship changed owner (decisio
 
   /** A crewed folder that asks thomas, then finds argo owns the ship. */
   async function askedThomasThenArgoOwns(): Promise<{ stub: StubFleet; questionId: string }> {
-    const stub = await startRoutedStubFleet({ [WHOAMI_PATH]: [ownedByThomas, ownedByArgo], [SEND_PATH]: [sent] });
+    const stub = await startRoutedStubFleet({ [WHOAMI_PATH]: [ownedByThomas, ownedByArgo], [SEND_PATH]: [sent], [ASK_PATH]: [sent] });
     expect((await runWith('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN })).status).toBe(0);
     const asked = await run('aeolus-ask.sh', ['ask', ...aQuestion]);
     expect(asked.status).toBe(0);
