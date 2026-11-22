@@ -52,8 +52,70 @@ is_uuid() {
   printf '%s' "$1" | grep -Eqx '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
 }
 
+# A selector for ask is a JSON object naming one ship. Parse its string
+# members before storing it, using only the plugin's standard shell tools.
+is_ship_selector() {
+  printf '%s\n' "$1" | LC_ALL=C awk '
+    function space() { while (substr(text, at, 1) ~ /^[ \t\r\n]$/) at++ }
+    function string(    c, e, hex, n, i) {
+      if (substr(text, at++, 1) != "\"") return 0
+      value = ""
+      while (at <= length(text)) {
+        c = substr(text, at++, 1)
+        if (c == "\"") return 1
+        if (c ~ /[[:cntrl:]]/) return 0
+        if (c == "\\") {
+          e = substr(text, at++, 1)
+          if (e == "u") {
+            hex = substr(text, at, 4)
+            if (length(hex) != 4 || hex !~ /^[0-9a-fA-F]+$/) return 0
+            n = 0
+            for (i = 1; i <= 4; i++) n = n * 16 + index("0123456789abcdef", tolower(substr(hex, i, 1))) - 1
+            c = n > 0 && n < 128 ? sprintf("%c", n) : "?"
+            at += 4
+          } else if (e == "\"" || e == "\\" || e == "/") c = e
+          else if (e ~ /^[bfnrt]$/) c = "?"
+          else return 0
+        }
+        value = value c
+      }
+      return 0
+    }
+    { text = text (NR > 1 ? "\n" : "") $0 }
+    END {
+      at = 1; space()
+      if (substr(text, at++, 1) != "{") exit 1
+      space()
+      while (substr(text, at, 1) != "}") {
+        if (!string()) exit 1
+        key = value; space()
+        if (substr(text, at++, 1) != ":") exit 1
+        space()
+        if (!string()) exit 1
+        fields[key] = value; space()
+        c = substr(text, at++, 1)
+        if (c == "}") { at--; break }
+        if (c != ",") exit 1
+        space()
+        if (substr(text, at, 1) == "}") exit 1
+      }
+      at++; space()
+      if (at <= length(text) || fields["kind"] != "ship") exit 1
+      for (key in fields) if (key != "kind" && key != "name" && key != "shipId") exit 1
+      if (("name" in fields) == ("shipId" in fields)) exit 1
+      if ("name" in fields) {
+        if (length(fields["name"]) > 48 || fields["name"] !~ /^[a-z0-9:-]+$/) exit 1
+      } else {
+        id = fields["shipId"]
+        if (length(id) != 30 || id !~ /^shp_[0-7][0-9a-hjkmnp-tv-z]+$/) exit 1
+      }
+    }'
+}
+
 model=""
 selector=""
+selector_input=""
+selector_set=0
 title=""
 context=""
 options=()
@@ -65,7 +127,7 @@ read_question() {
   local keys=0 label detail
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --selector) [ "$#" -ge 2 ] || usage "--selector takes a ship selector"; selector="$(printf '%s' "$2" | tr '\n\r' '  ')"; shift 2 ;;
+      --selector) [ "$#" -ge 2 ] || usage "--selector takes a ship selector"; selector_input="$2"; selector_set=1; selector="$(printf '%s' "$2" | tr '\n\r' '  ')"; shift 2 ;;
       --title) [ "$#" -ge 2 ] || usage "--title takes the title"; title="$2"; shift 2 ;;
       --context-stdin) context="$(cat; printf x)"; context="${context%x}"; shift ;;
       --context) [ "$#" -ge 2 ] || usage "--context takes the context"; context="$2"; shift 2 ;;
@@ -155,6 +217,7 @@ command="${1:-}"
 case "$command" in
   ask)
     read_question "$@"
+    if [ "$selector_set" -eq 1 ]; then is_ship_selector "$selector_input" || usage "--selector takes a ship selector"; fi
     if [ -z "$selector" ]; then read_owner; selector="$owner"; fi
     # Keep the recipient and expose the uuid before sending: a lost response
     # must still let the permission tool withdraw what may have reached it.

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -146,6 +146,36 @@ describe('aeolus-ask.sh ask', () => {
     const withdrawn = await run('aeolus-ask.sh', ['withdraw', replacement.question.id, '--model', 'claude-opus-5-5']);
     expect([replaced.status, withdrawn.status]).toEqual([0, 0]);
     expect(sendsOf(fleet).slice(1).map(({ selector: recipient }) => recipient)).toEqual([selector, selector]);
+  });
+
+  it.each(['{"kind":"ship",', '{"kind":"ship","name":"decider"} trailing', '{"kind":"type","type":"reviewer"}', ''])('refuses invalid selector JSON %s without recording or sending it', async (selector) => {
+    fleet = await crewedAt([sent]);
+    await run('aeolus-ask.sh', ['ask', '--selector', '{"kind":"ship","name":"decider"}', ...aQuestion]);
+    const crews = join(home, '.aeolus', 'crews', 'claude-code');
+    const questions = join(crews, readdirSync(crews).find((name) => name.endsWith('.questions')) ?? 'missing');
+    const before = readFileSync(questions, 'utf8');
+    const calls = fleet.calls.length;
+
+    const result = await run('aeolus-ask.sh', ['ask', '--selector', selector, ...aQuestion]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('usage');
+    expect(readFileSync(questions, 'utf8')).toBe(before);
+    expect(fleet.calls).toHaveLength(calls);
+  });
+
+  it('keeps the selected ship when the ask response is lost, so the question can be withdrawn', async () => {
+    fleet = await startRoutedStubFleet({ [ASK_PATH]: [{ status: 503, body: { code: 'UNAVAILABLE', message: 'try again' } }], [SEND_PATH]: [sent] });
+    expect((await runWith('aeolus-identity.sh', { args: ['write', fleet.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN })).status).toBe(0);
+    const selector = { kind: 'ship', name: 'decider' };
+    const asked = await run('aeolus-ask.sh', ['ask', '--selector', JSON.stringify(selector), ...aQuestion]);
+    const question = askInputSchema.parse(JSON.parse(fleet.calls[0]?.body ?? ''));
+
+    const withdrawn = await run('aeolus-ask.sh', ['withdraw', question.id, '--model', 'claude-opus-5-5']);
+
+    expect(asked.status).toBe(1);
+    expect(withdrawn.status).toBe(0);
+    expect(sendsOf(fleet)[1]?.selector).toEqual(selector);
   });
 
   it('reads the permission context from stdin without putting it in an argument', async () => {
