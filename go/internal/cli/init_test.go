@@ -544,6 +544,19 @@ func TestInitWaitsForOneProcessForTenSeconds(t *testing.T) {
 	}
 }
 
+func TestInitWaitsForOneProcessForTheStabilityWaitItIsGiven(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.StableFor = 2 * time.Second
+	waits := 0
+	machine.init.Sleep = func() { waits++; machine.elapsed++ }
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	if waits != 2 {
+		t.Errorf("waited %d seconds, want 2", waits)
+	}
+}
+
 func TestInitFailsWhenTheServiceCrashesDuringTheWait(t *testing.T) {
 	machine := newMachine(t)
 	machine.init.Sleep = func() { machine.elapsed++; machine.service.running = false }
