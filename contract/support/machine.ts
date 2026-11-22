@@ -8,6 +8,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { onTestFinished, TestRunner } from 'vitest';
 
 import { descendantsOf, PROCESS_RECORD_VARIABLE, recordTestProcess, stopDescendants, stopProcess } from '../../scripts/support/test-process.js';
+import { timingVariablesOf, type Timings } from './timings.js';
 import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
 /**
@@ -539,8 +540,8 @@ function aShortFolder(): string {
   return realpathSync(mkdtempSync(`${process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '.'}/`));
 }
 
-/** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet. */
-export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean } = {}): Promise<Machine> {
+/** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet; its trierarch runs at the suite's shortened timings unless `timings` says production. */
+export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean; timings?: Timings } = {}): Promise<Machine> {
   const others = at.others ?? [];
   // In the run's short folder: the ship sockets under the machine's home are within the system's limit only for a short path.
   const root = aShortFolder();
@@ -589,6 +590,8 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
     AEOLUS_PLUGIN_DATA: pluginData,
     AEOLUS_CODEX_PLUGIN_ROOT: PLUGIN_ROOT,
     AEOLUS_CODEX_PLUGIN_DATA: codexPluginData,
+    // init writes it into the service's unit, so the service runs at these timings too.
+    ...timingVariablesOf(at.timings ?? 'shortened'),
   };
   const servicePid = (): number | undefined => {
     const file = join(machine, 'systemd', 'pid');
