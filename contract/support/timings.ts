@@ -1,18 +1,17 @@
 /**
- * The trierarch's timings as the contract suite runs it. Today's trierarch
- * runs with its test timing setting, every timing it names divided by
- * `TIMING_DIVISOR` (docs/timings-and-limits.md); another trierarch's command,
- * which may not read that setting, runs at the production values. A machine
- * at `production` timings runs without the setting, for the tests that prove
+ * The trierarch's timings as the contract suite runs it: with its test
+ * timing setting, every timing it names divided by `TIMING_DIVISOR`
+ * (docs/timings-and-limits.md), whether the suite built the trierarch or
+ * `AEOLUS_TRIERARCH_UNDER_TEST` names a build, as CI does. A machine at
+ * `production` timings runs without the setting, for the tests that prove
  * each production value.
  */
-import { isTodaysTrierarch } from './trierarch-under-test.js';
 
 /** The variable the trierarch reads its test timing setting from. */
 export const TIMING_VARIABLE = 'AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR';
 
 /** How much shorter the suite runs the trierarch's timings. */
-export const TIMING_DIVISOR = isTodaysTrierarch ? 5 : 1;
+export const TIMING_DIVISOR = 5;
 
 /** The timings a machine runs the trierarch at. */
 export type Timings = 'shortened' | 'production';
@@ -39,5 +38,5 @@ export const PASSES_MS = 3 * PASS_INTERVAL_MS + FIRST_RESTART_DELAY_MS;
 
 /** The variables a machine runs the trierarch with for its timings. */
 export function timingVariablesOf(timings: Timings): Readonly<Record<string, string>> {
-  return timings === 'shortened' && TIMING_DIVISOR > 1 ? { [TIMING_VARIABLE]: String(TIMING_DIVISOR) } : {};
+  return timings === 'shortened' ? { [TIMING_VARIABLE]: String(TIMING_DIVISOR) } : {};
 }
