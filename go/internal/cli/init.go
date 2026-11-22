@@ -138,9 +138,11 @@ type Init struct {
 	IsLeaseHeld func(fleetURL string, crewToken string) (bool, error)
 	ShipName    func(fleetURL string, crewToken string) (string, error)
 	// Sleep waits between reads of running.json; a test passes one that does not wait.
-	Sleep   func()
-	Now     func() time.Time
-	LastLog func() string
+	Sleep func()
+	Now   func() time.Time
+	// StableFor is how long the service keeps one process before init reports success; none is InitStability.
+	StableFor time.Duration
+	LastLog   func() string
 	// Stop is closed when the process is told to stop: Ctrl+C at a setup question stops setup.
 	Stop <-chan struct{}
 	// Print writes a line of setup's progress where no terminal is open; nil writes nothing, as under --json.
@@ -647,7 +649,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 			return finish(0, i.serviceError(err))
 		}
 	}
-	w.say("Checking that the service stays running (at least 10 seconds)...")
+	w.say(fmt.Sprintf("Checking that the service stays running (at least %s)...", seconds(i.stableFor())))
 	if err := i.waitForService(); err != nil {
 		return finish(0, i.serviceError(err))
 	}
@@ -662,6 +664,24 @@ func (i Init) serviceError(err error) error {
 		}
 	}
 	return err
+}
+
+// InitStability is how long the service keeps one process before init reports success, unless the machine gives another.
+const InitStability = 10 * time.Second
+
+func (i Init) stableFor() time.Duration {
+	if i.StableFor > 0 {
+		return i.StableFor
+	}
+	return InitStability
+}
+
+// seconds says a duration of whole seconds as a person reads it.
+func seconds(d time.Duration) string {
+	if d == time.Second {
+		return "1 second"
+	}
+	return fmt.Sprintf("%d seconds", int(d/time.Second))
 }
 
 func (i Init) waitForService() error {
@@ -705,8 +725,8 @@ func (i Init) waitForService() error {
 				if running.FirstReportRefusal != "" {
 					reason = fmt.Errorf("first report not accepted: %s", running.FirstReportRefusal)
 				}
-			case at.Sub(stableSince) < 10*time.Second:
-				reason = errors.New("service did not keep one process for 10 seconds")
+			case at.Sub(stableSince) < i.stableFor():
+				reason = fmt.Errorf("service did not keep one process for %s", seconds(i.stableFor()))
 			default:
 				kept, err := crew.Read(i.Paths.CrewToken)
 				if err != nil {

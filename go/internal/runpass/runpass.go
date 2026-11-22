@@ -190,6 +190,8 @@ type Pass struct {
 	Store           Store
 	Log             func(line string)
 	Now             func() time.Time
+	// FirstRestartDelay is the wait before the first restart of a session that died; none waits the reconciler's own.
+	FirstRestartDelay time.Duration
 	// NewLaunchID is a launch id of its own for each start (#490).
 	NewLaunchID func() string
 	FleetURL    string
@@ -1334,7 +1336,7 @@ func (p Pass) reconcile(state reconciler.State, snapshot *seen.Snapshot) (reconc
 	}
 	now := p.Now()
 	marksLaunches, missingPlugins, notOffered := p.launchMarks()
-	context := reconciler.Context{Requests: requests, Clears: clears, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), McpServers: p.mcpServers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile, MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered}
+	context := reconciler.Context{Requests: requests, Clears: clears, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), McpServers: p.mcpServers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile, MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered, FirstRestartDelay: p.FirstRestartDelay}
 	// A request for a model its harness does not list may name one the vendor added since: the harness's models are confirmed again before the request is given back (#333).
 	if p.ConfirmModels != nil {
 		if harnesses := p.modelsToConfirm(state, context); len(harnesses) > 0 {

@@ -13,8 +13,8 @@ import { PASS_INTERVAL_MS, PRODUCTION_FIRST_RESTART_DELAY_MS, PRODUCTION_INIT_ST
 // The rest of the suite runs the trierarch at shortened timings (support/timings.ts); these tests hold each timing it shortens to its
 // production value (docs/timings-and-limits.md), and one holds the shortened pass interval, which proves the setting reaches the service.
 
-/** How much later than its timing a pass, init's return or a restart may come: the work of a pass and init's one-second polls. */
-const LATE_BY_AT_MOST_MS = 2_000;
+/** How much later than its timing a pass or init's return may come, for the work of a pass and init's polls: under a second, so a timing a second longer fails. */
+const LATE_BY_AT_MOST_MS = 1_000;
 const CREWED_WITHIN_MS = 30_000;
 /** How often the tests look at the trierarch's files. */
 const LOOK_EVERY_MS = 50;

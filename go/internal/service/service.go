@@ -22,7 +22,7 @@ import (
 const Unit = "aeolus-trierarch.service"
 
 // variables are the ones the trierarch itself reads, carried into the service when set where install ran.
-var variables = []string{"AEOLUS_PLUGIN_ROOT", "AEOLUS_PLUGIN_DATA", "AEOLUS_CODEX_PLUGIN_ROOT", "AEOLUS_CODEX_PLUGIN_DATA", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "AEOLUS_TRIERARCH_CONFIG"}
+var variables = []string{"AEOLUS_PLUGIN_ROOT", "AEOLUS_PLUGIN_DATA", "AEOLUS_CODEX_PLUGIN_ROOT", "AEOLUS_CODEX_PLUGIN_DATA", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "AEOLUS_TRIERARCH_CONFIG", "AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR"}
 
 const defaultPath = "/usr/bin:/bin"
 

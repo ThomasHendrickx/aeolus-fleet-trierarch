@@ -64,6 +64,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/timings"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
@@ -95,6 +96,8 @@ func main() {
 		close(stop)
 	}()
 	environ := os.Environ()
+	// The timings are the production values unless the contract suite's test timing setting shortens them.
+	timed := timings.Of(environ)
 	capLog(paths.Of(home, "").Logs)
 	machine := cli.Machine{
 		Environ:               environ,
@@ -140,9 +143,10 @@ func main() {
 		},
 		ContainerHost: func(modelToken string) container.Host { return container.Machine{ModelToken: modelToken} },
 		NewPass: func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error) {
-			return newPass(at, kept, configuration, home, program)
+			return newPass(at, kept, configuration, home, program, timed.FirstRestartDelay)
 		},
-		PassEvery: passEvery,
+		PassEvery:     timed.PassInterval,
+		InitStableFor: timed.InitStability,
 		OwnShip: func(kept crew.File) receiving.Ship {
 			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
 		},
@@ -450,9 +454,6 @@ func checkNow(at paths.Paths, harness string) (keys.StateAt, bool) {
 	return key, true
 }
 
-// passEvery is how often the loop runs a pass: restarts and releases wait at most this long.
-const passEvery = 5 * time.Second
-
 // stdout and stderr are the process's own, capped where launchd writes them to the log file; the journal caps itself.
 var (
 	stdout io.Writer = os.Stdout
@@ -576,7 +577,7 @@ func environment() map[string]string {
 }
 
 // newPass is one pass of the run loop with this machine's adapters: the fleet over /api/v1 with the trierarch's crew token, the harnesses the configuration offers, worktrees of the configured repositories, and the state file.
-func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string) (func(isKeyCutOff bool) error, error) {
+func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string, firstRestartDelay time.Duration) (func(isKeyCutOff bool) error, error) {
 	env := environment()
 	client := fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
 	// Detected again only for a harness whose version changed since (#365); the operator's own options win.
@@ -706,6 +707,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Store:             saved,
 		Log:               logLine,
 		Now:               time.Now,
+		FirstRestartDelay: firstRestartDelay,
 		NewLaunchID:       newLaunchID,
 		FleetURL:          kept.FleetURL,
 		Sockets:           opened,
