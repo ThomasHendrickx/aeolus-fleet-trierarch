@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { aCrewingMachine, crash, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine } from './support/machine.js';
+import { PASSES_MS } from './support/timings.js';
 
 // run with the reconciler, as the service runs it: what is assigned is crewed, what ends is ended, a session that ended is started again (docs/trierarch.md, "Lifecycles").
 
@@ -25,8 +26,6 @@ async function aRunningScout(): Promise<void> {
 /** Time enough for the trierarch's own ship to receive what it was sent. */
 const ANSWERED_WITHIN_MS = 30_000;
 
-/** Long enough for a pass or two of a trierarch that restarted. */
-const PASSES_MS = 12_000;
 
 let fleet: Fleet;
 let machine: Machine;

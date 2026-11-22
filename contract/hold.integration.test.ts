@@ -8,14 +8,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
+import { PASSES_MS } from './support/timings.js';
 
 // The hold and the hand-over, as a session sees them: each session runs under a hold of its own that outlives the trierarch, takes its ship's messages through the aeolus-fleet plugin's hooks, and only its own ship's (docs/trierarch.md, "Crewing a ship").
 
 const CREWED_WITHIN_MS = 30_000;
 /** A pass hands an idle session one message every 5 seconds. */
 const HANDED_WITHIN_MS = 30_000;
-/** Long enough for two passes, in which a running trierarch would hand a message over. */
-const PASSES_MS = 12_000;
 /** How every crew token core issues starts. */
 const CREW_TOKEN_PREFIX = 'aeolus_ct_v1_';
 const MESSAGE = 'Review PR 12 and say what you found';

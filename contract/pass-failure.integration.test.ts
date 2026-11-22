@@ -8,12 +8,11 @@ import { z } from 'zod';
 import { aCrewingMachine } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
+import { PASSES_MS } from './support/timings.js';
 
 // A pass that cannot read what it reconciles is kept in the state with its reason and since when, across the passes that fail after it (docs/trierarch.md, "Lifecycles").
 
-/** A pass runs every 5 seconds. */
 const FAILS_WITHIN_MS = 30_000;
-const PASSES_MS = 12_000;
 
 const stateSchema = z.object({ passFailure: z.object({ reason: z.string().min(1), since: z.string() }).optional() });
 
