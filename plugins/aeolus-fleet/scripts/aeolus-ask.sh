@@ -22,13 +22,12 @@
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
-QUESTION_CONTENT_TYPE='application/vnd.aeolus.question+json'
 WITHDRAWAL_CONTENT_TYPE='application/vnd.aeolus.question-withdrawal+json'
 REPLACEMENT_CONTENT_TYPE='application/vnd.aeolus.question-replacement+json'
 
 usage() {
   [ -n "${1:-}" ] && echo "aeolus: $1" >&2
-  echo "usage: aeolus-ask.sh ask --title <title> [--context <context>] --option <label> <detail>... --pick <option number> <why> [--model <model>]" >&2
+  echo "usage: aeolus-ask.sh ask [--selector <ship selector JSON>] --title <title> [--context <context>] --option <label> <detail>... --pick <option number> <why> [--model <model>]" >&2
   echo "       aeolus-ask.sh withdraw <questionId> [--model <model>]" >&2
   echo "       aeolus-ask.sh replace <questionId> --title <title> ... (as ask)" >&2
   exit 2
@@ -54,6 +53,7 @@ is_uuid() {
 }
 
 model=""
+selector=""
 title=""
 context=""
 options=()
@@ -65,6 +65,7 @@ read_question() {
   local keys=0 label detail
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --selector) [ "$#" -ge 2 ] || usage "--selector takes a ship selector"; selector="$(printf '%s' "$2" | tr '\n\r' '  ')"; shift 2 ;;
       --title) [ "$#" -ge 2 ] || usage "--title takes the title"; title="$2"; shift 2 ;;
       --context-stdin) context="$(cat; printf x)"; context="${context%x}"; shift ;;
       --context) [ "$#" -ge 2 ] || usage "--context takes the context"; context="$2"; shift 2 ;;
@@ -154,13 +155,18 @@ command="${1:-}"
 case "$command" in
   ask)
     read_question "$@"
-    read_owner
+    if [ -z "$selector" ]; then read_owner; selector="$owner"; fi
     # Keep the recipient and expose the uuid before sending: a lost response
     # must still let the permission tool withdraw what may have reached it.
-    keep_asked "$id" "$owner"
+    keep_asked "$id" "$selector"
     echo "aeolus: question ${id}"
-    send_to "$owner" "$QUESTION_CONTENT_TYPE" "$question" "question-${id}"
-    echo "aeolus: asked your ship's owner question ${id} (message ${sent}); its answer arrives as a reply to that message. Withdraw or replace the question by its uuid ${id}."
+    input="${question%\}},\"selector\":${selector},\"idempotencyKey\":\"question-${id}\"${model:+,\"model\":\"$(json "$model")\"}}"
+    output="$(printf '%s' "$input" | "$(dirname "$0")/aeolus-fleet.sh" ask -)"
+    status=$?
+    printf '%s\n' "$output"
+    [ "$status" -eq 0 ] || exit "$status"
+    sent="$(aeolus_json_string "$output" messageId)"
+    echo "aeolus: asked question ${id} (message ${sent}); its answer arrives as a reply to that message. Withdraw or replace the question by its uuid ${id}."
     ;;
   withdraw)
     questionId="${1:-}"
@@ -176,6 +182,7 @@ case "$command" in
     is_uuid "$questionId" || usage "replace takes the question's uuid"
     shift
     read_question "$@"
+    [ -z "$selector" ] || usage "--selector applies only to ask"
     read_asked "$questionId"
     send_to "$asked" "$REPLACEMENT_CONTENT_TYPE" "{\"questionId\":\"${questionId}\",\"question\":${question}}" "question-replacement-${id}"
     keep_asked "$id" "$asked"
