@@ -8,16 +8,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
 
 // Variable names the test timing setting: a whole number every timing here is divided by. Only tests set it.
 const Variable = "AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR"
 
-// The production values.
+// The production values; the first restart delay is the reconciler's first, RestartDelays[0].
 const (
-	PassInterval      = 5 * time.Second
-	InitStability     = 10 * time.Second
-	FirstRestartDelay = 5 * time.Second
+	PassInterval  = 5 * time.Second
+	InitStability = 10 * time.Second
 )
 
 // Timings are the timings the trierarch runs at.
@@ -41,5 +42,5 @@ func Of(environ []string) Timings {
 		}
 	}
 	by := time.Duration(divisor)
-	return Timings{PassInterval: PassInterval / by, InitStability: InitStability / by, FirstRestartDelay: FirstRestartDelay / by}
+	return Timings{PassInterval: PassInterval / by, InitStability: InitStability / by, FirstRestartDelay: reconciler.RestartDelays[0] / by}
 }

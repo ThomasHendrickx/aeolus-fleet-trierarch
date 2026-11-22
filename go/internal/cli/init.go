@@ -24,6 +24,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/timings"
 )
 
 // Flags are init's flags, as the trierarch plugin's setup line gives them.
@@ -140,7 +141,7 @@ type Init struct {
 	// Sleep waits between reads of running.json; a test passes one that does not wait.
 	Sleep func()
 	Now   func() time.Time
-	// StableFor is how long the service keeps one process before init reports success; none is InitStability.
+	// StableFor is how long the service keeps one process before init reports success; none is timings.InitStability.
 	StableFor time.Duration
 	LastLog   func() string
 	// Stop is closed when the process is told to stop: Ctrl+C at a setup question stops setup.
@@ -666,14 +667,11 @@ func (i Init) serviceError(err error) error {
 	return err
 }
 
-// InitStability is how long the service keeps one process before init reports success, unless the machine gives another.
-const InitStability = 10 * time.Second
-
 func (i Init) stableFor() time.Duration {
 	if i.StableFor > 0 {
 		return i.StableFor
 	}
-	return InitStability
+	return timings.InitStability
 }
 
 // seconds says a duration of whole seconds as a person reads it.
