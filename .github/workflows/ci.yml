@@ -22,11 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install-node-modules
       - run: npm run typecheck
       - run: npm run lint
       - id: tests
@@ -93,11 +89,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install-node-modules
       - run: npx vitest run --project plugin:unit --project scripts:unit
         env:
           TESTCONTAINERS_RYUK_DISABLED: 'true'
@@ -144,11 +136,7 @@ jobs:
         if: ${{ needs.changed-paths.result != 'success' }}
         run: exit 1
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install-node-modules
       # The images Testcontainers starts, from the Actions cache.
       - uses: ./.github/actions/test-images
       # Ubuntu's pasta AppArmor profile blocks Podman's network teardown.
@@ -217,6 +205,8 @@ jobs:
             scripts/support/test-folders.ts
             # The images Testcontainers starts.
             .github/actions/test-images/action.yml
+            # Restores node_modules every job runs against.
+            .github/actions/install-node-modules/action.yml
             # The jobs' own steps and these lists.
             .github/workflows/ci.yml
             # The suite's global setup builds the Go trierarch of the next version.
@@ -272,15 +262,11 @@ jobs:
         if: ${{ needs.changed-paths.result != 'success' }}
         run: exit 1
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
       - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
-      - run: npm ci
+      - uses: ./.github/actions/install-node-modules
       - uses: ./.github/actions/test-images
       # A version of its own, as a release's is, so it and today's trierarch take over each other's holds, and above every version the tests seed, as a release's is; MAJOR.MINOR.PATCH, the only versions upgrade takes.
       - run: go build -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=0.99.0" -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
@@ -326,11 +312,7 @@ jobs:
       VERSION: 0.0.0-ci.${{ github.run_id }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-      - run: npm ci
+      - uses: ./.github/actions/install-node-modules
       - run: npm run set-version -- "$VERSION"
       - run: podman build --file image/Containerfile --build-arg VERSION="$VERSION" --tag localhost/aeolus-session:ci .
       - run: image/test/smoke-test.sh podman localhost/aeolus-session:ci "$VERSION"

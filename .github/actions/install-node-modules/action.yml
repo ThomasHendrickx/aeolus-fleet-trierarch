@@ -1,0 +1,24 @@
+# Sets up Node and puts node_modules on the runner from the Actions cache, keyed on the
+# runner's OS and chip, the Node version and the hash of package-lock.json. On a hit it
+# skips npm ci: node_modules holds everything npm ci made, install scripts' output
+# included (Prisma's client and engines). On a miss, a changed lock file or an expired
+# cache, it runs npm ci and the job's end caches the result. Needs the repository checked
+# out. The guardrails job does not use it: it proves a fresh npm ci works.
+name: Install node_modules
+description: Sets up Node and restores node_modules from the Actions cache, running npm ci on a miss.
+runs:
+  using: composite
+  steps:
+    - id: node
+      uses: actions/setup-node@v7
+      with:
+        node-version: 26
+    - id: modules
+      uses: actions/cache@v6
+      with:
+        path: node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node-${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json') }}
+    - name: npm ci
+      if: steps.modules.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci

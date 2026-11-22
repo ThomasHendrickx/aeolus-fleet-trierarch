@@ -73,6 +73,7 @@ const SHARED = [
   'scripts/support/test-folders.global-setup.ts',
   'scripts/support/test-folders.ts',
   '.github/actions/test-images/action.yml',
+  '.github/actions/install-node-modules/action.yml',
   '.github/workflows/ci.yml',
   'go/internal/cli/cli.go',
   'contract/run.integration.test.ts',
