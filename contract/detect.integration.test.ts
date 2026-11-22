@@ -8,13 +8,13 @@ import { z } from 'zod';
 import { aCrewingMachine, setupLineOf, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine, type OtherHarness } from './support/machine.js';
+import { PASSES_MS } from './support/timings.js';
 
 // What a trierarch detects each harness offers, kept in detected.json and given by `aeolus-trierarch detect` (docs/trierarch.md, "Detected options").
 
 const CREWED_WITHIN_MS = 30_000;
 const TOLD_WITHIN_MS = 30_000;
-/** Long enough for a trierarch that restarted to detect what it would. */
-const PASSES_MS = 12_000;
+const DETECTED_WITHIN_MS = 30_000;
 
 /** What the stand-ins answer: Claude Code's aliases resolve to `claude-<alias>-5`, Codex's catalog holds one model, Copilot's help lists two. */
 const CLAUDE_CODE_MODELS = ['claude-sonnet-5', 'claude-opus-5'];
@@ -180,7 +180,7 @@ describe('a start', () => {
 
     await restart();
 
-    await expect.poll(() => detected()['claude-code']?.version, { timeout: PASSES_MS }).toBe(CLAUDE_CODE_VERSION);
+    await expect.poll(() => detected()['claude-code']?.version, { timeout: DETECTED_WITHIN_MS }).toBe(CLAUDE_CODE_VERSION);
     expect(helpCalls()).toBe(before + 1);
   });
 

@@ -157,6 +157,14 @@ func TestTheServiceEnvironmentCarriesPATHAndTheTrierarchsOwnVariablesOnly(t *tes
 	}
 }
 
+func TestTheServiceEnvironmentCarriesTheTestTimingSetting(t *testing.T) {
+	environment := Environment([]string{"AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR=5"})
+
+	if got := environment["AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR"]; got != "5" {
+		t.Errorf("AEOLUS_TRIERARCH_TEST_TIMING_DIVISOR is %q, want %q", got, "5")
+	}
+}
+
 func TestWriteWritesTheUnitAndRunsNothing(t *testing.T) {
 	systemctl := &aSystemctl{}
 	service := aService(t, systemctl)

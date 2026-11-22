@@ -296,6 +296,8 @@ type Context struct {
 	NotOffered map[string]string
 	// ConfigurationFile is the configuration as its file gives it, as the failed starts keep it: another one than the machine stopped offering itself with offers it again (#853).
 	ConfigurationFile string
+	// FirstRestartDelay is the wait before the first restart of a session that died; none waits RestartDelays' first.
+	FirstRestartDelay time.Duration
 }
 
 // Trust is what a harness trusts, read from its own files: the names of the repositories and folders, and the flags it still asks to accept before a session starts with them (#403).
@@ -855,19 +857,19 @@ func launchStep(entry Entry, context Context, isFinal bool) step {
 	}
 	if launch.Kind == LaunchRefused {
 		refused := modelRefusal(entry, launch.Model, context.Versions)
-		return failedLaunch(entry, context.Now, refused, isFinal)
+		return failedLaunch(entry, context, refused, isFinal)
 	}
 	if !isWindowOver(entry, context.Now) {
 		return wakeStep(entry, context)
 	}
-	return failedLaunch(entry, context.Now, refusal{reason: noActivity(entry, launch)}, isFinal)
+	return failedLaunch(entry, context, refusal{reason: noActivity(entry, launch)}, isFinal)
 }
 
 // failedLaunch is a launch window that ended without activity, or with the model refused: the request is given back with the reason while its crew is not final, with what the refusal tells first; for a final crew it is a failed start against the restart budget.
-func failedLaunch(entry Entry, now time.Time, why refusal, isFinal bool) step {
+func failedLaunch(entry Entry, context Context, why refusal, isFinal bool) step {
 	outcome := machineFailedStart(entry, why)
 	if isFinal {
-		failed := exitStep(withoutLaunch(entry), now, why.reason, "")
+		failed := exitStep(withoutLaunch(entry), context, why.reason, "")
 		failed.actions = append(append([]Action{}, why.actions...), failed.actions...)
 		failed.outcome = outcome
 		return failed
@@ -954,7 +956,7 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 		return step{entry: &started, actions: []Action{{Kind: Launch, ShipID: entry.ShipID}}, starts: 1}
 	}
 	if session.Status == SessionExited {
-		return exitStep(entry, context.Now, "", context.Observed.FailureReasons[entry.ShipID])
+		return exitStep(entry, context, "", context.Observed.FailureReasons[entry.ShipID])
 	}
 	if session.IsOtherVersion {
 		return otherVersionStep(entry, context)
@@ -971,12 +973,12 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 		return woken
 	}
 	if launch.Kind == LaunchRefused {
-		return failedLaunch(entry, context.Now, modelRefusal(entry, launch.Model, context.Versions), true)
+		return failedLaunch(entry, context, modelRefusal(entry, launch.Model, context.Versions), true)
 	}
 	if !isWindowOver(entry, context.Now) {
 		return wakeStep(entry, context)
 	}
-	quiet := exitStep(entry, context.Now, noActivity(entry, launch), "")
+	quiet := exitStep(entry, context, noActivity(entry, launch), "")
 	quiet.outcome = &failedstarts.Outcome{ShipID: entry.ShipID, Reason: noActivity(entry, launch)}
 	return quiet
 }
@@ -1013,7 +1015,8 @@ func noteWithReason(note string, reason string) string {
 }
 
 // exitStep is a session that exited, or failed its start with the reason given: it starts again after its wait, or, with the restart budget spent, the entry is crashed and its owner told, with why its last start failed when it did. A session that failed its start still runs, so it stops first.
-func exitStep(entry Entry, now time.Time, failedStart string, failureReason string) step {
+func exitStep(entry Entry, context Context, failedStart string, failureReason string) step {
+	now := context.Now
 	failureReason = cleanFailureReason(failureReason)
 	exits := []string{}
 	for _, exit := range entry.Exits {
@@ -1031,13 +1034,21 @@ func exitStep(entry Entry, now time.Time, failedStart string, failureReason stri
 	}
 	restarting := withState(withoutLaunch(entry), "restarting", now)
 	restarting.Exits = exits
-	restarting.RestartAt = stamp(now.Add(RestartDelays[min(len(exits), len(RestartDelays))-1]))
+	restarting.RestartAt = stamp(now.Add(restartDelay(len(exits), context.FirstRestartDelay)))
 	actions := []Action{}
 	if failedStart != "" {
 		actions = append(actions, stop)
 	}
 	actions = append(actions, Action{Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(restartingNote, failureReason), FailedStart: cleanFailureReason(failedStart)})
 	return step{entry: &restarting, actions: actions}
+}
+
+// restartDelay is the wait before the restart with that number in the window, the first one the given first delay when there is one.
+func restartDelay(restart int, first time.Duration) time.Duration {
+	if restart == 1 && first > 0 {
+		return first
+	}
+	return RestartDelays[min(restart, len(RestartDelays))-1]
 }
 
 // Failure reasons cross the fleet boundary: scrub before shortening, so truncation cannot expose part of a credential.

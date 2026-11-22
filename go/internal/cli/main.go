@@ -87,6 +87,8 @@ type Machine struct {
 	// NewPass is one pass of the run loop, with the crew file and configuration run read; the pass is told whether the fleet's key is cut off, which the trierarch's own report says.
 	NewPass   func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error)
 	PassEvery time.Duration
+	// InitStableFor is how long init waits for the service to keep one process; none is timings.InitStability.
+	InitStableFor time.Duration
 	// OwnShip is the trierarch's own ship at the fleet, which run receives for beside the passes; none when nil.
 	OwnShip func(kept crew.File) receiving.Ship
 	// Trusted keeps the trusted repositories the trierarch plugin's ship sends (aeolus-fleet#384), with the configuration run read; none when nil.
@@ -299,6 +301,7 @@ func Main(args []string, machine Machine) (string, int) {
 				IsLeaseHeld:           machine.IsLeaseHeld,
 				ShipName:              machine.ShipName,
 				Sleep:                 machine.Sleep,
+				StableFor:             machine.InitStableFor,
 				Now:                   machine.Now,
 				LastLog: func() string {
 					if machine.ServiceLog == nil {

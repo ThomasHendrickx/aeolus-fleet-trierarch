@@ -9,12 +9,11 @@ import { z } from 'zod';
 import { aCrewingMachine, crash, sessionOf, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
+import { PASSES_MS } from './support/timings.js';
 
 // A session on its subscription never starts with a key in reach (docs/trierarch.md, "API keys", K6 and K2): what Claude Code reads itself would give it a key, so the request is given back while its crew is not final, and the ship waits once it is.
 
 const CREWED_WITHIN_MS = 30_000;
-/** Long enough for a pass or two after the session ended, and its wait before it would start again. */
-const PASSES_MS = 15_000;
 /** The helper's command, which no cause may name. */
 const HELPER = 'contract-key-helper-not-real';
 

@@ -392,6 +392,23 @@ func TestAFinalCrewQuietForItsWholeLaunchWindowRestartsAgainstItsBudget(t *testi
 	}
 }
 
+func TestASessionThatDiedFirstRestartsAfterTheFirstRestartDelayTheContextGives(t *testing.T) {
+	entry := anEntry(scout, "crewing")
+	entry.LaunchedAt, entry.LaunchID = ago(61*time.Second), "launch-1"
+	context := aContext(aRequest(scout))
+	context.Requests[0].IsFinal = true
+	context.Requests[0].Status = status("crewing")
+	context.Observed.Sessions = running(scout)
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchNone}
+	context.FirstRestartDelay = time.Second
+
+	next, _ := Reconcile(withEntries(entry), context)
+
+	if got, want := next.Entries[scout].RestartAt, now.Add(time.Second).UTC().Format("2006-01-02T15:04:05.000Z"); got != want {
+		t.Errorf("restartAt = %s, want %s", got, want)
+	}
+}
+
 func TestARunningEntryWhoseSessionIsGoneStartsAgainWithNoRestartCounted(t *testing.T) {
 	context := aContext(aRequest(scout))
 	context.Requests[0].Status = status("running")

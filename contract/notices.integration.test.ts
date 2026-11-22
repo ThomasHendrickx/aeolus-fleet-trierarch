@@ -10,9 +10,7 @@ import { z } from 'zod';
 import { aCrewingMachine, crash, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine } from './support/machine.js';
-
-/** Time enough for passes after the one that told, to show a notice told twice. */
-const ANOTHER_PASSES_MS = 12_000;
+import { PASSES_MS } from './support/timings.js';
 
 // What the trierarch tells argo and a ship's owner (docs/trierarch.md, "Crashed and Restart", "Crewing a ship", "API keys", "Release"), each in the ship protocol's shape for argo: a headline, a blank line, the facts.
 
@@ -99,7 +97,7 @@ describe('unpushed work discarded on a release', () => {
     // The stand-in session writes its own files into its ship folder, which is no repository: only the main repository's change is told.
     await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain(`Discarded from the worktree of scout (${scout}), ${main}: ?? notes.txt`);
     expect(existsSync(folder)).toBe(false);
-    await wait(ANOTHER_PASSES_MS);
+    await wait(PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toEqual([]);
   });
 
@@ -116,7 +114,7 @@ describe('unpushed work discarded on a release', () => {
     await fleet.removeCrewRequest(scout);
 
     await expect.poll(() => fleet.leasesOf(scout), { timeout: CREWED_WITHIN_MS }).toBe(0);
-    await wait(ANOTHER_PASSES_MS);
+    await wait(PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toEqual([]);
   });
 });
@@ -134,7 +132,7 @@ describe('a session crashed', () => {
 
     expect(notice?.to).toBe('argo');
     expect(withoutLastFailure(notice?.text ?? '')).toBe(crashedAfterSix(scout, { tail: 'Restart it in the console to crew it again.' }));
-    await wait(ANOTHER_PASSES_MS);
+    await wait(PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toHaveLength(1);
   });
 
@@ -151,7 +149,7 @@ describe('a session crashed', () => {
 
     expect(notice?.to).toBe('thomas');
     expect(withoutLastFailure(notice?.text ?? '')).toBe(crashedAfterSix(scout, { tail: 'argo can restart it in the console.' }));
-    await wait(ANOTHER_PASSES_MS);
+    await wait(PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toHaveLength(1);
   });
 
@@ -212,7 +210,7 @@ describe('a ship whose folder holds no identity', () => {
         ].join('\n'),
       },
     ]);
-    await wait(ANOTHER_PASSES_MS);
+    await wait(PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toHaveLength(1);
   });
 });
@@ -238,7 +236,7 @@ describe('a session refused the model it launched with', () => {
         ].join('\n'),
       },
     ]);
-    await wait(ANOTHER_PASSES_MS);
+    await wait(PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toHaveLength(1);
   });
 });
@@ -280,7 +278,7 @@ describe("a harness's API key that holds its ships back", () => {
         ].join('\n'),
       },
     ]);
-    await wait(ANOTHER_PASSES_MS);
+    await wait(PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toHaveLength(1);
   });
 

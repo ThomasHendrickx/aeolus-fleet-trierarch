@@ -880,6 +880,19 @@ func TestASessionThatExitedStartsAgainContinuingOnceItsWaitIsOver(t *testing.T) 
 	}
 }
 
+func TestASessionThatExitedWaitsTheFirstRestartDelayThePassIsGiven(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.FirstRestartDelay = time.Second
+	pass.crewed(t)
+	pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+
+	pass.run(t)
+
+	if got, want := pass.store.state.Entries[scout].RestartAt, now.Add(time.Second).UTC().Format("2006-01-02T15:04:05.000Z"); got != want {
+		t.Errorf("restartAt = %s, want %s", got, want)
+	}
+}
+
 func TestARestartIsReportedOnTheShipsBehalf(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)

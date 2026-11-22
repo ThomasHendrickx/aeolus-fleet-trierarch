@@ -9,12 +9,11 @@ import { z } from 'zod';
 import { aCrewingMachine, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
+import { PASSES_MS } from './support/timings.js';
 
 // A machine whose session starts keep failing stops offering itself (docs/trierarch.md, "Crewing a ship", aeolus-fleet#853): once the last start of 3 different ships failed with no start succeeding since, it offers no harness and no place, and tells argo once.
 
 const REPORTED_WITHIN_MS = 30_000;
-/** Long enough for a pass or two of a trierarch that restarted. */
-const PASSES_MS = 12_000;
 const STOPPED_HEADLINE = 'Session starts fail here: this machine takes no new ships';
 
 let fleet: Fleet;

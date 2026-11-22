@@ -648,6 +648,21 @@ func TestStatusDistinguishesAPendingFirstReportFromARefusedOne(t *testing.T) {
 	}
 }
 
+func TestInitWaitsForOneProcessForTheMachinesInitStability(t *testing.T) {
+	machine, _, _ := aMain(t)
+	machine.InitStableFor = 2 * time.Second
+	waits := 0
+	machine.Sleep = func() { waits++ }
+	machine.Now = func() time.Time { return time.Date(2026, 10, 6, 7, 0, 20+waits, 0, time.UTC) }
+
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	if waits != 2 {
+		t.Errorf("waited %d seconds, want 2", waits)
+	}
+}
+
 func TestStatusShowsWhenTheProcessHasNotRunForTenSeconds(t *testing.T) {
 	machine, _, _ := aMain(t)
 	if output, code := Main(setupWords(), machine); code != 0 {
