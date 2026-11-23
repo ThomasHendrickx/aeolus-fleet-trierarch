@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/url"
@@ -104,6 +105,10 @@ func (r Runtime) run(args ...string) (string, error) {
 	}
 	said, err := exec.Command(r.Binary, args...).Output()
 	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+			return "", fmt.Errorf("%s %s failed: %w: %s", r.Binary, args[0], err, strings.TrimSpace(string(exit.Stderr)))
+		}
 		return "", fmt.Errorf("%s %s failed: %w", r.Binary, args[0], err)
 	}
 	return string(said), nil
@@ -168,6 +173,9 @@ func (r Runtime) stopContainer(shipID string) error {
 	removed := "its remove answered no error"
 	if removeErr != nil {
 		removed = removeErr.Error()
+		if strings.Contains(removed, "rootless netns: kill network process: permission denied") {
+			removed += "; check the trierarch ship for the pasta AppArmor finding"
+		}
 	}
 	for _, line := range strings.Split(listed, "\n") {
 		if name, _, _ := strings.Cut(strings.TrimSpace(line), " "); name == containerName(shipID) {
