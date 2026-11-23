@@ -290,7 +290,7 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 	}
 	folder := session.Folder
 	command := []string{
-		r.Binary, "run", "--rm", "-i",
+		r.Binary, "run", "--rm", "-i", "--read-only",
 		"--name", containerName(session.ShipID),
 		"--label", ownerLabel + "=" + owner,
 		// Without it, podman lets swap double the memory cap.

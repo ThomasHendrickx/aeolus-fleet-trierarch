@@ -85,7 +85,7 @@ func TestTheHoldRunsTheSessionInAContainerOfItsOwnSeeingOnlyItsFolderHomeAndSock
 
 	home, sockets := filepath.Join(r.Homes, scout), filepath.Join(r.Sockets, scout)
 	want := []string{
-		"podman", "run", "--rm", "-i", "--name", "trierarch-" + scout, "--label", "aeolus.trierarch=aeolus-trierarch",
+		"podman", "run", "--rm", "-i", "--read-only", "--name", "trierarch-" + scout, "--label", "aeolus.trierarch=aeolus-trierarch",
 		"--memory-swap", "4g", "--memory", "4g", "--cpus", "2", "--pids-limit", "4096", "--userns=keep-id:uid=1000,gid=1000",
 		"--device", "/dev/fuse", "--device", "/dev/net/tun", "--cap-add", "SYS_ADMIN", "--security-opt", "unmask=ALL",
 		"--volume", "/worktrees/aeolus-fleet/scout:/worktrees/aeolus-fleet/scout", "--volume", home + ":/home/ubuntu", "--volume", sockets + ":" + sockets,
