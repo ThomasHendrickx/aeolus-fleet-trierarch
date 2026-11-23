@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
@@ -109,7 +110,19 @@ func Of(in Input) Report {
 		note += ", not offered: " + stopped
 	}
 	if in.PastaAppArmorMissing {
-		note += ", pasta AppArmor profile lacks the Podman SIGTERM receive rule"
+		finding := ", pasta AppArmor profile lacks the Podman SIGTERM receive rule"
+		limit := 200 - len(finding)
+		if in.IsKeyCutOff {
+			limit -= len(", ") + len(keyCutOffNote)
+		}
+		if len(note) > limit {
+			for len(note) > limit-3 {
+				_, size := utf8.DecodeLastRuneInString(note)
+				note = note[:len(note)-size]
+			}
+			note += "..."
+		}
+		note += finding
 	}
 	state := "idle"
 	if in.Running > 0 {
