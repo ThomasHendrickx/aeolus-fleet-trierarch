@@ -1202,6 +1202,7 @@ aeolus_meeting_text() {
     *)
       printf 'It is for every participant: contribute to the meeting by sending to %s, never with inReplyTo, and only while you hold the mic or moderate it. ' "$selector"
       printf 'To speak, request the mic with "%s/scripts/aeolus-fleet.sh" requestMic %s and contribute once the mic notice comes. ' "$root" "$input"
+      printf 'When a meeting contribution asks participants to request the mic, request it now; do not wait to be given it. '
       printf 'Not holding the mic and with nothing to request, end your turn.'
       ;;
   esac
