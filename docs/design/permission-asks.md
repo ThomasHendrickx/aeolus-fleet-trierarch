@@ -1,6 +1,6 @@
 # Design: a session's permission question reaches its owner in the Aeolus app (#374)
 
-Status: purpose and step 1 approved by Thomas on 13 Nov; this flow is for his approval. Nothing is built.
+Status: the permission flow is built. The trierarch asks a person owner; an argo-owned ship is refused. See the [architecture](../architecture.md#claude-code-permission-tool) for the released behaviour.
 
 ## Purpose
 
