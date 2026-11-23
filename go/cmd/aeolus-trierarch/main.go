@@ -580,6 +580,11 @@ func environment() map[string]string {
 func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string, firstRestartDelay time.Duration) (func(isKeyCutOff bool) error, error) {
 	env := environment()
 	client := fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
+	pastaMissing, pastaErr := checkPastaAppArmor(container.Machine{}, runtime.GOOS, "/")
+	if pastaErr != nil {
+		logLine("Could not check the pasta AppArmor profile: " + pastaErr.Error())
+	}
+	pastaNotice := &pastaOwnerNotice{Fleet: client, ShipID: kept.ShipID, Key: "trierarch:pasta-apparmor:" + newLaunchID()}
 	// Detected again only for a harness whose version changed since (#365); the operator's own options win.
 	detect := detectionOf(at, env, home, logLine)
 	detected, err := detect.Detect(context.Background(), slices.Sorted(maps.Keys(configuration.Harnesses)), detection.ByStart)
@@ -777,7 +782,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			offered = withTrusted(offered)
-			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now(), PastaAppArmorMissing: pastaMissing}
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
@@ -800,6 +805,11 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		}
 		if err := cli.ReportAccepted(at.Running, os.Getpid()); err != nil {
 			logLine(fmt.Sprintf("record accepted report: %v", err))
+		}
+		if pastaMissing {
+			if err := pastaNotice.Tell(); err != nil {
+				logLine("Could not tell the owner about the pasta AppArmor profile: " + err.Error())
+			}
 		}
 		return sender.Send()
 	}, nil

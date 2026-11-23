@@ -71,6 +71,8 @@ type Input struct {
 	// OS and Arch are Go's names of the platform and chip.
 	OS, Arch    string
 	IsKeyCutOff bool
+	// PastaAppArmorMissing records the startup check of the host profile.
+	PastaAppArmorMissing bool
 	// Now is the time of the report: when the machine that stopped offering itself offers itself again for a probe (#853).
 	Now time.Time
 	// Load is the machine's load as last read; none before one could be (#400).
@@ -105,6 +107,9 @@ func Of(in Input) Report {
 	stopped := whyNotOffered(in)
 	if stopped != "" {
 		note += ", not offered: " + stopped
+	}
+	if in.PastaAppArmorMissing {
+		note += ", pasta AppArmor profile lacks the Podman SIGTERM receive rule"
 	}
 	state := "idle"
 	if in.Running > 0 {
