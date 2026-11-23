@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -609,5 +610,17 @@ func TestTheReportStatesTheKeySecretsAreSealedTo(t *testing.T) {
 func TestATrierarchWithoutAKeyStatesNone(t *testing.T) {
 	if got, ok := detailsJSON(t, anInput())["sealingKey"]; ok {
 		t.Errorf("sealingKey = %v, want the field left out", got)
+	}
+}
+
+func TestTheReportNamesTheMissingPastaAppArmorRule(t *testing.T) {
+	in := anInput()
+	field := reflect.ValueOf(&in).Elem().FieldByName("PastaAppArmorMissing")
+	if !field.IsValid() {
+		t.Fatal("report input has no pasta AppArmor finding")
+	}
+	field.SetBool(true)
+	if got := Of(in).Note; !strings.Contains(got, "pasta AppArmor") || !strings.Contains(got, "Podman") {
+		t.Fatalf("note = %q, want the pasta AppArmor finding", got)
 	}
 }
