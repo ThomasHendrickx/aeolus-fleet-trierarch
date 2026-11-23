@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -359,5 +360,28 @@ func TestReadsTheTrierarchShipsOwnerRatherThanItsCrewRequester(t *testing.T) {
 	owner, err := reader.OwnerOf("shp_trierarch")
 	if err != nil || owner != "shp_owner" {
 		t.Fatalf("owner = %q, %v; want shp_owner", owner, err)
+	}
+}
+
+func TestTellsTheComputerOwnerThePastaRuleAndCommands(t *testing.T) {
+	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
+	teller, ok := any(client).(interface {
+		TellPastaAppArmor(string, string, string) error
+	})
+	if !ok {
+		t.Fatal("fleet cannot tell the owner about the pasta profile")
+	}
+	if err := teller.TellPastaAppArmor("shp_owner", "workstation", "key"); err != nil {
+		t.Fatal(err)
+	}
+	selector := (*sent)["selector"].(map[string]any)
+	if selector["shipId"] != "shp_owner" {
+		t.Fatalf("selector = %v, want owner", selector)
+	}
+	message := (*sent)["payload"].(string)
+	for _, want := range []string{"workstation", "signal (receive) set=(term) peer=podman,", "sudo sed -i", "/etc/apparmor.d/usr.bin.pasta", "sudo apparmor_parser -r /etc/apparmor.d/usr.bin.pasta"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("message = %q, want %q", message, want)
+		}
 	}
 }
