@@ -1248,6 +1248,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
           'The plugin acknowledged it for you: do not receive or ack it. ' +
           `It is for every participant: contribute to the meeting by sending to {"kind":"meeting","meetingId":"${MEETING_ID}"}, never with inReplyTo, and only while you hold the mic or moderate it. ` +
           `To speak, request the mic with "/plugin/scripts/aeolus-fleet.sh" requestMic '{"meetingId":"${MEETING_ID}"}' and contribute once the mic notice comes. ` +
+          'When a meeting contribution asks participants to request the mic, request it now; do not wait to be given it. ' +
           'Not holding the mic and with nothing to request, end your turn.\n\n' +
           'Review "PR 12"\nand say what you found',
       );
@@ -1746,6 +1747,28 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
     describe('the queued prompt (UserPromptSubmit)', () => {
       const theQueuedPrompt = () => aCodexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: QUEUED });
+
+      it('tells a Codex participant called to vote to request the mic now, before waiting for a mic notice (#610)', async () => {
+        const meetingId = 'mtg_01m5qbm1q6rsy6gf15c9w4a8s5';
+        await aCodexHandOver({
+          '/api/v1/ship/pushReceive': [receiving(aDelivery({
+            meetingId,
+            recipient: { kind: 'meeting', meetingId },
+            payload: 'vote now: every voter requests the mic',
+          }))],
+          '/api/v1/ship/ack': [acknowledged],
+        });
+
+        const prompted = await theQueuedPrompt();
+        const context = z.object({ hookSpecificOutput: z.object({ additionalContext: z.string() }) }).parse(JSON.parse(prompted.stdout)).hookSpecificOutput.additionalContext;
+
+        expect(context).toContain('vote now: every voter requests the mic');
+        expect(context).toContain(`requestMic '{"meetingId":"${meetingId}"}'`);
+        expect(context).toContain('When a meeting contribution asks participants to request the mic, request it now; do not wait to be given it.');
+        expect(context).toContain(`sending to {"kind":"meeting","meetingId":"${meetingId}"}, never with inReplyTo`);
+        expect(context).not.toContain('by sending to orchestrator-1 with inReplyTo');
+        expect(context).toContain('contribute once the mic notice comes');
+      });
 
       it('acknowledges the handed message first, then adds it to the context of the turn the prompt starts', async () => {
         const { stub } = await aCodexHandOver({ '/api/v1/ship/ack': [acknowledged] });
