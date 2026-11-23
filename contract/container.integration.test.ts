@@ -223,6 +223,7 @@ describe('a session in a container', () => {
       'run',
       '--rm',
       '-i',
+      '--read-only',
       '--name',
       container(),
       '--label',

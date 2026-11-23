@@ -317,7 +317,7 @@ environment=(PATH="$PATH")
 home= workdir= envFile= container=
 while [ $# -gt 0 ]; do
   case "$1" in
-    --rm|-i|--*=*) shift ;;
+    --rm|-i|--read-only|--*=*) shift ;;
     --name) container="$2"; shift 2 ;;
     --volume) [ "\${2#*:}" = '${SESSION_HOME}' ] && home="\${2%%:*}"; shift 2 ;;
     --env) if [[ "$2" == *=* ]]; then environment+=("$2"); else environment+=("$2=\${!2}"); fi; shift 2 ;;
