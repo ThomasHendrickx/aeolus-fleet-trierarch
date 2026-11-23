@@ -489,3 +489,33 @@ func (c Client) UsageLimitRecipient(shipID string) (string, error) {
 	}
 	return "", nil
 }
+
+// OwnerOf reads the owner of the named ship.
+func (c Client) OwnerOf(shipID string) (string, error) {
+	var ship struct {
+		OwnerShipID *string `json:"ownerShipId"`
+	}
+	if err := call(c.URL, request{path: "/fleet/ship", crewToken: c.CrewToken, body: map[string]string{"shipId": shipID}}, &ship); err != nil {
+		return "", err
+	}
+	if ship.OwnerShipID == nil {
+		return "", nil
+	}
+	return *ship.OwnerShipID, nil
+}
+
+// TellPastaAppArmor tells the computer's owner how to repair its profile.
+func (c Client) TellPastaAppArmor(ownerID, shipName, key string) error {
+	text := shipName + " has a pasta AppArmor profile missing a Podman rule\n\n" +
+		"Podman network cleanup can fail. Add this line inside /etc/apparmor.d/usr.bin.pasta:\n\n" +
+		"`signal (receive) set=(term) peer=podman,`\n\n" +
+		"Run:\n\n```sh\nsudo sed -i '$ i\\  signal (receive) set=(term) peer=podman,' /etc/apparmor.d/usr.bin.pasta\nsudo apparmor_parser -r /etc/apparmor.d/usr.bin.pasta\n```"
+	refusal, err := c.ReportToOwner(ownerID, text, key)
+	if err != nil {
+		return err
+	}
+	if refusal != nil {
+		return refusal
+	}
+	return nil
+}

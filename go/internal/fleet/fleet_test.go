@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -339,5 +340,48 @@ func TestAsksAndConfirmsTheMcpConfigurationToThePluginsShipAsItsOwnShipWithAKeyO
 				t.Errorf("idempotency keys %v then %v, want one of its own each time", first, got["idempotencyKey"])
 			}
 		})
+	}
+}
+
+func TestReadsTheTrierarchShipsOwnerRatherThanItsCrewRequester(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/fleet/ship" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ownerShipId":"shp_owner","crewRequest":{"requestedBy":{"id":"shp_requester"}}}`))
+	}))
+	t.Cleanup(server.Close)
+	client := Client{URL: server.URL, CrewToken: "test"}
+	reader, ok := any(client).(interface{ OwnerOf(string) (string, error) })
+	if !ok {
+		t.Fatal("fleet does not read a ship's owner")
+	}
+	owner, err := reader.OwnerOf("shp_trierarch")
+	if err != nil || owner != "shp_owner" {
+		t.Fatalf("owner = %q, %v; want shp_owner", owner, err)
+	}
+}
+
+func TestTellsTheComputerOwnerThePastaRuleAndCommands(t *testing.T) {
+	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
+	teller, ok := any(client).(interface {
+		TellPastaAppArmor(string, string, string) error
+	})
+	if !ok {
+		t.Fatal("fleet cannot tell the owner about the pasta profile")
+	}
+	if err := teller.TellPastaAppArmor("shp_owner", "workstation", "key"); err != nil {
+		t.Fatal(err)
+	}
+	selector := (*sent)["selector"].(map[string]any)
+	if selector["shipId"] != "shp_owner" {
+		t.Fatalf("selector = %v, want owner", selector)
+	}
+	message := (*sent)["payload"].(string)
+	for _, want := range []string{"workstation", "signal (receive) set=(term) peer=podman,", "sudo sed -i", "/etc/apparmor.d/usr.bin.pasta", "sudo apparmor_parser -r /etc/apparmor.d/usr.bin.pasta"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("message = %q, want %q", message, want)
+		}
 	}
 }

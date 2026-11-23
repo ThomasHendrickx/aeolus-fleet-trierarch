@@ -250,6 +250,24 @@ func TestAStopFailsWhileTheShipsContainerIsStillListedSoItsFolderIsNotRead(t *te
 	}
 }
 
+func TestPodmanNetworkCleanupFailurePointsToTheTrierarchFinding(t *testing.T) {
+	r, _ := aContainerRuntime(t)
+	r.Run = func(args ...string) (string, error) {
+		switch args[0] {
+		case "rm":
+			return "", errors.New("rootless netns: kill network process: permission denied")
+		case "ps":
+			return "trierarch-" + scout + " running\n", nil
+		default:
+			return "", nil
+		}
+	}
+	err := r.Stop(scout)
+	if err == nil || !strings.Contains(err.Error(), "pasta AppArmor") || !strings.Contains(err.Error(), "trierarch ship") {
+		t.Fatalf("Stop = %v, want a pointer to the trierarch ship's pasta AppArmor finding", err)
+	}
+}
+
 func TestAStopFailsWhenTheContainersCannotBeListedAfterItSoItsFolderIsNotRead(t *testing.T) {
 	r, binary := aContainerRuntime(t)
 	binary.fails["ps"] = true

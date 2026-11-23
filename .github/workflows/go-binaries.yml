@@ -109,6 +109,13 @@ jobs:
           cache: npm
       - run: npm ci
       - uses: ./.github/actions/test-images
+      # Match the integration runner's pasta profile for the host check.
+      - name: Allow Podman to stop its rootless network helper
+        run: |
+          if [ -f /etc/apparmor.d/usr.bin.pasta ]; then
+            sudo sed -i '$ i\  signal (receive) set=(term) peer=podman,' /etc/apparmor.d/usr.bin.pasta
+            sudo apparmor_parser -r /etc/apparmor.d/usr.bin.pasta
+          fi
       - uses: actions/download-artifact@v8
         with:
           name: aeolus-trierarch-linux-${{ matrix.goarch }}
