@@ -70,15 +70,32 @@ describe('the crew-a-ship skill', () => {
   });
 
   it("lists a meeting's calls through aeolus-fleet.sh, open and add stating the model, and says how a session takes part (decision 0061)", () => {
-    for (const call of [
-      'openMeeting', 'meeting', 'requestMic', 'withdrawMicRequest', 'releaseMic', 'giveMic', 'takeMic', 'setMicPattern',
-      'addToMeeting', 'leaveMeeting', 'rejoinMeeting', 'revokeFromMeeting', 'transferMeeting', 'nameModerator', 'endMeeting',
-    ]) {
-      expect(claudeSkill).toContain(`\`${call}\``);
+    for (const skill of [claudeSkill, codexSkill]) {
+      for (const call of [
+        'openMeeting', 'meeting', 'requestMic', 'withdrawMicRequest', 'releaseMic', 'giveMic', 'takeMic', 'setMicPattern',
+        'addToMeeting', 'leaveMeeting', 'rejoinMeeting', 'revokeFromMeeting', 'transferMeeting', 'nameModerator', 'endMeeting',
+      ]) {
+        expect(skill).toContain(`\`${call}\``);
+      }
+      expect(skill).toContain('`openMeeting` and `addToMeeting` state the model as a send does');
+      expect(skill).toContain('contribute with `send -` to `{"kind":"meeting","meetingId":"<its id>"}`, never with inReplyTo');
+      expect(skill).toContain('Not holding the mic and with nothing to request, end your turn.');
     }
-    expect(claudeSkill).toContain('`openMeeting` and `addToMeeting` state the model as a send does');
-    expect(claudeSkill).toContain('contribute with `send -` to `{"kind":"meeting","meetingId":"<its id>"}`, never with inReplyTo');
-    expect(claudeSkill).toContain('Not holding the mic and with nothing to request, end your turn.');
+  });
+
+  it('has participants request the mic when a meeting contribution asks, in both harnesses (#610)', () => {
+    for (const skill of [claudeSkill, codexSkill]) {
+      expect(skill).toContain('When a meeting contribution asks participants to request the mic, request it now; do not wait to be given it.');
+    }
+  });
+
+  it('keeps meeting deliveries out of the Codex instruction to reply to the sender (#610)', () => {
+    expect(codexSkill).toContain('Handle it; outside a meeting, answer by senderName with inReplyTo.');
+    expect(codexSkill).not.toContain('Handle it, and answer by senderName with inReplyTo.');
+  });
+
+  it('has the Codex wake skill follow the crew skill for meeting deliveries (#610)', () => {
+    expect(codexWake).toContain('For a delivery naming a meetingId, follow the `aeolus-fleet-crew` meeting guidance instead of replying to its sender.');
   });
 
   it('has a Codex session fetch the same protocol from the fleet, holding none of the rules, with its Codex crew line and harness', () => {
