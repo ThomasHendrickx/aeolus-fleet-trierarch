@@ -624,3 +624,16 @@ func TestTheReportNamesTheMissingPastaAppArmorRule(t *testing.T) {
 		t.Fatalf("note = %q, want the pasta AppArmor finding", got)
 	}
 }
+
+func TestMissingPastaRuleDoesNotPreventStoppedMachineReport(t *testing.T) {
+	in := aStoppedInput("shp_a", "shp_b", "shp_c")
+	in.PastaAppArmorMissing = true
+
+	report := Of(in)
+	if len(report.Note) > 200 || !strings.Contains(report.Note, "pasta AppArmor") || !strings.Contains(report.Note, "not offered") {
+		t.Fatalf("note = %q (%d bytes), want the finding and stopped machine within 200 characters", report.Note, len(report.Note))
+	}
+	if got := asJSON(t, report)["details"].(map[string]any)["harnesses"]; !reflect.DeepEqual(got, []any{}) {
+		t.Fatalf("harnesses = %v, want none", got)
+	}
+}
