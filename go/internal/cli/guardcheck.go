@@ -18,14 +18,24 @@ import (
 // the trierarch starts. It prints the hook's answer, writes the refusal to stderr and exits with its code; whatever goes wrong before
 // the check can run refuses the call too, so it fails closed.
 func guardCheckCommand(words []string, machine Machine) (string, int) {
-	answer := guardAnswer(words, machine)
+	// The deadline holds for the whole command, so whatever it waits on, it answers and the process exits before the hook's timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), guard.Deadline)
+	defer cancel()
+	answered := make(chan guard.Answer, 1)
+	go func() { answered <- guardAnswer(ctx, words, machine) }()
+	var answer guard.Answer
+	select {
+	case answer = <-answered:
+	case <-ctx.Done():
+		answer = guard.Failed("deadline")
+	}
 	if answer.Stderr != "" && machine.Stderr != nil {
 		fmt.Fprint(machine.Stderr, answer.Stderr)
 	}
 	return answer.Stdout, answer.ExitCode
 }
 
-func guardAnswer(words []string, machine Machine) guard.Answer {
+func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Answer {
 	command, ok := parse(words)
 	shipID := command.values["--ship"]
 	if !ok || len(command.words) != 0 || !crew.IsShipID(shipID) {
@@ -74,7 +84,7 @@ func guardAnswer(words []string, machine Machine) guard.Answer {
 		Boundary:  guard.Boundary{ShipFolder: resolvedPath(shipFolder), Repositories: repositories},
 		Protected: guard.ClaudeCodeProtected(resolvedPath(machine.HomeDirectory), resolvedPath(shipFolder), resolvedPath(guardfile.Folder(at.Ships, shipID)), resolvedPath(at.Config)),
 	}
-	return checker.Check(context.Background(), machine.Stdin)
+	return checker.Check(ctx, machine.Stdin)
 }
 
 // resolvedPath is the path with the links of its longest part that exists resolved, as the guard compares the paths a call writes.

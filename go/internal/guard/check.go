@@ -12,8 +12,8 @@ import (
 	"unicode/utf8"
 )
 
-// defaultDeadline is guard check's own deadline, below the hook's timeout.
-const defaultDeadline = 5 * time.Second
+// Deadline is guard check's own deadline, below the hook's timeout.
+const Deadline = 5 * time.Second
 
 // summaryLength is how much of the call a refusal record keeps.
 const summaryLength = 200
@@ -97,7 +97,7 @@ func (c Checker) deadline() time.Duration {
 	if c.Deadline > 0 {
 		return c.Deadline
 	}
-	return defaultDeadline
+	return Deadline
 }
 
 // Check reads the call from input and answers within the deadline. Anything
