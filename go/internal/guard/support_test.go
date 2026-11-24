@@ -3,6 +3,7 @@ package guard
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -84,7 +85,7 @@ func aShellCall(command string) string { return aCall("Bash", map[string]any{"co
 
 func check(t *testing.T, checker Checker, call string) Answer {
 	t.Helper()
-	return checker.Check(context.Background(), strings.NewReader(call))
+	return checker.Check(context.Background(), io.NopCloser(strings.NewReader(call)))
 }
 
 // reason is the refusal the session sees, or "" when the call runs.

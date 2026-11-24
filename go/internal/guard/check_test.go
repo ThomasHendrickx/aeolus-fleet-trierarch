@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -177,5 +179,44 @@ func TestARefusalTheGuardCannotRecordIsRefusedAsGuardFailed(t *testing.T) {
 				t.Fatal("check gave no answer within a second, want a refusal by its deadline")
 			}
 		})
+	}
+}
+
+// stalledInput is a harness that never sends its call: a read waits until
+// the input is closed.
+type stalledInput struct {
+	closed   chan struct{}
+	once     sync.Once
+	returned chan struct{}
+}
+
+func newStalledInput() *stalledInput {
+	return &stalledInput{closed: make(chan struct{}), returned: make(chan struct{})}
+}
+
+func (s *stalledInput) Read([]byte) (int, error) {
+	<-s.closed
+	close(s.returned)
+	return 0, io.ErrClosedPipe
+}
+
+func (s *stalledInput) Close() error {
+	s.once.Do(func() { close(s.closed) })
+	return nil
+}
+
+func TestAStalledInputIsRefusedAtTheDeadlineAndLeftWithNoReadRunning(t *testing.T) {
+	checker, _ := aChecker()
+	checker.Deadline = 20 * time.Millisecond
+	input := newStalledInput()
+	t.Cleanup(func() { _ = input.Close() })
+
+	if got := reason(t, checker.Check(context.Background(), input)); got != "Refused by the guard: guard failed: deadline." {
+		t.Errorf("check of a stalled input refused as %q, want guard failed: deadline", got)
+	}
+	select {
+	case <-input.returned:
+	default:
+		t.Error("a read of the stalled input still runs after check answered, want it stopped")
 	}
 }
