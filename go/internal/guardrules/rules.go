@@ -55,5 +55,12 @@ func Read(payload string, configured Identity) (Assignment, error) {
 		}
 		message.Sets[index] = canonical
 	}
+	resolved, err := json.Marshal(message.Sets)
+	if err != nil {
+		return Assignment{}, fmt.Errorf("%w: encode sets: %w", ErrRefused, err)
+	}
+	if len(resolved) > 64*1024 {
+		return Assignment{}, fmt.Errorf("%w: rule sets too large", ErrRefused)
+	}
 	return message, nil
 }
