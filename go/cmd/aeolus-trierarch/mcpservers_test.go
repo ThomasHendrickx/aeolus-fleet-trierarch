@@ -48,7 +48,7 @@ func TestCopilotOffersNoMCPServerInContainers(t *testing.T) {
 func TestCopilotIsWiredWithTheMCPProxyAndTheSessionsFolderItsMCPServersNeed(t *testing.T) {
 	configuration := config.Configuration{Harnesses: map[string]config.Harness{"copilot": {}}}
 	at := paths.Paths{Sessions: t.TempDir()}
-	wired, _, err := harnessesOf(configuration, at, map[string]string{}, t.TempDir(), &startedSessions{}, modelproxy.Runtime{Folder: t.TempDir()}, &offers{configured: configuration})
+	wired, _, err := harnessesOf(configuration, at, map[string]string{}, t.TempDir(), "/usr/local/bin/aeolus-trierarch", &startedSessions{}, modelproxy.Runtime{Folder: t.TempDir()}, &offers{configured: configuration})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -633,7 +633,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	}
 	running := sessionRuntime(at, program, configuration)
 	proxy := modelProxy(at, program)
-	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
+	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, program, running, proxy, offers)
 	if err != nil {
 		return nil, err
 	}
@@ -977,7 +977,7 @@ func (o *offers) options() map[string]map[string][]string {
 var adapters = []string{"claude-code", "codex", "copilot"}
 
 // harnessesOf are the adapters of the harnesses the configuration offers, each with the aeolus-fleet plugin its harness installed, and their names, the default first. Each plugin is looked for at use, so a missing one is reported without stopping the trierarch and an installation is found without a restart. A configured harness this trierarch has no adapter for stops it at start, so no request for it is ever crewed.
-func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running runningSessions, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
+func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, program string, running runningSessions, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
 	for name := range configuration.Harnesses {
 		if !slices.Contains(adapters, name) {
 			return nil, nil, fmt.Errorf("this trierarch has no adapter for the harness %s: it offers %s", name, strings.Join(adapters, ", "))
@@ -1015,6 +1015,8 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				Events:          events,
 				ProxyURL:        proxyURL,
 				Sessions:        at.Sessions,
+				Program:         program,
+				Ships:           at.Ships,
 				Homes:           homesOf(at, configuration.Runtime),
 				// In containers, a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
 				MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime),

@@ -13,7 +13,6 @@ func aGuardedHarness(t *testing.T) (Harness, *aRuntime) {
 	t.Helper()
 	harness, running, _ := aHarness(t)
 	harness.Program = "/opt/aeolus trierarch/aeolus-trierarch"
-	harness.Ships = t.TempDir()
 	return harness, running
 }
 

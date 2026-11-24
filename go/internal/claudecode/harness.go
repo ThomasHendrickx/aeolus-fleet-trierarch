@@ -70,6 +70,10 @@ type Harness struct {
 	// Homes is where each ship crewed before the ship folders has a home of its own, for sessions in containers, which its container gets
 	// as its home (decision 0039); a ship crewed fresh has it in its ship's folder. Empty on the host, where every session shares the user's.
 	Homes string
+	// Program is the trierarch's own file, which every session's guard hook runs as guard check.
+	Program string
+	// Ships is the state folder's ships directory, where each ship's guard folder keeps its rules, settings and refusals.
+	Ships string
 	// MoveWithinUserNamespace moves a ship's home whose own top the host user cannot give its write to the trash within the runtime's user
 	// namespace; nil on the host.
 	MoveWithinUserNamespace func(from string, to string) error
@@ -232,6 +236,11 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
 	// --mcp-config takes every word up to the next flag, so it comes last.
 	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder))
+	guardSettings, err := h.writeGuardSettings(entry.ShipID)
+	if err != nil {
+		return err
+	}
+	command = append(command, settingsFlag, guardSettings)
 	shipPlugin := h.pluginOf(entry)
 	if h.Homes == "" && shipPlugin.Crews != h.Plugin.Crews {
 		env["CLAUDE_CONFIG_DIR"] = filepath.Join(h.homeOf(entry), ".claude")

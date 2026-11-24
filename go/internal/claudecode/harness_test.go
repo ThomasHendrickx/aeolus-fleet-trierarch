@@ -63,6 +63,8 @@ func aHarness(t *testing.T) (Harness, *aRuntime, *anOnboarding) {
 		Managed:    t.TempDir(),
 		User:       filepath.Join(t.TempDir(), "settings.json"),
 		Events:     func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
+		Program:    "/usr/local/bin/aeolus-trierarch",
+		Ships:      t.TempDir(),
 	}, running, onboarding
 }
 
