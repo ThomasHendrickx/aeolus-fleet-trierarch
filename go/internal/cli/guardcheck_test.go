@@ -43,7 +43,7 @@ func aGuardedShip(t *testing.T, rules string) (Machine, paths.Paths, string) {
 		t.Fatal(err)
 	}
 	if rules != "" {
-		if err := (guardfile.Store{Ships: at.Ships}).Write(context.Background(), guardedShip, []byte(rules)); err != nil {
+		if err := (guardfile.Store{Guards: at.Guard}).Write(context.Background(), guardedShip, []byte(rules)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -72,7 +72,7 @@ func guardCheck(machine Machine, shipID string, call string) (string, string, in
 // refusalsOf are the refusals kept for the ship, one JSON object a line.
 func refusalsOf(t *testing.T, at paths.Paths, shipID string) []map[string]any {
 	t.Helper()
-	text, err := os.ReadFile(filepath.Join(at.Ships, shipID, "guard", "refusals.jsonl"))
+	text, err := os.ReadFile(filepath.Join(at.Guard, shipID, "refusals.jsonl"))
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -152,8 +152,8 @@ func TestGuardCheckRefusesACallWithoutAShip(t *testing.T) {
 func TestGuardCheckProtectsTheGuardsOwnFilesTheConfigurationAndTheHarnessSettings(t *testing.T) {
 	machine, at, folder := aGuardedShip(t, noPublishRules)
 	for _, target := range []string{
-		filepath.Join(at.Ships, guardedShip, "guard", "refusals.jsonl"),
-		filepath.Join(at.Ships, guardedShip, "guard", "settings.json"),
+		filepath.Join(at.Guard, guardedShip, "refusals.jsonl"),
+		filepath.Join(at.Guard, guardedShip, "settings.json"),
 		at.Config,
 		filepath.Join(machine.HomeDirectory, ".claude", "settings.json"),
 		filepath.Join(folder, "main", ".claude", "settings.local.json"),

@@ -48,7 +48,7 @@ func TestRunKeepsRulesForItsConfiguredFleetAndPluginShip(t *testing.T) {
 	machine.McpFleet = func(crew.File) McpFleet { return anMcpFleet{fleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv"} }
 	var keeper *guardrules.Keeper
 	machine.GuardRules = func(at paths.Paths, identity guardrules.Identity) receiving.GuardKeeper {
-		keeper = &guardrules.Keeper{Identity: identity, Store: guardfile.Store{Ships: at.Ships}}
+		keeper = &guardrules.Keeper{Identity: identity, Store: guardfile.Store{Guards: at.Guard}}
 		return keeper
 	}
 	if output, code := Main([]string{"run"}, machine); code != 0 {

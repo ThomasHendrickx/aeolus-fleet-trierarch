@@ -49,7 +49,7 @@ func TestARealClaudeCodeSessionDoesNotRunACallTheGuardDeniesAndShowsItsRule(t *t
 	if result.ran || !strings.Contains(result.output, "Refused by the guard: commands.deny touch, in no-touch @ 8d41e07.") {
 		t.Fatalf("ran %v, want the call refused with its rule: %s", result.ran, result.output)
 	}
-	refusals, err := os.ReadFile(filepath.Join(guardfile.Folder(session.at.Ships, realGuardShip), "refusals.jsonl"))
+	refusals, err := os.ReadFile(filepath.Join(guardfile.Folder(session.at.Guard, realGuardShip), "refusals.jsonl"))
 	if err != nil || !strings.Contains(string(refusals), `"rule":"commands.deny touch"`) {
 		t.Fatalf("refusals %s, %v, want the refusal kept", refusals, err)
 	}
@@ -93,10 +93,10 @@ func TestARealClaudeCodeSessionDoesNotRunACallWhenTheGuardsProgramIsGone(t *test
 func TestARealClaudeCodeSessionDoesNotRunACallWhenTheGuardMissesItsDeadline(t *testing.T) {
 	session := aRealGuardedSession(t, noTouch)
 	// A refusal kept through a pipe no one reads hangs until the guard's own deadline answers.
-	if err := os.MkdirAll(guardfile.Folder(session.at.Ships, realGuardShip), 0o700); err != nil {
+	if err := os.MkdirAll(guardfile.Folder(session.at.Guard, realGuardShip), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := syscall.Mkfifo(filepath.Join(guardfile.Folder(session.at.Ships, realGuardShip), "refusals.jsonl"), 0o600); err != nil {
+	if err := syscall.Mkfifo(filepath.Join(guardfile.Folder(session.at.Guard, realGuardShip), "refusals.jsonl"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -135,7 +135,7 @@ func aRealGuardedSession(t *testing.T, sets string) realGuardedSession {
 		t.Fatal(err)
 	}
 	rules := `{"fleetId":"flt_01m3tb1zgr5h2ffee12xnch8sv","pluginShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","shipId":"` + realGuardShip + `","settingsVersion":1,"sets":` + sets + `}`
-	if err := (guardfile.Store{Ships: at.Ships}).Write(context.Background(), realGuardShip, []byte(rules)); err != nil {
+	if err := (guardfile.Store{Guards: at.Guard}).Write(context.Background(), realGuardShip, []byte(rules)); err != nil {
 		t.Fatal(err)
 	}
 	return realGuardedSession{home: home, at: at, folder: folder, program: builtTrierarch(t)}
@@ -165,7 +165,7 @@ func (s realGuardedSession) run(t *testing.T, program string) realGuardResult {
 	t.Helper()
 	marker := filepath.Join(s.folder, "ran")
 	model := aBashModel(t, "touch "+marker)
-	harness := Harness{Program: program, Ships: s.at.Ships}
+	harness := Harness{Program: program, Guards: s.at.Guard}
 	settings, err := harness.writeGuardSettings(realGuardShip, nil)
 	if err != nil {
 		t.Fatal(err)

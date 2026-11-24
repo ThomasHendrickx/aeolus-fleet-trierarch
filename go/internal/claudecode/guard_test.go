@@ -27,7 +27,7 @@ func TestEverySessionStartsWithTheGuardHookInItsSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	settings := filepath.Join(harness.Ships, scout, "guard", "settings.json")
+	settings := filepath.Join(harness.Guards, scout, "settings.json")
 	command := running.started[0].Command
 	at := slices.Index(command, "--settings")
 	if at < 0 || at+1 >= len(command) || command[at+1] != settings {

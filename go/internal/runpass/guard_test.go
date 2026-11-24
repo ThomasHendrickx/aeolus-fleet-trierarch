@@ -27,6 +27,11 @@ func (r someGuardRules) KeptVersion(shipID string) (int, bool, error) {
 	return version, ok, nil
 }
 
+func (r someGuardRules) Forget(shipID string) error {
+	delete(r, shipID)
+	return nil
+}
+
 // aGuardedPass is a pass whose harness starts its sessions guarded, scout's rules kept at the versions given.
 func aGuardedPass(t *testing.T, rules someGuardRules) (*aPass, *guardedHarness) {
 	t.Helper()
@@ -142,5 +147,18 @@ func TestASessionWhoseSettingsDisableTheGuardIsGivenBackInsteadOfStartedAgain(t 
 
 	if len(pass.harness.launches) != 1 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: "+hooksOff) {
 		t.Fatalf("launches %d, calls %q, want no start again and the request given back", len(pass.harness.launches), pass.fleet.calls)
+	}
+}
+
+func TestAReleaseForgetsTheShipsGuardFolder(t *testing.T) {
+	rules := someGuardRules{scout: 1}
+	pass, _ := aGuardedPass(t, rules)
+	pass.crewed(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+
+	pass.run(t)
+
+	if _, ok := rules[scout]; ok || len(pass.store.state.Entries) != 0 {
+		t.Fatalf("rules %v, entries %+v, want the guard folder forgotten with the request", rules, pass.store.state.Entries)
 	}
 }
