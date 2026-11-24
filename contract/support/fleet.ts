@@ -31,7 +31,7 @@ export interface Fleet {
   readonly database: PrismaClient;
   /** The trierarch ship's id and the secret its setup line carries. */
   readonly trierarchShip: { readonly shipId: ShipId; readonly secret: string };
-  /** The trierarch plugin's ship the setup line names: the guard rules of every crew come from it, as the plugin sends them. */
+  /** The trierarch plugin's ship the setup line names: the guard rules of every crew come from it, as the plugin sends them. Unless a test names its own, what the trierarch sends it is left out of what it told. */
   readonly pluginShip: ShipId;
   /** Makes the ship the trierarch plugin's ship, as a test's own setup line names it. */
   usePluginShip(shipId: ShipId): void;
@@ -123,7 +123,8 @@ export async function aFleet(): Promise<Fleet> {
   const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
   const commissioned = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'test-machine', type: 'trierarch', kind: 'trierarch', scopes: ['crew:run'] }));
   const trierarchShip = { shipId: commissioned.shipId, secret: secretOf(commissioned.secret) };
-  let pluginShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'default-trierarch-plugin', type: 'reviewer' })).shipId;
+  const defaultPluginShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'default-trierarch-plugin', type: 'reviewer' })).shipId;
+  let pluginShip = defaultPluginShip;
   /** Sends the trierarch the guard rules of the ship's settings version, none of them, as the trierarch plugin sends them for every assignment (guard design 4.4). */
   const sendGuardRules = async (shipId: ShipId, settingsVersion: number): Promise<void> => {
     const caller: ShipCaller = { shipId: pluginShip, fleetId: argo.fleetId, kind: 'agent', scopes: argo.scopes };
@@ -203,6 +204,10 @@ export async function aFleet(): Promise<Fleet> {
       const told: Told[] = [];
       for (const message of messages) {
         const delivery = await database.delivery.findFirst({ where: { messageId: message.id }, select: { recipientShipId: true } });
+        // What the trierarch sends the default plugin ship (its requests, its usage) is no telling: only a test's own plugin ship counts.
+        if (delivery?.recipientShipId === defaultPluginShip) {
+          continue;
+        }
         const recipient = delivery?.recipientShipId == null ? undefined : await database.ship.findUnique({ where: { id: delivery.recipientShipId }, select: { name: true } });
         told.push({ to: recipient?.name ?? '', text: message.payload ?? '' });
       }
