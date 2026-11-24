@@ -59,7 +59,7 @@ func TestARefusalByTheMechanismRecordsNoSetAndNoCommit(t *testing.T) {
 func TestTheGuardFailsClosed(t *testing.T) {
 	tests := []struct {
 		name, call, want string
-		sets         SetSource
+		sets             SetSource
 	}{
 		{"on input it cannot read", "not json", "Refused by the guard: guard failed: input unreadable.", nil},
 		{"on input without a tool", `{"tool_input":{}}`, "Refused by the guard: guard failed: input unreadable.", nil},
