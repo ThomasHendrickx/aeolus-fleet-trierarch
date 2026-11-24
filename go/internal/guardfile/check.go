@@ -61,8 +61,9 @@ func (s Store) GuardStatus(ctx context.Context, shipID string) (guard.Status, bo
 		return guard.Status{}, false, err
 	}
 	var kept struct {
-		ShipID string             `json:"shipId"`
-		Sets   []guard.AppliedSet `json:"sets"`
+		ShipID          string             `json:"shipId"`
+		SettingsVersion int                `json:"settingsVersion"`
+		Sets            []guard.AppliedSet `json:"sets"`
 	}
 	if err := json.Unmarshal(text, &kept); err != nil {
 		return guard.Status{}, false, fmt.Errorf("decode guard rules: %w", err)
@@ -70,7 +71,7 @@ func (s Store) GuardStatus(ctx context.Context, shipID string) (guard.Status, bo
 	if kept.ShipID != shipID {
 		return guard.Status{}, false, fmt.Errorf("guard rules do not belong to ship %s", shipID)
 	}
-	status := guard.Status{Sets: kept.Sets, Recent: []guard.RecentRefusal{}}
+	status := guard.Status{SettingsVersion: kept.SettingsVersion, Sets: kept.Sets, Recent: []guard.RecentRefusal{}}
 	if status.Sets == nil {
 		status.Sets = []guard.AppliedSet{}
 	}

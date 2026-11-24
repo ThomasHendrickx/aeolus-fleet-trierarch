@@ -5,7 +5,9 @@ import "time"
 // Status is what the guard applied to a session and what it refused, as the crew status carries it (aeolus-fleet docs/design/guard,
 // section 4.8): the sets at their commits, how many refusals, and the last twenty.
 type Status struct {
-	Sets     []AppliedSet    `json:"sets"`
+	// SettingsVersion is the settings version the rules it applies were kept for, which it is reported with; not part of the status.
+	SettingsVersion int             `json:"-"`
+	Sets            []AppliedSet    `json:"sets"`
 	Refusals int             `json:"refusals"`
 	Recent   []RecentRefusal `json:"recent"`
 }

@@ -3,11 +3,13 @@ package runpass
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
 
 // someGuardStatuses are what each guarded session applied and refused, by ship.
@@ -143,9 +145,14 @@ func TestAGuardReportThatFailedPartlyIsTriedAgainOnlyForWhatTheFleetDidNotTake(t
 func TestARefusalReportedButNotKeptAsReportedIsReportedAgainUnderTheSameKey(t *testing.T) {
 	pass, statuses, reports := aReportingPass(t, aGuardStatus(0))
 	statuses[scout] = aGuardStatus(1)
-	pass.store.failSaves = 1
+	saved := reconciler.State{Entries: maps.Clone(pass.store.state.Entries)}
+	pass.store.isUnwritable = true
+	if err := pass.pass.Run(); err == nil {
+		t.Fatal("a pass whose state cannot be written succeeded")
+	}
+	// The state file holds what it held before the pass.
+	pass.store.isUnwritable, pass.store.state.Entries = false, saved.Entries
 
-	pass.run(t)
 	pass.run(t)
 
 	if len(reports.refusedKeys) != 2 || reports.refusedKeys[0] == "" || reports.refusedKeys[0] != reports.refusedKeys[1] {

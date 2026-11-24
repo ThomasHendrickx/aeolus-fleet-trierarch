@@ -174,6 +174,19 @@ func TestTheGuardStatusIsTheKeptSetsAndTheLastTwentyRefusals(t *testing.T) {
 	}
 }
 
+func TestTheGuardStatusNamesTheSettingsVersionItsRulesWereKeptFor(t *testing.T) {
+	store := Store{Guards: filepath.Join(t.TempDir(), "guard")}
+	if err := store.Write(context.Background(), shipID, []byte(payload)); err != nil {
+		t.Fatal(err)
+	}
+
+	status, _, err := store.GuardStatus(context.Background(), shipID)
+
+	if err != nil || status.SettingsVersion != 3 {
+		t.Fatalf("GuardStatus = %d, %v, want settings version 3", status.SettingsVersion, err)
+	}
+}
+
 func TestForgettingAShipRemovesItsWholeGuardFolder(t *testing.T) {
 	guards := filepath.Join(t.TempDir(), "guard")
 	store := Store{Guards: guards}

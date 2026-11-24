@@ -138,8 +138,10 @@ type Entry struct {
 	HasStarted bool   `json:"hasStarted"`
 	// GuardWaitSince is when its session first waited for the guard rules of its settings version to start, cleared once it starts.
 	GuardWaitSince string `json:"guardWaitSince,omitempty"`
-	// GuardReported is the settings version and refusal count of the guard last reported for it, as `<version>:<count>`.
+	// GuardReported is the settings version and refusal count of the guard status last reported for it, as `<version>:<count>`.
 	GuardReported string `json:"guardReported,omitempty"`
+	// RefusalsReported is how many of its guard's refusals were reported as its session's activity, counted over its guard folder.
+	RefusalsReported int `json:"refusalsReported,omitempty"`
 	// UsageLimitTold is the occurrence whose notice was sent, kept across passes and restarts (#1629).
 	UsageLimitTold string `json:"usageLimitTold,omitempty"`
 	// LaunchedAt and LaunchID are set while its session's launch window is open (#382, #490).
