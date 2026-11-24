@@ -236,11 +236,15 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
 	// --mcp-config takes every word up to the next flag, so it comes last.
 	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder))
-	guardSettings, err := h.writeGuardSettings(entry.ShipID)
-	if err != nil {
-		return err
+	// A session in a container cannot reach guard check on the host yet: it starts without the guard, and the trierarch reports no
+	// guarded harness there.
+	if h.Homes == "" {
+		guardSettings, err := h.writeGuardSettings(entry.ShipID)
+		if err != nil {
+			return err
+		}
+		command = append(command, settingsFlag, guardSettings)
 	}
-	command = append(command, settingsFlag, guardSettings)
 	shipPlugin := h.pluginOf(entry)
 	if h.Homes == "" && shipPlugin.Crews != h.Plugin.Crews {
 		env["CLAUDE_CONFIG_DIR"] = filepath.Join(h.homeOf(entry), ".claude")
