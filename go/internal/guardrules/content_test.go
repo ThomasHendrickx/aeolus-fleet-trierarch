@@ -82,3 +82,16 @@ func TestInvalidNestedRulesNeverReplaceTheStoredResolution(t *testing.T) {
 		t.Fatalf("Accept(invalid nested version 4) = %v, %v, want refused and unchanged", outcome, err)
 	}
 }
+
+func TestSameVersionCannotReorderRules(t *testing.T) {
+	store := &memoryRules{}
+	original := withSets(3, aResolvedSet(`{"git":{"deny":["push","skip-hooks"]}}`))
+	if _, err := aKeeper(store).Accept(context.Background(), pluginID, original); err != nil {
+		t.Fatal(err)
+	}
+	before := slices.Clone(store.files[shipID])
+	outcome, err := aKeeper(store).Accept(context.Background(), pluginID, strings.Replace(original, `["push","skip-hooks"]`, `["skip-hooks","push"]`, 1))
+	if outcome != Refused || !errors.Is(err, ErrRefused) || !slices.Equal(before, store.files[shipID]) {
+		t.Fatalf("Accept(reordered rules) = %v, %v, want refused with first-rule order unchanged", outcome, err)
+	}
+}

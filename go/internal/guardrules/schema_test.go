@@ -127,3 +127,36 @@ func TestRulesRejectUnknownMessageFieldsRegardlessOfCase(t *testing.T) {
 		t.Fatalf("Read(SETS) = %v, want refusal", err)
 	}
 }
+
+func aSetOfSize(size int) string {
+	base := aResolvedSet(`{"commands":{"deny":[{"command":"npm","args":[""]}]}}`)
+	return strings.Replace(base, `"args":[""]`, `"args":["`+strings.Repeat("x", size-len(base))+`"]`, 1)
+}
+
+func TestResolvedRulesFitThe64KiBBoundary(t *testing.T) {
+	for _, test := range []struct {
+		size      int
+		isRefused bool
+	}{{65536, false}, {65537, true}} {
+		// The two array brackets belong to the combined resolved sets.
+		_, err := Read(withSets(1, aSetOfSize(test.size-2)), configured)
+		if (err != nil) != test.isRefused {
+			t.Fatalf("Read(%d bytes of sets) = %v, refused want %v", test.size, err, test.isRefused)
+		}
+	}
+}
+
+func TestResolvedRulesLimitAppliesToAllSetsTogether(t *testing.T) {
+	_, err := Read(withSets(1, aSetOfSize(32767), aSetOfSize(32767)), configured)
+	if !errors.Is(err, ErrRefused) {
+		t.Fatalf("Read(65537 bytes across two sets) = %v, want refusal", err)
+	}
+}
+
+func TestResolvedRulesLimitCountsBytesRatherThanCharacters(t *testing.T) {
+	set := aResolvedSet(`{"commands":{"deny":[{"command":"npm","args":["` + strings.Repeat("é", 32768) + `"]}]}}`)
+	_, err := Read(withSets(1, set), configured)
+	if !errors.Is(err, ErrRefused) {
+		t.Fatalf("Read(UTF-8 rules over 64 KiB) = %v, want refusal", err)
+	}
+}

@@ -87,6 +87,7 @@ func TestRefusedGuardDeliveriesAreAcknowledgedWithoutChangingStoredRules(t *test
 		{"another sender", guardDelivery(argo, guardPayload)},
 		{"another fleet", guardDelivery(plugin, strings.ReplaceAll(guardPayload, fleet, "flt_01m3tb1zgr5h2ffee12xnch8sw"))},
 		{"invalid message", guardDelivery(plugin, "null")},
+		{"invalid nested rules", guardDelivery(plugin, strings.Replace(guardPayload, `"sets":[]`, `"sets":[{"name":"base","repository":"fleet/rules","commit":"8d41e07","file":"base.yaml","floor":true,"rules":{"git":{"deny":["unknown-action"]}}}]`, 1))},
 		{"older version", guardDelivery(plugin, strings.ReplaceAll(guardPayload, `"settingsVersion":3`, `"settingsVersion":2`))},
 	} {
 		t.Run(test.name, func(t *testing.T) {
