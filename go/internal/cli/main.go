@@ -132,6 +132,9 @@ type Machine struct {
 	StartedAt func(pid int) string
 	// Print writes a line to stdout at once, as logs --follow does for each line it follows.
 	Print func(line string)
+	// Stdin is what guard check reads its tool call from; Stderr is where it writes a refusal.
+	Stdin  io.ReadCloser
+	Stderr io.Writer
 }
 
 const usage = `Usage: aeolus-trierarch <command>
@@ -238,6 +241,10 @@ func Main(args []string, machine Machine) (string, int) {
 	}
 	if len(args) > 0 && args[0] == "proxy" {
 		return "", modelproxy.Main(args[1:], Version)
+	}
+	// Guard check is a session's hook, never a person's command: it answers only as the hook.
+	if len(args) > 1 && args[0] == "guard" && args[1] == "check" {
+		return guardCheckCommand(args[2:], machine)
 	}
 	command, ok := parse(args)
 	if !ok {

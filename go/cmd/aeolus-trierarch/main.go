@@ -186,6 +186,8 @@ func main() {
 		Print:      func(line string) { fmt.Fprintln(stdout, line) },
 		IsTerminal: isTerminal(os.Stdout),
 		StartedAt:  startedAt,
+		Stdin:      os.Stdin,
+		Stderr:     os.Stderr,
 		Detect: func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error) {
 			warn := func(line string) { fmt.Fprintln(os.Stderr, line) }
 			return detectionOf(at, environment(), home, warn).Detect(context.Background(), harnesses, by)

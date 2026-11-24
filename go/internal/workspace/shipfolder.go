@@ -146,6 +146,9 @@ func prepareShipFolder(shipFolder string, workspace reconciler.Workspace, madeMa
 	return folder, nil
 }
 
+// RepositoryFolders are the folders of the repositories the ship folder holds now, as repositoryFoldersIn finds them.
+func RepositoryFolders(folder string) ([]string, error) { return repositoryFoldersIn(folder) }
+
 // repositoryFoldersIn are the folders of the repositories the ship folder holds now: `main/`, then each sub-repository by its name. Only
 // a folder that is not there is none: one that cannot be read fails it, so no repository is left out of what its removal would discard.
 func repositoryFoldersIn(folder string) ([]string, error) {

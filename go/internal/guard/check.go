@@ -200,6 +200,10 @@ func (c Checker) record(result outcome) Refusal {
 	return refusal
 }
 
+// Failed is the answer that refuses a call guard check could not check, as
+// guard failed with the cause: before a Checker can run, it fails closed too.
+func Failed(cause string) Answer { return deny(failed(cause)) }
+
 // deny is the answer that refuses the call for the verdict.
 func deny(refusal *verdict) Answer {
 	message := "Refused by the guard: " + refusal.rule + "."
