@@ -102,6 +102,21 @@ type Harness interface {
 	NotOfferedReason() string
 }
 
+// Guarded is a harness whose sessions start with the guard (aeolus-fleet docs/design/guard, section 4.6).
+type Guarded interface {
+	// GuardProblem is why the entry's session cannot start guarded, as the settings it would load disable hooks; "" when it can.
+	GuardProblem(entry reconciler.Entry) string
+}
+
+// guardProblem is why the harness cannot start the entry's session guarded, "" when it can or has no guard yet.
+func guardProblem(harness Harness, entry reconciler.Entry) string {
+	guarded, ok := harness.(Guarded)
+	if !ok {
+		return ""
+	}
+	return guarded.GuardProblem(entry)
+}
+
 // Workspace makes and removes a ship's workspace, and lists every folder under the root.
 type Workspace interface {
 	// ShipFolderOf is the folder a ship crewed fresh keeps every file of its own in.
@@ -773,6 +788,10 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if problem := p.startProblem(entry, login); problem != "" {
 		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
 	}
+	// Settings that keep the guard from running are this computer's state too: given back before it registers (guard design 4.6).
+	if problem := guardProblem(harness, entry); problem != "" {
+		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
+	}
 	crewToken := entry.CrewToken
 	if !isUnderItsLease {
 		if crewToken, err = p.registered(entry); err != nil {
@@ -915,6 +934,9 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 	}
 	if err := harness.SessionDied(entry); err != nil {
 		return state, err
+	}
+	if problem := guardProblem(harness, entry); problem != "" {
+		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
 	}
 	launchID := p.NewLaunchID()
 	login := p.loginOf(entry)

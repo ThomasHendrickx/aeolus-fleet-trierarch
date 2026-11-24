@@ -89,11 +89,13 @@ func withSettings(t *testing.T, file string, text string) {
 
 func TestEverySettingsFileASessionLoadsThatDisablesHooksKeepsItFromStarting(t *testing.T) {
 	for name, fileOf := range map[string]func(Harness, string) string{
-		"user":              func(h Harness, _ string) string { return h.User },
-		"project":           func(_ Harness, folder string) string { return filepath.Join(folder, ".claude", "settings.json") },
-		"local":             func(_ Harness, folder string) string { return filepath.Join(folder, ".claude", "settings.local.json") },
-		"managed":           func(h Harness, _ string) string { return filepath.Join(h.Managed, "managed-settings.json") },
-		"managed drop-in":   func(h Harness, _ string) string { return filepath.Join(h.Managed, "managed-settings.d", "50-hooks.json") },
+		"user":    func(h Harness, _ string) string { return h.User },
+		"project": func(_ Harness, folder string) string { return filepath.Join(folder, ".claude", "settings.json") },
+		"local":   func(_ Harness, folder string) string { return filepath.Join(folder, ".claude", "settings.local.json") },
+		"managed": func(h Harness, _ string) string { return filepath.Join(h.Managed, "managed-settings.json") },
+		"managed drop-in": func(h Harness, _ string) string {
+			return filepath.Join(h.Managed, "managed-settings.d", "50-hooks.json")
+		},
 		"the configuration": func(h Harness, folder string) string { return filepath.Join(folder, "configured.json") },
 	} {
 		t.Run(name, func(t *testing.T) {
