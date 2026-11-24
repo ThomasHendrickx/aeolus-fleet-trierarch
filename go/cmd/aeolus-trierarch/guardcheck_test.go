@@ -34,8 +34,8 @@ func aStuckGuardCheck(t *testing.T) *exec.Cmd {
 	return command
 }
 
-// exitOf runs the command to its end, at most 15 seconds: how it exited and after how long.
-func exitOf(t *testing.T, command *exec.Cmd) (error, time.Duration) {
+// exitOf runs the command to its end, at most 15 seconds: after how long, and how it exited.
+func exitOf(t *testing.T, command *exec.Cmd) (time.Duration, error) {
 	t.Helper()
 	started := time.Now()
 	done := make(chan error, 1)
@@ -45,11 +45,11 @@ func exitOf(t *testing.T, command *exec.Cmd) (error, time.Duration) {
 	go func() { done <- command.Wait() }()
 	select {
 	case err := <-done:
-		return err, time.Since(started)
+		return time.Since(started), err
 	case <-time.After(15 * time.Second):
 		_ = command.Process.Kill()
 		t.Fatal("guard check still ran 15 seconds after it started")
-		return nil, 0
+		return 0, nil
 	}
 }
 
@@ -68,7 +68,7 @@ func TestGuardCheckExitsAtItsDeadlineWhenItsWorkIsStuck(t *testing.T) {
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 
-	err, took := exitOf(t, command)
+	took, err := exitOf(t, command)
 
 	if exitCodeOf(err) != 2 || strings.TrimSpace(stderr.String()) != "Refused by the guard: guard failed: deadline." {
 		t.Fatalf("guard check = %v, %q, want exit 2 and the deadline refusal", err, stderr.String())
@@ -100,7 +100,7 @@ func TestGuardCheckExitsWithinItsDeadlineWhenItsAnswerCannotBeWritten(t *testing
 	}
 	command.Stderr, command.Stdout = writer, io.Discard
 
-	err, took := exitOf(t, command)
+	took, err := exitOf(t, command)
 	_ = writer.Close()
 
 	if exitCodeOf(err) != 2 || took > 5500*time.Millisecond {
