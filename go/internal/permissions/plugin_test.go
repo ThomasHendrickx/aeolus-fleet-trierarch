@@ -31,6 +31,7 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var mu sync.Mutex
+			var asks []json.RawMessage
 			var sends []struct{ ContentType, Payload, Model string }
 			fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/ship/whoami" {
@@ -38,6 +39,16 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 					return
 				}
 				switch r.URL.Path {
+				case "/api/v1/ship/ask":
+					var asked json.RawMessage
+					if err := json.NewDecoder(r.Body).Decode(&asked); err != nil {
+						t.Error(err)
+					}
+					mu.Lock()
+					asks = append(asks, asked)
+					mu.Unlock()
+					fmt.Fprint(w, `{"messageId":"msg_01m6jyczpnpp5c0vxh54c966cx"}`)
+					return
 				case "/api/v1/ship/pushReceive":
 					_ = json.NewEncoder(w).Encode(map[string]any{"deliveries": []any{map[string]any{"deliveryId": "dlv_01m6jyczpnpp5c0vxh54c966cw", "messageId": "msg_01m6jyczpnpp5c0vxh54c966cx", "senderName": "orchestrator-1", "payload": strings.Repeat("x", 1025), "contentType": "text/plain", "attempts": 1}}})
 					return
@@ -96,12 +107,13 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if len(sends) != 2 || sends[0].ContentType != "application/vnd.aeolus.question+json" || sends[1].ContentType != "application/vnd.aeolus.question-withdrawal+json" {
-				t.Fatalf("sends = %+v", sends)
+			if len(asks) != 1 || len(sends) != 1 || sends[0].ContentType != "application/vnd.aeolus.question-withdrawal+json" {
+				t.Fatalf("asks = %s, sends = %+v", asks, sends)
 			}
 			var question struct {
-				ID, Title, Context string
-				Options            []struct {
+				ID, Title, Context, Model string
+				Selector                  struct{ Kind, ShipID string }
+				Options                   []struct {
 					Key           int
 					Label, Detail string
 				}
@@ -110,11 +122,14 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 					Why    string
 				}
 			}
-			if err := json.Unmarshal([]byte(sends[0].Payload), &question); err != nil {
+			if err := json.Unmarshal(asks[0], &question); err != nil {
 				t.Fatal(err)
 			}
-			if question.ID != id || question.Title != test.title || sends[0].Model != "claude-opus-5-5" || sends[1].Model != "claude-opus-5-5" {
-				t.Fatalf("question %+v, models %q %q", question, sends[0].Model, sends[1].Model)
+			if question.ID != id || question.Title != test.title || question.Model != "claude-opus-5-5" || sends[0].Model != "claude-opus-5-5" {
+				t.Fatalf("question %+v, withdrawal model %q", question, sends[0].Model)
+			}
+			if question.Selector.Kind != "ship" || question.Selector.ShipID != "shp_01m6jyczpnpp5c0vxh54c966cz" {
+				t.Fatalf("question recipient = %+v, want the ship's owner", question.Selector)
 			}
 			if len(question.Options) != 3 || question.Options[0].Label != "Allow once" || question.Options[1].Label != "Allow for this session" || !strings.Contains(question.Options[1].Detail, test.rule) || question.Options[2].Label != "Deny" || question.Pick.Option != 3 || question.Pick.Why != "nothing runs without your yes" {
 				t.Fatalf("options/pick = %+v", question)

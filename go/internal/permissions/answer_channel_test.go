@@ -29,17 +29,16 @@ func TestAnOwnersAnswerTravelsFromThePluginStoreThroughThePrivateChannel(t *test
 				switch r.URL.Path {
 				case "/api/v1/ship/whoami":
 					fmt.Fprint(w, `{"ownerShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","ownerName":"person"}`)
-				case "/api/v1/ship/send":
-					var message struct{ ContentType, Payload string }
-					_ = json.NewDecoder(r.Body).Decode(&message)
-					if message.ContentType == "application/vnd.aeolus.question+json" {
-						var q struct{ ID string }
-						_ = json.Unmarshal([]byte(message.Payload), &q)
-						payload, _ := json.Marshal(Answer{QuestionID: q.ID, Option: option, Note: "owner note"})
-						pending = append(pending, map[string]any{"deliveryId": "dlv_01m6jyczpnpp5c0vxh54c966cw", "messageId": "msg_01m6jyczpnpp5c0vxh54c966cu", "senderShipId": "shp_01m6jyczpnpp5c0vxh54c966cz", "senderName": "person", "contentType": "application/vnd.aeolus.answer+json", "inReplyTo": "msg_01m6jyczpnpp5c0vxh54c966cx", "payload": string(payload)})
-					} else {
-						withdrawals++
+				case "/api/v1/ship/ask":
+					var q struct{ ID string }
+					if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+						t.Error(err)
 					}
+					payload, _ := json.Marshal(Answer{QuestionID: q.ID, Option: option, Note: "owner note"})
+					pending = append(pending, map[string]any{"deliveryId": "dlv_01m6jyczpnpp5c0vxh54c966cw", "messageId": "msg_01m6jyczpnpp5c0vxh54c966cu", "senderShipId": "shp_01m6jyczpnpp5c0vxh54c966cz", "senderName": "person", "contentType": "application/vnd.aeolus.answer+json", "inReplyTo": "msg_01m6jyczpnpp5c0vxh54c966cx", "payload": string(payload)})
+					fmt.Fprint(w, `{"messageId":"msg_01m6jyczpnpp5c0vxh54c966cx"}`)
+				case "/api/v1/ship/send":
+					withdrawals++
 					fmt.Fprint(w, `{"messageId":"msg_01m6jyczpnpp5c0vxh54c966cx"}`)
 				case "/api/v1/ship/pushReceive":
 					_ = json.NewEncoder(w).Encode(map[string]any{"deliveries": pending})
