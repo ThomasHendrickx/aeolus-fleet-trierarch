@@ -139,6 +139,50 @@ func TestGuardCheckRefusesEveryCallOfAShipItDoesNotCrew(t *testing.T) {
 	}
 }
 
+func TestGuardCheckKeepsTheRefusalOfAKnownShipItCouldNotCheck(t *testing.T) {
+	for cause, breakIt := range map[string]func(t *testing.T, at paths.Paths, folder string){
+		"state unreadable": func(t *testing.T, at paths.Paths, _ string) {
+			if err := os.WriteFile(at.State, []byte("no state"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"ship not crewed here": func(t *testing.T, at paths.Paths, _ string) {
+			if err := (state.File{Path: at.State}).Save(reconciler.Empty()); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"ship's folder unreadable": func(t *testing.T, _ paths.Paths, folder string) {
+			if err := os.Chmod(folder, 0o000); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(folder, 0o700) })
+		},
+	} {
+		t.Run(cause, func(t *testing.T) {
+			machine, at, folder := aGuardedShip(t, noPublishRules)
+			breakIt(t, at, folder)
+
+			_, stderr, code := guardCheck(machine, guardedShip, aHookCall(t, folder, "Read", map[string]any{"file_path": "README.md"}))
+
+			refusals := refusalsOf(t, at, guardedShip)
+			if want := "guard failed: " + cause; code != 2 || len(refusals) != 1 || refusals[0]["rule"] != want || refusals[0]["at"] == nil {
+				t.Fatalf("guard check = %q, %d, refusals %v, want exit 2 and the refusal kept as %q", stderr, code, refusals, want)
+			}
+		})
+	}
+}
+
+func TestGuardCheckKeepsNoRefusalForAShipWithoutAGuardFolder(t *testing.T) {
+	machine, at, folder := aGuardedShip(t, noPublishRules)
+	stranger := "shp_01m6jyczpnpp5c0vxh54c966cx"
+
+	_, _, code := guardCheck(machine, stranger, aHookCall(t, folder, "Read", map[string]any{"file_path": "README.md"}))
+
+	if _, err := os.Stat(filepath.Join(at.Guard, stranger)); code != 2 || !os.IsNotExist(err) {
+		t.Fatalf("guard check exited %d, guard folder %v, want exit 2 and no guard folder made", code, err)
+	}
+}
+
 func TestGuardCheckRefusesACallWithoutAShip(t *testing.T) {
 	machine, _, folder := aGuardedShip(t, noPublishRules)
 
