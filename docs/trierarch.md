@@ -346,6 +346,54 @@ A ship crewed by hand before its trierarch crews it counts as crewed: the triera
 
 The trierarch's own ship takes no work by message: a ping gets pong, and any other delivery is acknowledged and logged as not handled. Only the crew requests assigned to it start or stop a session on the machine.
 
+### The guard check
+
+`aeolus-trierarch guard check` checks one tool call of a guarded session before it runs, against the guard's own protection and the rule sets kept for the session (aeolus-fleet docs/design/guard, sections 4.1 and 4.6). It reads Claude Code's PreToolUse hook input and answers within its own 5-second deadline. A call it lets run gets no answer and exit code 0. A call it refuses gets Claude Code's deny, the same reason on stderr and exit code 2, so neither a deny nor the blocking code lets it through: `Refused by the guard: tools.deny web, in no-web @ 8d41e07.`, or for a refusal by the mechanism itself, which names no set and no commit, `Refused by the guard: unknown tool: Teleport.` Anything that goes wrong refuses the call as `guard failed: <cause>`: input it cannot read, rules it cannot read or decode (a field the rule set file does not have too, and a git action off the closed list, such as `pussh`), shell input that does not parse, a refusal it cannot record (`refusal unrecorded`), a panic and its deadline. Recording a refusal runs within the same deadline and panic recovery, so a record that hangs or panics is refused as `guard failed: deadline` or `guard failed: panic`.
+
+Each tool is checked as a harness-neutral kind. Claude Code's tools map so; an MCP tool `mcp__<server>__<tool>` is `mcp:<server>/<tool>`, and any other tool is unknown, refused as `unknown tool: <name>` while any rule set applies (AskUserQuestion, EnterPlanMode and ExitPlanMode among them, which every Claude Code session disallows anyway):
+
+| Tool | Kind |
+| --- | --- |
+| `Bash` | `shell` |
+| `BashOutput` | `shell` |
+| `KillShell` | `shell` |
+| `Write` | `file-write` |
+| `Edit` | `file-write` |
+| `MultiEdit` | `file-write` |
+| `NotebookEdit` | `file-write` |
+| `Read` | `file-read` |
+| `Glob` | `file-read` |
+| `Grep` | `file-read` |
+| `LS` | `file-read` |
+| `NotebookRead` | `file-read` |
+| `Skill` | `file-read` |
+| `ToolSearch` | `file-read` |
+| `SlashCommand` | `file-read` |
+| `TodoWrite` | `file-read` |
+| `WebFetch` | `web` |
+| `WebSearch` | `web` |
+| `Task` | `agent` |
+| `Agent` | `agent` |
+
+Skill, ToolSearch and SlashCommand only read text into the session, and TodoWrite changes only the session's own list. `tools.deny` and `tools.allow` match kinds, `*` standing for any characters (`mcp:linear/*`). Every set refuses on its own: a call runs only when each set lets it, and the first refusing rule names the refusal.
+
+The checks run in this order, the first refusal naming the call's:
+
+1. The guard's own protection, whatever the rules: a write to the guard's state folder, the trierarch's configuration, `~/.claude/settings*.json` or any `.claude/settings*.json` in the ship's folder is refused as `protected: <path>`. A write that reaches everything under its target (`rm`, `rmdir`, `mv` of a source, `chmod`, a glob) is protected when its target is such a file, a folder of the protected path's own (`rm -rf ~/.claude`, `rm -rf ~`), or a `.claude` folder in the ship's folder; a folder that only holds one further down (`rm -rf node_modules`) is not.
+2. While any rule set applies: an unknown tool, then what cannot be resolved before it runs, `unresolvable: <what>`.
+3. The boundary, also with no rule sets: every write target must lie inside the ship's folder or its repositories, else `outside the boundary: <path>`.
+4. Each set on its own: its tools, then for each command the shell runs its commands and git rules, then for each write its `writePaths`.
+
+The shell input is parsed as bash: lists, pipelines, subshells, blocks, `if`, `while`, `for`, `case`, function bodies, command and process substitution, and here documents that expand are all read for the commands they run. Read again as shell input, when literal: `sh -c` and `bash -c` (and dash, zsh, ksh, mksh, ash, rbash), `eval`, an alias's value (checked when it is defined), a `trap` action, `watch`, `env -S`, a shell's script from a literal here document or here string, and a git `!alias` from `git -c`. Read through to the command they run: `env`, `command`, `builtin`, `exec`, `nohup`, `time`, `setsid`, `stdbuf`, `nice`, `timeout`, `sudo`, `doas`, `xargs` and `find -exec`; an option of one the guard cannot read is unresolvable. Unresolvable while any set applies: a command name that is not literal (a variable, a substitution, ANSI-C quoting, a glob, brace expansion), `eval`, `source` or `.` of a non-literal, `sh -c` of a non-literal, a shell reading its script from a pipe or an expanding here document, an alias or trap that is not literal, `xargs` or `find -exec` running a non-literal, interpreter code that is not literal (`python -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`, `lua -e`, `Rscript -e`), and an argument a command rule compares that is not literal. What runs as a program is not read: a script file (`sh build.sh`, `./build.sh`, `source ./env.sh`) and literal interpreter code (`python3 -c 'print(1)'`).
+
+A command rule matches the command's name without its folder and its first arguments, literal. `commands.allow` names every command that may run, shell builtins and `export` too, and the wrappers around a command as well as the command.
+
+Git actions are read from the git command after its global options (`-C`, `-c`, `--git-dir`, `--work-tree`, `--no-pager` and the others git has; an option the guard does not know is unresolvable) and its environment. Long options count in every abbreviation git accepts (`--forc`, `--no-verif`), short ones in clusters (`-uf`, `-anm`). `-c core.hooksPath=`, `--config-env=core.hooksPath=`, `GIT_CONFIG_KEY_<n>=core.hooksPath` and `GIT_CONFIG_PARAMETERS` naming it are skip-hooks, set as a prefix, through `env` or by `export` earlier in the input; any use of `core.hooksPath` in `git config` too. `git -c alias.<name>=` is resolved. Unresolvable while the set has git rules: a git command that is no command of git's own (an alias from configuration, a `git-<name>` program), `GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM` and `GIT_EXEC_PATH`, a `GIT_CONFIG_*` value or alias the guard cannot read, a subcommand that is not literal, and, in a git command that can make a denied action (push, send-pack, commit, merge, pull, am, rebase, branch, remote, config, reset, update-ref), a word that is not literal and is no message, file, author, date or template value. An action already denied is named before what cannot be resolved.
+
+Write targets are the file tools' paths, redirections (`/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/tty`, `/dev/zero` and `/dev/fd/<n>` excepted, as a duplicated file descriptor is), and the operands of `rm`, `rmdir`, `touch`, `mkdir`, `tee`, `chmod`, `sed -i`, and the destination of `cp`, `mv` and `ln` (each source as it lands in a destination folder too, and the sources of `mv`). Each is made absolute from the session's working folder, as `cd` and `pushd` with a literal folder change it (in a subshell or pipeline only there; after a branch only what both paths agree on), `~` and variables set to literal values earlier in the input (and `HOME`) put in, `..` removed, and every symbolic link followed, those a literal `ln` in the same call makes too; the link a write makes or removes itself (`ln`, `rm`, `mv` of a source) is not followed. A glob's target is the folder its matches lie in. A target that cannot be resolved (a variable the guard does not know, a substitution, a relative path after `cd` to a non-literal folder) is unresolvable while any set applies, and runs without rule sets. `writePaths` globs are relative to the repository a target lies in, `**` standing for any number of folders: a write inside a repository must match an `allow` glob when there are any and no `deny` glob; a write in the ship's folder outside every repository is refused while `allow` has globs.
+
+What the guard cannot see: what a program does once it runs (a script it wrote, an interpreter's own code, a build tool), a folder that only holds a protected file further down, aliases and git configuration set before the call, and a file another tool writes on its own. The guard checks the call, not the program; a container session (decision 0039) limits what that program reaches, and a repository's own branch protection limits a push. A session on the host can reach the guard's files through such a program; only a container session cannot reach them at all.
+
 ### Crashed and Restart
 
 A session that dies is restarted by the trierarch on its own. When its restart budget is spent, the trierarch writes status `crashed` and sends the ship's owner a plain-text report naming the ship, how often its session crashed and why its last start (#397) or turn failed: a human decides. For Claude Code, Codex and Copilot, the latest failed turn reason also appears in the blocked status. Before either report, secrets and URL credentials are replaced with `[redacted]`, whitespace is collapsed to one line, and the reason is capped at 200 characters, ending in an ellipsis when shortened. A later successful turn clears an earlier error, including as the cause of a start. The operator's Restart writes the request again as an exact copy, and Edit writes it with new settings: either is a new settings version. The trierarch treats a new version of its crew record as the signal: it stops the running session and crews the ship again with that version, in the same ship folder (The ship folder above), as a first start: a fresh session with that version's first prompt, never the old conversation continued (#443). A crashed request starts again with a fresh restart budget. It is no release: the ship is crewed again under the lease it holds, with the crew token the state keeps, since core removes the crew request on a release (#367), and its repositories stay.

@@ -1,0 +1,222 @@
+package guard
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestACallNoRuleRefusesRunsWithoutAnAnswer(t *testing.T) {
+	checker, refusals := aChecker(aSet("no-web", "8d41e07aa", `{"tools":{"deny":["web"]}}`))
+
+	allowed(t, checker, aCall("Read", map[string]any{"file_path": repository + "/README.md"}))
+	if len(refusals.refusals) != 0 {
+		t.Errorf("an allowed call recorded %v, want no refusal", refusals.refusals)
+	}
+}
+
+func TestARefusalNamesTheRuleTheSetAndItsShortCommit(t *testing.T) {
+	checker, _ := aChecker(aSet("no-web", "8d41e07aa1b2", `{"tools":{"deny":["web"]}}`))
+
+	refusedAs(t, checker, aCall("WebFetch", map[string]any{"url": "https://example.com"}), "Refused by the guard: tools.deny web, in no-web @ 8d41e07.")
+}
+
+func TestARefusalIsRecordedWithTheRuleSetCommitAndTheCallCutTo200Characters(t *testing.T) {
+	checker, refusals := aChecker(aSet("no-web", "8d41e07aa1b2", `{"tools":{"deny":["web"]}}`))
+	url := "https://example.com/" + strings.Repeat("x", 300)
+
+	check(t, checker, aCall("WebFetch", map[string]any{"url": url}))
+
+	set, commit := "no-web", "8d41e07aa1b2"
+	want := Refusal{At: checkedAt, Tool: "WebFetch", Rule: "tools.deny web", Set: &set, Commit: &commit, Summary: (`{"url":"` + url)[:200]}
+	if len(refusals.refusals) != 1 || !sameRefusal(refusals.refusals[0], want) {
+		t.Errorf("recorded %+v, want %+v", refusals.refusals, want)
+	}
+}
+
+func TestARefusalByTheMechanismRecordsNoSetAndNoCommit(t *testing.T) {
+	checker, refusals := aChecker()
+	checker.Sets = memorySets{err: errors.New("rules.json: permission denied")}
+
+	check(t, checker, aShellCall("ls"))
+
+	if len(refusals.refusals) != 1 {
+		t.Fatalf("recorded %v, want one refusal", refusals.refusals)
+	}
+	encoded, err := json.Marshal(refusals.refusals[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"at":"2026-11-24T21:00:00Z","tool":"Bash","rule":"guard failed: rules unreadable","set":null,"commit":null,"summary":"ls"}`
+	if string(encoded) != want {
+		t.Errorf("recorded %s, want %s", encoded, want)
+	}
+}
+
+func TestTheGuardFailsClosed(t *testing.T) {
+	tests := []struct {
+		name, call, want string
+		sets             SetSource
+	}{
+		{"on input it cannot read", "not json", "Refused by the guard: guard failed: input unreadable.", nil},
+		{"on input without a tool", `{"tool_input":{}}`, "Refused by the guard: guard failed: input unreadable.", nil},
+		{"on rules it cannot read", aShellCall("ls"), "Refused by the guard: guard failed: rules unreadable.", memorySets{err: errors.New("gone")}},
+		{"on rules it cannot decode", aShellCall("ls"), "Refused by the guard: guard failed: rules unreadable.", memorySets{sets: []json.RawMessage{json.RawMessage(`{"name":1}`)}}},
+		{"on a rule type it does not know", aShellCall("ls"), "Refused by the guard: guard failed: rules unreadable.", memorySets{sets: []json.RawMessage{aSet("odd", "abc", `{"reads":{"deny":["x"]}}`)}}},
+		{"on a git action not on the closed list", aShellCall("ls"), "Refused by the guard: guard failed: rules unreadable.", memorySets{sets: []json.RawMessage{aSet("typo", "abc", `{"git":{"deny":["pussh"]}}`)}}},
+		{"on a command it cannot parse", aShellCall("echo 'unterminated"), "Refused by the guard: guard failed: shell input unparsable.", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checker, _ := aChecker()
+			if tt.sets != nil {
+				checker.Sets = tt.sets
+			}
+			refusedAs(t, checker, tt.call, tt.want)
+		})
+	}
+}
+
+// panickingSets stands for a check that breaks while it runs.
+type panickingSets struct{}
+
+func (panickingSets) Sets(context.Context) ([]json.RawMessage, error) { panic("broken") }
+
+func TestTheGuardFailsClosedOnAPanic(t *testing.T) {
+	checker, _ := aChecker()
+	checker.Sets = panickingSets{}
+
+	refusedAs(t, checker, aShellCall("ls"), "Refused by the guard: guard failed: panic.")
+}
+
+// blockingSets never answers until released.
+type blockingSets struct{ release chan struct{} }
+
+func (b blockingSets) Sets(context.Context) ([]json.RawMessage, error) {
+	<-b.release
+	return nil, nil
+}
+
+func TestTheGuardRefusesAtItsOwnDeadline(t *testing.T) {
+	checker, _ := aChecker()
+	sets := blockingSets{release: make(chan struct{})}
+	t.Cleanup(func() { close(sets.release) })
+	checker.Sets = sets
+	checker.Deadline = 20 * time.Millisecond
+
+	refusedAs(t, checker, aShellCall("ls"), "Refused by the guard: guard failed: deadline.")
+}
+
+func TestTheDeadlineIsFiveSecondsUnlessSet(t *testing.T) {
+	if got := (Checker{}).deadline(); got != 5*time.Second {
+		t.Errorf("deadline() = %v, want 5s", got)
+	}
+}
+
+func sameRefusal(got, want Refusal) bool {
+	return got.At.Equal(want.At) && got.Tool == want.Tool && got.Rule == want.Rule &&
+		equalPointer(got.Set, want.Set) && equalPointer(got.Commit, want.Commit) && got.Summary == want.Summary
+}
+
+func equalPointer(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// stuckRefusals never keeps a refusal until released.
+type stuckRefusals struct{ release chan struct{} }
+
+func (s stuckRefusals) Append(context.Context, Refusal) error {
+	<-s.release
+	return nil
+}
+
+// panickingRefusals breaks while it keeps a refusal.
+type panickingRefusals struct{}
+
+func (panickingRefusals) Append(context.Context, Refusal) error { panic("broken") }
+
+// failingRefusals cannot keep a refusal.
+type failingRefusals struct{}
+
+func (failingRefusals) Append(context.Context, Refusal) error {
+	return errors.New("refusals.jsonl: disk full")
+}
+
+func TestARefusalTheGuardCannotRecordIsRefusedAsGuardFailed(t *testing.T) {
+	stuck := stuckRefusals{release: make(chan struct{})}
+	t.Cleanup(func() { close(stuck.release) })
+	tests := []struct {
+		name     string
+		refusals RefusalLog
+		want     string
+	}{
+		{"when recording hangs past the deadline", stuck, "Refused by the guard: guard failed: deadline."},
+		{"when recording panics", panickingRefusals{}, "Refused by the guard: guard failed: panic."},
+		{"when recording fails", failingRefusals{}, "Refused by the guard: guard failed: refusal unrecorded."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checker, _ := aChecker(aSet("no-web", "8d41e07aa1b2", `{"tools":{"deny":["web"]}}`))
+			checker.Refusals = tt.refusals
+			checker.Deadline = 20 * time.Millisecond
+
+			answered := make(chan Answer, 1)
+			go func() { answered <- check(t, checker, aCall("WebFetch", map[string]any{"url": "https://example.com"})) }()
+			select {
+			case answer := <-answered:
+				if got := reason(t, answer); got != tt.want {
+					t.Errorf("check refused as %q, want %q", got, tt.want)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("check gave no answer within a second, want a refusal by its deadline")
+			}
+		})
+	}
+}
+
+// stalledInput is a harness that never sends its call: a read waits until
+// the input is closed.
+type stalledInput struct {
+	closed   chan struct{}
+	once     sync.Once
+	returned chan struct{}
+}
+
+func newStalledInput() *stalledInput {
+	return &stalledInput{closed: make(chan struct{}), returned: make(chan struct{})}
+}
+
+func (s *stalledInput) Read([]byte) (int, error) {
+	<-s.closed
+	close(s.returned)
+	return 0, io.ErrClosedPipe
+}
+
+func (s *stalledInput) Close() error {
+	s.once.Do(func() { close(s.closed) })
+	return nil
+}
+
+func TestAStalledInputIsRefusedAtTheDeadlineAndLeftWithNoReadRunning(t *testing.T) {
+	checker, _ := aChecker()
+	checker.Deadline = 20 * time.Millisecond
+	input := newStalledInput()
+	t.Cleanup(func() { _ = input.Close() })
+
+	if got := reason(t, checker.Check(context.Background(), input)); got != "Refused by the guard: guard failed: deadline." {
+		t.Errorf("check of a stalled input refused as %q, want guard failed: deadline", got)
+	}
+	select {
+	case <-input.returned:
+	default:
+		t.Error("a read of the stalled input still runs after check answered, want it stopped")
+	}
+}
