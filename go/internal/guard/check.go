@@ -101,29 +101,55 @@ func (c Checker) deadline() time.Duration {
 }
 
 // Check reads the call from input and answers within the deadline. Anything
-// that goes wrong refuses the call: the guard fails closed.
+// that goes wrong refuses the call: the guard fails closed. Recording a
+// refusal runs within the same deadline and recovery, so a refusal it cannot
+// record is refused as guard failed.
 func (c Checker) Check(ctx context.Context, input io.Reader) Answer {
 	bounded, cancel := context.WithTimeout(ctx, c.deadline())
 	defer cancel()
-	done := make(chan outcome, 1)
-	go func() {
-		defer func() {
-			if recover() != nil {
-				done <- outcome{refusal: failed("panic")}
-			}
-		}()
-		done <- c.evaluate(bounded, input)
-	}()
-	var result outcome
-	select {
-	case result = <-done:
-	case <-bounded.Done():
-		result = outcome{refusal: failed("deadline")}
+	result, cause := guarded(bounded, func() outcome { return c.evaluate(bounded, input) })
+	if cause != "" {
+		result = outcome{refusal: failed(cause)}
 	}
 	if result.refusal == nil {
 		return Answer{}
 	}
-	return c.refuse(context.WithoutCancel(ctx), result)
+	if bounded.Err() != nil {
+		return deny(failed("deadline"))
+	}
+	err, cause := guarded(bounded, func() error { return c.Refusals.Append(bounded, c.record(result)) })
+	if cause == "" && err != nil {
+		cause = "refusal unrecorded"
+	}
+	if cause != "" {
+		return deny(failed(cause))
+	}
+	return deny(result.refusal)
+}
+
+// guarded runs step within ctx's deadline and its own panic recovery. The
+// cause is why it gave no result, "" when it did.
+func guarded[T any](ctx context.Context, step func() T) (T, string) {
+	type ended struct {
+		result T
+		cause  string
+	}
+	done := make(chan ended, 1)
+	go func() {
+		defer func() {
+			if recover() != nil {
+				done <- ended{cause: "panic"}
+			}
+		}()
+		done <- ended{result: step()}
+	}()
+	select {
+	case end := <-done:
+		return end.result, end.cause
+	case <-ctx.Done():
+		var none T
+		return none, "deadline"
+	}
 }
 
 func (c Checker) evaluate(ctx context.Context, input io.Reader) outcome {
@@ -145,16 +171,21 @@ func (c Checker) evaluate(ctx context.Context, input io.Reader) outcome {
 	return outcome{call: read, refusal: c.judge(ctx, read, sets)}
 }
 
-func (c Checker) refuse(ctx context.Context, result outcome) Answer {
+// record is the refusal as the guard keeps it.
+func (c Checker) record(result outcome) Refusal {
 	refusal := Refusal{At: c.Now(), Tool: result.call.tool, Rule: result.refusal.rule, Summary: cut(result.call.summary(), summaryLength)}
-	message := "Refused by the guard: " + result.refusal.rule + "."
 	if set := result.refusal.set; set != nil {
 		refusal.Set, refusal.Commit = &set.Name, &set.Commit
-		message = fmt.Sprintf("Refused by the guard: %s, in %s @ %s.", result.refusal.rule, set.Name, cut(set.Commit, 7))
 	}
-	// The call is refused whether or not the record is kept: a guard that
-	// cannot write its record still never lets the call through.
-	_ = c.Refusals.Append(ctx, refusal)
+	return refusal
+}
+
+// deny is the answer that refuses the call for the verdict.
+func deny(refusal *verdict) Answer {
+	message := "Refused by the guard: " + refusal.rule + "."
+	if set := refusal.set; set != nil {
+		message = fmt.Sprintf("Refused by the guard: %s, in %s @ %s.", refusal.rule, set.Name, cut(set.Commit, 7))
+	}
 	decision, err := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{
 		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": message,
 	}})
