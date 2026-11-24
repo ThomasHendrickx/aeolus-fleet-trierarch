@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardrules"
 )
 
@@ -137,5 +139,37 @@ func TestTheKeptVersionIsTheSettingsVersionOfTheRulesKeptForTheShip(t *testing.T
 
 	if version != 3 || !ok || err != nil {
 		t.Fatalf("KeptVersion = %d, %v, %v, want 3", version, ok, err)
+	}
+}
+
+func TestTheGuardStatusIsTheKeptSetsAndTheLastTwentyRefusals(t *testing.T) {
+	ships := filepath.Join(t.TempDir(), "ships")
+	store := Store{Ships: ships}
+	if err := store.Write(context.Background(), shipID, []byte(payload)); err != nil {
+		t.Fatal(err)
+	}
+	refusals := Refusals{Ships: ships, ShipID: shipID}
+	set, commit := "no-push", "8d41e079bd56801e1e2acf18f094c22ade5ec8a9"
+	for second := range 21 {
+		refusal := guard.Refusal{At: time.Date(2026, 11, 24, 21, 0, second, 0, time.UTC), Tool: "Bash", Rule: "git.deny push", Set: &set, Commit: &commit, Summary: "git push"}
+		if second == 20 {
+			refusal = guard.Refusal{At: time.Date(2026, 11, 24, 21, 0, second, 0, time.UTC), Tool: "Write", Rule: "protected: /home/crew/.claude/settings.json", Summary: "{}"}
+		}
+		if err := refusals.Append(context.Background(), refusal); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	status, ok, err := store.GuardStatus(context.Background(), shipID)
+
+	if err != nil || !ok {
+		t.Fatalf("GuardStatus = %v, %v, want a status", ok, err)
+	}
+	if len(status.Sets) != 1 || status.Sets[0] != (guard.AppliedSet{Name: "no-push", Repository: "fleet/rules", Commit: commit, Floor: true}) {
+		t.Fatalf("sets = %+v, want the kept no-push set", status.Sets)
+	}
+	last := status.Recent[len(status.Recent)-1]
+	if status.Refusals != 21 || len(status.Recent) != 20 || status.Recent[0].At.Second() != 1 || last.Tool != "Write" || last.Set != nil || last.Commit != nil {
+		t.Fatalf("status = %d refusals, %+v, want 21 and the last twenty, the mechanism's with no set", status.Refusals, status.Recent)
 	}
 }
