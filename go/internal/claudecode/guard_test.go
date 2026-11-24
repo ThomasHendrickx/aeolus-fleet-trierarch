@@ -141,3 +141,17 @@ func TestSettingsThatKeepHooksOrThatTheSessionDoesNotLoadLetItStart(t *testing.T
 		t.Fatalf("GuardProblem = %q, want none", got)
 	}
 }
+
+func TestASessionInAContainerStartsWithoutTheGuardWhichDoesNotReachItYet(t *testing.T) {
+	harness, running := aGuardedHarness(t)
+	harness.Homes = t.TempDir()
+	entry := anEntry(t)
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if command := running.started[0].Command; slices.Contains(command, "--settings") {
+		t.Fatalf("command %q, want no guard settings in a container", command)
+	}
+}

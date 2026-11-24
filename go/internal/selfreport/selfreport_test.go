@@ -114,6 +114,7 @@ func TestDetailsSayWhatTheMachineOffers(t *testing.T) {
 	  "logins": [],
 	  "machine": {"os": "macos", "arch": "arm64"},
 	  "runtime": "container",
+	  "guardedHarnesses": [],
 	  "version": "0.40.0"
 	}`
 	assertJSON(t, got, want)
@@ -635,5 +636,32 @@ func TestMissingPastaRuleDoesNotPreventStoppedMachineReport(t *testing.T) {
 	}
 	if got := asJSON(t, report)["details"].(map[string]any)["harnesses"]; !reflect.DeepEqual(got, []any{}) {
 		t.Fatalf("harnesses = %v, want none", got)
+	}
+}
+
+func TestClaudeCodeOfferedOnTheHostIsAGuardedHarness(t *testing.T) {
+	got := detailsJSON(t, anInput())["guardedHarnesses"]
+
+	if !reflect.DeepEqual(got, []any{"claude-code"}) {
+		t.Fatalf("guardedHarnesses = %v, want [claude-code]", got)
+	}
+}
+
+func TestAHarnessWithoutAGuardOrNotOfferedIsNoGuardedHarness(t *testing.T) {
+	in := anInput()
+	in.Configuration.Harnesses = map[string]config.Harness{"codex": {}}
+	in.Harnesses = []string{"codex"}
+
+	if got := detailsJSON(t, in)["guardedHarnesses"]; !reflect.DeepEqual(got, []any{}) {
+		t.Fatalf("guardedHarnesses = %v, want none", got)
+	}
+}
+
+func TestClaudeCodeInContainersIsNoGuardedHarnessUntilItsGuardReachesThem(t *testing.T) {
+	in := anInput()
+	in.Configuration.Runtime = &config.Runtime{Kind: "container"}
+
+	if got := detailsJSON(t, in)["guardedHarnesses"]; !reflect.DeepEqual(got, []any{}) {
+		t.Fatalf("guardedHarnesses = %v, want none", got)
 	}
 }
