@@ -125,7 +125,7 @@ func (h Harness) GuardProblem(entry reconciler.Entry) string {
 		}
 	}
 	for _, source := range sourcesOf(flags) {
-		file := h.userOf(entry)
+		file := h.sessionUserOf(entry)
 		if source != "user" {
 			file = filepath.Join(entry.Folder, ".claude", map[string]string{"local": "settings.local.json", "project": "settings.json"}[source])
 		}

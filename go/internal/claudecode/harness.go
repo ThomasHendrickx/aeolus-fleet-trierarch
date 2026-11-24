@@ -115,6 +115,24 @@ func (h Harness) userOf(entry reconciler.Entry) string {
 	return UserSettings(h.homeOf(entry), "")
 }
 
+// configDirectoryOf is the Claude configuration folder the entry's session on the host is started with, false when it reads the user's:
+// a ship crewed in a ship folder before the ship homes went keeps the one in its ship's home, where its identity is.
+func (h Harness) configDirectoryOf(entry reconciler.Entry) (string, bool) {
+	if h.Homes != "" || h.pluginOf(entry).Crews == h.Plugin.Crews {
+		return "", false
+	}
+	return filepath.Join(h.homeOf(entry), ".claude"), true
+}
+
+// sessionUserOf is the user settings file the entry's session loads, as it is started: the one of the configuration folder it is
+// started with.
+func (h Harness) sessionUserOf(entry reconciler.Entry) string {
+	if directory, ok := h.configDirectoryOf(entry); ok {
+		return UserSettings("", directory)
+	}
+	return h.userOf(entry)
+}
+
 // privateFolderMode is a ship's home's mode: only its owner reads it, as it holds the ship's crew token.
 const privateFolderMode = 0o700
 
@@ -253,8 +271,8 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		command = append(command, settingsFlag, guardSettings)
 	}
 	shipPlugin := h.pluginOf(entry)
-	if h.Homes == "" && shipPlugin.Crews != h.Plugin.Crews {
-		env["CLAUDE_CONFIG_DIR"] = filepath.Join(h.homeOf(entry), ".claude")
+	if directory, ok := h.configDirectoryOf(entry); ok {
+		env["CLAUDE_CONFIG_DIR"] = directory
 		env["AEOLUS_DATA"] = shipPlugin.Data
 		env["AEOLUS_CREWS"] = shipPlugin.Crews
 		command = append(command, "--plugin-dir", h.Plugin.Root)
