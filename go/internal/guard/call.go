@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Tool kinds, harness-neutral (design 4.1). An MCP tool is mcp:<server>/<tool>.
@@ -18,9 +19,35 @@ const (
 
 // claudeCodeKinds maps Claude Code's tools onto the guard's kinds.
 var claudeCodeKinds = map[string]string{
-	"Bash":     kindShell,
-	"Read":     kindFileRead,
-	"WebFetch": kindWeb,
+	"Bash":         kindShell,
+	"BashOutput":   kindShell,
+	"KillShell":    kindShell,
+	"Write":        kindFileWrite,
+	"Edit":         kindFileWrite,
+	"MultiEdit":    kindFileWrite,
+	"NotebookEdit": kindFileWrite,
+	"Read":         kindFileRead,
+	"Glob":         kindFileRead,
+	"Grep":         kindFileRead,
+	"LS":           kindFileRead,
+	"NotebookRead": kindFileRead,
+	"WebFetch":     kindWeb,
+	"WebSearch":    kindWeb,
+	"Task":         kindAgent,
+	"Agent":        kindAgent,
+}
+
+// claudeCodeKind is the kind of a Claude Code tool, "" for a tool the guard
+// does not know. Claude Code names an MCP tool mcp__<server>__<tool>.
+func claudeCodeKind(tool string) string {
+	if rest, ok := strings.CutPrefix(tool, "mcp__"); ok {
+		server, name, found := strings.Cut(rest, "__")
+		if !found || server == "" || name == "" {
+			return ""
+		}
+		return "mcp:" + server + "/" + name
+	}
+	return claudeCodeKinds[tool]
 }
 
 // call is one tool call as the guard reads it.
@@ -48,7 +75,7 @@ func readCall(input io.Reader) (call, error) {
 	if hook.ToolName == "" {
 		return call{}, errors.New("hook input names no tool")
 	}
-	read := call{tool: hook.ToolName, kind: claudeCodeKinds[hook.ToolName], input: hook.ToolInput, cwd: hook.Cwd}
+	read := call{tool: hook.ToolName, kind: claudeCodeKind(hook.ToolName), input: hook.ToolInput, cwd: hook.Cwd}
 	if read.kind == kindShell {
 		var shell struct {
 			Command string `json:"command"`
