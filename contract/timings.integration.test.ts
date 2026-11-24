@@ -102,6 +102,7 @@ describe('at its production timings, the trierarch', () => {
   it('runs its passes 5 s apart', async () => {
     const { machine: crewing } = await aCrewingMachineAt('production');
 
+    expect(crewing.serviceLog().match(/runs as pid/g)).toHaveLength(1);
     for (const gap of await gapsBetweenPasses(crewing, 2)) {
       expect(gap).toBeGreaterThanOrEqual(PRODUCTION_PASS_INTERVAL_MS);
       expect(gap).toBeLessThan(PRODUCTION_PASS_INTERVAL_MS + LATE_BY_AT_MOST_MS);
