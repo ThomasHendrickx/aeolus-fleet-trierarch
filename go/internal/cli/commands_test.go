@@ -46,8 +46,8 @@ func TestRunRunsAPassEveryIntervalUntilItIsStopped(t *testing.T) {
 	stop := make(chan struct{})
 	machine.Stop = stop
 	passes := 0
-	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
-		return func(bool) error {
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
+		return func(context.Context, bool) error {
 			passes++
 			if passes == 3 {
 				close(stop)
@@ -71,8 +71,8 @@ func TestAFailedPassIsLoggedAndTheLoopGoesOn(t *testing.T) {
 	logged := []string{}
 	machine.Log = func(line string) { logged = append(logged, line) }
 	passes := 0
-	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
-		return func(bool) error {
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
+		return func(context.Context, bool) error {
 			passes++
 			if passes == 2 {
 				close(stop)
@@ -247,8 +247,8 @@ func TestRunReceivesBesideThePassesAnswersAPingAndAcknowledgesTheRest(t *testing
 	ship := &anOwnShip{}
 	machine.OwnShip = func(crew.File) receiving.Ship { return ship }
 	passes := 0
-	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
-		return func(bool) error {
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
+		return func(context.Context, bool) error {
 			passes++
 			ship.mu.Lock()
 			isAnswered := len(ship.acked) == 1 && len(ship.ponged) == 1
@@ -284,8 +284,8 @@ func TestRunTellsEachPassWhetherTheFleetsKeyIsCutOff(t *testing.T) {
 	machine.Stop = stop
 	machine.OwnShip = func(crew.File) receiving.Ship { return aCutOffOwnShip{} }
 	var told []bool
-	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
-		return func(isKeyCutOff bool) error {
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
+		return func(_ context.Context, isKeyCutOff bool) error {
 			told = append(told, isKeyCutOff)
 			if isKeyCutOff {
 				close(stop)

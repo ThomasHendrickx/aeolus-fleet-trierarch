@@ -6,6 +6,7 @@
 package runpass
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -102,6 +103,155 @@ type Harness interface {
 	NotOfferedReason() string
 }
 
+// Guarded is a harness whose sessions start with the guard (aeolus-fleet docs/design/guard, sections 4.5 and 4.6).
+type Guarded interface {
+	// IsGuarded is whether its sessions start guarded on this machine.
+	IsGuarded() bool
+	// GuardProblem is why the entry's session cannot start guarded, as the settings it would load disable hooks; "" when it can. An
+	// error when its settings could not be read within ctx.
+	GuardProblem(ctx context.Context, entry reconciler.Entry) (string, error)
+}
+
+// GuardRules are the guard rules the trierarch keeps for each ship.
+type GuardRules interface {
+	// KeptVersion is the settings version of the rules kept for the ship, false when none are kept.
+	KeptVersion(ctx context.Context, shipID string) (int, bool, error)
+	// Forget removes the ship's guard folder, its rules, settings and refusals, as its request is released.
+	Forget(ctx context.Context, shipID string) error
+}
+
+// guardReadWait is how long a pass waits on one read or removal of a guard file: one that stalls holds the pass no longer.
+const guardReadWait = 5 * time.Second
+
+// GuardRulesWait is how long a crew waits for the rules of its settings version before its request is given back (design 4.5).
+const GuardRulesWait = 10 * time.Minute
+
+// guardRulesDidNotArrive is why a request whose rules did not arrive in time is given back.
+const guardRulesDidNotArrive = "guard rules did not arrive"
+
+// guardedOf is the harness as it guards its sessions, false when it starts them without the guard.
+func guardedOf(harness Harness) (Guarded, bool) {
+	guarded, ok := harness.(Guarded)
+	if !ok || !guarded.IsGuarded() {
+		return nil, false
+	}
+	return guarded, true
+}
+
+// hasGuardRules is whether the rules of the entry's settings version are kept, as a guarded session needs to start.
+func (p Pass) hasGuardRules(ctx context.Context, entry reconciler.Entry) (bool, error) {
+	if p.GuardRules == nil {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, guardReadWait)
+	defer cancel()
+	version, ok, err := p.GuardRules.KeptVersion(ctx, entry.ShipID)
+	if err != nil {
+		return false, err
+	}
+	return ok && version == entry.SettingsVersion, nil
+}
+
+// guardGate is what the guard's start conditions say of a start of the entry's session (guard design 4.5, 4.6): it starts; it waits
+// for the rules of its settings version, its wait kept in the entry from its first; or its request is given back, with why, once they
+// did not arrive within GuardRulesWait of that first wait, or when the settings it would load disable hooks.
+type guardGate struct {
+	isWaiting bool
+	givenBack string
+	// entry is the entry with its wait kept.
+	entry reconciler.Entry
+}
+
+// guardGateOf is the guard's start conditions for the entry's session now, the one place every start of a guarded session asks
+// them. The settings are read only of an entry with a folder: a crew asks again once its folder is made, before it registers.
+func (p Pass) guardGateOf(ctx context.Context, harness Harness, entry reconciler.Entry) (guardGate, error) {
+	guarded, ok := guardedOf(harness)
+	if !ok {
+		return guardGate{entry: entry}, nil
+	}
+	has, err := p.hasGuardRules(ctx, entry)
+	if err != nil {
+		return guardGate{entry: entry}, err
+	}
+	if !has {
+		if entry.GuardWaitSince == "" {
+			entry.GuardWaitSince = p.Now().UTC().Format(time.RFC3339)
+		}
+		since, err := time.Parse(time.RFC3339, entry.GuardWaitSince)
+		if err == nil && p.Now().Sub(since) >= GuardRulesWait {
+			return guardGate{givenBack: guardRulesDidNotArrive, entry: entry}, nil
+		}
+		return guardGate{isWaiting: true, entry: entry}, nil
+	}
+	entry.GuardWaitSince = ""
+	if entry.Folder == "" {
+		return guardGate{entry: entry}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, guardReadWait)
+	defer cancel()
+	problem, err := guarded.GuardProblem(ctx, entry)
+	return guardGate{givenBack: problem, entry: entry}, err
+}
+
+// isWaitingForGuardRules is whether the entry's session, which would start again, waits for the rules of its settings version: it
+// waited for them before and its wait is not over. The first wait begins at a start, which keeps it.
+func (p Pass) isWaitingForGuardRules(ctx context.Context, harness Harness, entry reconciler.Entry) bool {
+	if entry.GuardWaitSince == "" {
+		return false
+	}
+	gate, err := p.guardGateOf(ctx, harness, entry)
+	return err != nil || gate.isWaiting
+}
+
+// heldByGuard asks the guard's start conditions of the entry's session: held when it waits, its wait kept, or when its request was
+// given back.
+func (p Pass) heldByGuard(ctx context.Context, state reconciler.State, harness Harness, entry reconciler.Entry) (reconciler.State, guardGate, bool, error) {
+	gate, err := p.guardGateOf(ctx, harness, entry)
+	switch {
+	case err != nil:
+		return state, gate, true, err
+	case gate.givenBack != "":
+		state, err = p.giveBack(state, entry.ShipID, entry.SettingsVersion, gate.givenBack, &gate.entry)
+		return state, gate, true, err
+	case gate.isWaiting:
+		state, err = p.put(state, gate.entry)
+		return state, gate, true, err
+	}
+	return state, gate, false, nil
+}
+
+// sessionStart is one start of a session: the entry as kept, the entry as its harness starts it, and how.
+type sessionStart struct {
+	entry    reconciler.Entry
+	starting reconciler.Entry
+	// isFirstStart starts it with its first prompt; isAgain starts the session of one that died, its messages kept for the new one.
+	isFirstStart bool
+	isAgain      bool
+	launchID     string
+}
+
+// startSession starts a session as every path does, a crew, a start again, an upgrade's and a recovery's: only once the guard's
+// start conditions let it, so no path starts a guarded session without them. A session that waits keeps its wait in its entry; one
+// that cannot start guarded gives its request back. The entry answered is the one kept, false when it did not start.
+func (p Pass) startSession(ctx context.Context, state reconciler.State, harness Harness, start sessionStart) (reconciler.State, reconciler.Entry, bool, error) {
+	state, gate, isHeld, err := p.heldByGuard(ctx, state, harness, start.entry)
+	if err != nil || isHeld {
+		return state, gate.entry, false, err
+	}
+	if start.isAgain {
+		if err := harness.SessionDied(start.entry); err != nil {
+			return state, start.entry, false, err
+		}
+	}
+	if err := p.Workspace.WriteRootFiles(start.starting); err != nil {
+		return state, start.entry, false, err
+	}
+	if err := harness.Launch(start.starting, start.isFirstStart, start.launchID); err != nil {
+		return state, start.entry, false, err
+	}
+	return state, gate.entry, true, nil
+}
+
 // Workspace makes and removes a ship's workspace, and lists every folder under the root.
 type Workspace interface {
 	// ShipFolderOf is the folder a ship crewed fresh keeps every file of its own in.
@@ -184,7 +334,12 @@ type Pass struct {
 	Fleet          Fleet
 	Sessions       Sessions
 	Harnesses      map[string]Harness
-	Workspace      Workspace
+	// GuardRules are the guard rules kept for each ship, which a guarded session starts only with.
+	GuardRules GuardRules
+	// GuardStatuses read each guarded session's guard; GuardReports report it, none until the fleet's core takes it (aeolus-fleet#2070).
+	GuardStatuses GuardStatuses
+	GuardReports  GuardReports
+	Workspace     Workspace
 	// FolderProcesses are stopped in an orphan worktree before it is removed.
 	FolderProcesses FolderProcesses
 	Store           Store
@@ -307,7 +462,7 @@ func startedOn(entry reconciler.Entry, login string, at string) reconciler.Entry
 const nextAfterFailure = "the next pass tries again; aeolus-trierarch status and list show where it stands"
 
 // Run runs one pass. State loading and snapshot writing errors are returned to the caller. A pass that cannot read what it reconciles is logged and kept in the state with its reason and since when, which a pass that succeeds clears.
-func (p Pass) Run() error {
+func (p Pass) Run(ctx context.Context) error {
 	p.keepProxy()
 	p.watchLoad()
 	if p.ConfirmDue != nil {
@@ -318,8 +473,9 @@ func (p Pass) Run() error {
 		return err
 	}
 	state = p.reportUsageLimits(state)
+	state = p.reportGuards(ctx, state)
 	snapshot := seen.Snapshot{Ships: map[string]seen.Ship{}}
-	next, actions, err := p.reconcile(state, &snapshot)
+	next, actions, err := p.reconcile(ctx, state, &snapshot)
 	if err != nil {
 		p.Log(fmt.Sprintf("The pass failed: %v; %s", err, nextAfterFailure))
 		since := p.Now().UTC().Format(isoMillis)
@@ -334,7 +490,7 @@ func (p Pass) Run() error {
 	}
 	// Every action is carried out, whatever an earlier one did: a failed action is logged and the pass goes on from the saved state.
 	for _, action := range actions {
-		if next, err = p.carryOut(next, action); err != nil {
+		if next, err = p.carryOut(ctx, next, action); err != nil {
 			if action.Kind == reconciler.RemoveStray {
 				// A stray is no ship's: the next stray is removed all the same.
 				p.Log(fmt.Sprintf("Could not remove %s, a folder under the root no crewed ship uses: %v; %s", action.Folder, err, nextAfterFailure))
@@ -502,7 +658,7 @@ func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) re
 }
 
 // observe is what runs: the sessions, what each in its launch window did, and for each entry whose session runs its inbox and turn. An inbox is watched only while its session runs, a crewing one from the moment its session runs (#473); its socket is opened again, as after the trierarch stopped, since its session keeps running and calls over it (decision 0026).
-func (p Pass) observe(state reconciler.State, running []sessions.Observed, snapshot *seen.Snapshot) (reconciler.Observed, map[string]string, error) {
+func (p Pass) observe(ctx context.Context, state reconciler.State, running []sessions.Observed, snapshot *seen.Snapshot) (reconciler.Observed, map[string]string, error) {
 	observed := reconciler.Observed{Sessions: []reconciler.Session{}, Launches: map[string]reconciler.LaunchSeen{}, Ships: map[string]reconciler.Seen{}, StartProblems: map[string]string{}, FailureReasons: map[string]string{}}
 	versions := map[string]string{}
 	statusOf := map[string]string{}
@@ -524,6 +680,9 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed, snaps
 		if entry.State == "restarting" || (entry.State == "running" && !hasSession) {
 			if problem := p.startProblem(entry, p.loginOf(entry)); problem != "" {
 				observed.StartProblems[shipID] = problem
+			} else if ok && p.isWaitingForGuardRules(ctx, harness, entry) {
+				// It waits, restarting, until the rules of its settings version are kept again, or its wait is over.
+				observed.StartProblems[shipID] = "waiting for the guard rules of its settings version"
 			}
 		}
 		if !ok || entry.Folder == "" {
@@ -619,26 +778,26 @@ func (p Pass) harnessOf(entry reconciler.Entry) (Harness, error) {
 	return harness, nil
 }
 
-func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconciler.State, error) {
+func (p Pass) carryOut(ctx context.Context, state reconciler.State, action reconciler.Action) (reconciler.State, error) {
 	entry, isEntry := state.Entries[action.ShipID]
 	switch action.Kind {
 	case reconciler.Crew:
 		if !isEntry {
 			return state, nil
 		}
-		return p.crew(state, entry, action.IsResumed)
+		return p.crew(ctx, state, entry, action.IsResumed)
 	case reconciler.Launch:
 		if !isEntry {
 			return state, nil
 		}
-		return p.launch(state, entry)
+		return p.launch(ctx, state, entry)
 	case reconciler.Stop:
 		return state, p.stop(action.ShipID)
 	case reconciler.Release:
 		if !isEntry {
 			return state, nil
 		}
-		return p.release(state, entry)
+		return p.release(ctx, state, entry)
 	case reconciler.Confirm:
 		return state, p.Fleet.ConfirmRelease(action.ShipID)
 	case reconciler.Forget:
@@ -703,16 +862,23 @@ func nameOf(entry reconciler.Entry) string {
 }
 
 // crew crews the ship (crew:run): once its harness can start a session, makes the workspace, gets its starting prompt and registers with the secret, so the session never sees it; writes the folder's identity and starts the harness, the status crewing, until its session shows activity in its launch window (#382). A ship another session crews before its crew is left; one gone is forgotten; a resumed crew whose ship is crewed holds it by its own lease: with the crew token its entry keeps, as a new settings version's does, it is crewed again under that lease, never released, as core removes the crew request on a release (#367); one that lost its register reply is released and crewed again.
-func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed bool) (reconciler.State, error) {
+func (p Pass) crew(ctx context.Context, state reconciler.State, entry reconciler.Entry, isResumed bool) (reconciler.State, error) {
 	harness, err := p.harnessOf(entry)
 	if err != nil {
 		return state, err
 	}
+	// A guarded session starts only with the rules of its settings version (guard design 4.5): it waits for them, and is given back
+	// before it registers when they did not arrive in time.
+	state, gate, isHeld, err := p.heldByGuard(ctx, state, harness, entry)
+	if err != nil || isHeld {
+		return state, err
+	}
+	entry = gate.entry
 	if entry.IsOldLayout && entry.CrewToken != "" {
-		return p.crewInTheShipFolderLayout(state, entry, harness)
+		return p.crewInTheShipFolderLayout(ctx, state, entry, harness)
 	}
 	if entry.IsShipFolderGone {
-		return p.crewInAFreshShipFolder(state, entry, harness)
+		return p.crewInAFreshShipFolder(ctx, state, entry, harness)
 	}
 	ship, err := p.Fleet.Ship(entry.ShipID)
 	if err != nil {
@@ -773,6 +939,10 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if problem := p.startProblem(entry, login); problem != "" {
 		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
 	}
+	// Settings that keep the guard from running are this computer's state too: given back before it registers (guard design 4.6).
+	if state, _, isHeld, err := p.heldByGuard(ctx, state, harness, entry); err != nil || isHeld {
+		return state, err
+	}
 	crewToken := entry.CrewToken
 	if !isUnderItsLease {
 		if crewToken, err = p.registered(entry); err != nil {
@@ -795,10 +965,8 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	launchID := p.NewLaunchID()
 	starting := entry
 	starting.Login = login
-	if err := p.Workspace.WriteRootFiles(starting); err != nil {
-		return state, err
-	}
-	if err := harness.Launch(starting, !entry.HasStarted, launchID); err != nil {
+	state, entry, isStarted, err := p.startSession(ctx, state, harness, sessionStart{entry: entry, starting: starting, isFirstStart: !entry.HasStarted, launchID: launchID})
+	if err != nil || !isStarted {
 		return state, err
 	}
 	entry.CrewFailures = 0
@@ -836,7 +1004,7 @@ func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconcile
 // it holds: its session stops, its workspace goes as a release's does, what it held unsaved logged, and it is crewed as a ship whose
 // ship's folder is gone is, a first start telling nobody. The entry is saved without its mark once its workspace is gone, so an
 // interruption crews it again in a fresh ship folder.
-func (p Pass) crewInTheShipFolderLayout(state reconciler.State, entry reconciler.Entry, harness Harness) (reconciler.State, error) {
+func (p Pass) crewInTheShipFolderLayout(ctx context.Context, state reconciler.State, entry reconciler.Entry, harness Harness) (reconciler.State, error) {
 	if err := p.stop(entry.ShipID); err != nil {
 		return state, err
 	}
@@ -849,7 +1017,7 @@ func (p Pass) crewInTheShipFolderLayout(state reconciler.State, entry reconciler
 	if err != nil {
 		return state, err
 	}
-	return p.crewInAFreshShipFolder(state, entry, harness)
+	return p.crewInAFreshShipFolder(ctx, state, entry, harness)
 }
 
 // madeMainOf is the repository a ship folder's `main/` is made of, kept with its entry so a new settings version naming another
@@ -865,7 +1033,7 @@ func madeMainOf(workspace reconciler.Workspace) string {
 // core removes the crew request on a release, so the ship is never released and registered again. Its session stops and its identity
 // and socket go; then its workspace is made in a new ship's folder, its identity written with the crew token its state keeps, and its
 // fresh session given a continuation prompt. Its usage since the last send went with the folder.
-func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.Entry, harness Harness) (reconciler.State, error) {
+func (p Pass) crewInAFreshShipFolder(ctx context.Context, state reconciler.State, entry reconciler.Entry, harness Harness) (reconciler.State, error) {
 	if err := p.stop(entry.ShipID); err != nil {
 		return state, err
 	}
@@ -895,10 +1063,8 @@ func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.En
 	starting := entry
 	starting.Login = login
 	starting.FirstPrompt = "This is a continuation of an existing crew request in a fresh session. Your previous conversation is unavailable. Recover the current task and progress from the fleet before acting; do not repeat completed work."
-	if err := p.Workspace.WriteRootFiles(starting); err != nil {
-		return state, err
-	}
-	if err := harness.Launch(starting, true, launchID); err != nil {
+	state, entry, isStarted, err := p.startSession(ctx, state, harness, sessionStart{entry: entry, starting: starting, isFirstStart: true, launchID: launchID})
+	if err != nil || !isStarted {
 		return state, err
 	}
 	entry.IsShipFolderGone, entry.HasStarted, entry.LaunchedAt, entry.LaunchID = false, true, p.Now().UTC().Format(isoMillis), launchID
@@ -908,22 +1074,17 @@ func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.En
 }
 
 // launch starts the entry's session again in its folder, continuing, its first minute checked from now (#397). The session that held its messages is gone: its store marks them for the session started now (#756).
-func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler.State, error) {
+func (p Pass) launch(ctx context.Context, state reconciler.State, entry reconciler.Entry) (reconciler.State, error) {
 	harness, err := p.harnessOf(entry)
 	if err != nil || entry.Folder == "" {
-		return state, err
-	}
-	if err := harness.SessionDied(entry); err != nil {
 		return state, err
 	}
 	launchID := p.NewLaunchID()
 	login := p.loginOf(entry)
 	starting := entry
 	starting.Login = login
-	if err := p.Workspace.WriteRootFiles(starting); err != nil {
-		return state, err
-	}
-	if err := harness.Launch(starting, false, launchID); err != nil {
+	state, entry, isStarted, err := p.startSession(ctx, state, harness, sessionStart{entry: entry, starting: starting, isAgain: true, launchID: launchID})
+	if err != nil || !isStarted {
 		return state, err
 	}
 	entry.LaunchedAt, entry.LaunchID = p.Now().UTC().Format(isoMillis), launchID
@@ -933,7 +1094,7 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 }
 
 // release ends what a removed request held (row 7): the session stops, the lease ends, then the workspace goes; only then is the request confirmed.
-func (p Pass) release(state reconciler.State, entry reconciler.Entry) (reconciler.State, error) {
+func (p Pass) release(ctx context.Context, state reconciler.State, entry reconciler.Entry) (reconciler.State, error) {
 	if err := p.stop(entry.ShipID); err != nil {
 		return state, err
 	}
@@ -948,6 +1109,14 @@ func (p Pass) release(state reconciler.State, entry reconciler.Entry) (reconcile
 	}
 	if err := p.endWorkspace(entry); err != nil {
 		return state, err
+	}
+	if p.GuardRules != nil {
+		forget, cancel := context.WithTimeout(ctx, guardReadWait)
+		err := p.GuardRules.Forget(forget, entry.ShipID)
+		cancel()
+		if err != nil {
+			return state, err
+		}
 	}
 	if state, err = p.remove(state, entry.ShipID); err != nil {
 		return state, err
@@ -1314,7 +1483,7 @@ func (p Pass) tellKeysNotReady(state reconciler.State) (reconciler.State, error)
 }
 
 // reconcile reads the requests, what runs and the ships' inboxes, saves what the reconciler made of them and answers the actions to carry out. It answers the latest state it saved, or was given, with the error.
-func (p Pass) reconcile(state reconciler.State, snapshot *seen.Snapshot) (reconciler.State, []reconciler.Action, error) {
+func (p Pass) reconcile(ctx context.Context, state reconciler.State, snapshot *seen.Snapshot) (reconciler.State, []reconciler.Action, error) {
 	requests, err := p.Fleet.AssignedRequests()
 	if err != nil {
 		return state, nil, err
@@ -1327,7 +1496,7 @@ func (p Pass) reconcile(state reconciler.State, snapshot *seen.Snapshot) (reconc
 	if err != nil {
 		return state, nil, err
 	}
-	observed, versions, err := p.observe(state, running, snapshot)
+	observed, versions, err := p.observe(ctx, state, running, snapshot)
 	if err != nil {
 		return state, nil, err
 	}

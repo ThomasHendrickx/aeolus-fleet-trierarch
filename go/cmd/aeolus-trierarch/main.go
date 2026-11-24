@@ -77,6 +77,10 @@ import (
 )
 
 func main() {
+	// Guard check is a session's hook: its deadline holds from its first instruction, before anything a trierarch does as it starts.
+	if cli.IsGuardCheck(os.Args[1:]) {
+		guardCheckMain(os.Args[1:])
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Println(err)
@@ -144,7 +148,7 @@ func main() {
 			return fleet.CoreVersionRefusal(fleetURL, cli.Version, fleet.MinimumCoreVersion)
 		},
 		ContainerHost: func(modelToken string) container.Host { return container.Machine{ModelToken: modelToken} },
-		NewPass: func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error) {
+		NewPass: func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
 			return newPass(at, kept, configuration, home, program, timed.FirstRestartDelay)
 		},
 		PassEvery:     timed.PassInterval,
@@ -157,7 +161,7 @@ func main() {
 		},
 		McpConfiguration: heldMcpConfigurationOf,
 		GuardRules: func(at paths.Paths, identity guardrules.Identity) receiving.GuardKeeper {
-			return &guardrules.Keeper{Identity: identity, Store: guardfile.Store{Ships: at.Ships}}
+			return &guardrules.Keeper{Identity: identity, Store: guardfile.Store{Guards: at.Guard}}
 		},
 		McpFleet: func(kept crew.File) cli.McpFleet {
 			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
@@ -186,6 +190,8 @@ func main() {
 		Print:      func(line string) { fmt.Fprintln(stdout, line) },
 		IsTerminal: isTerminal(os.Stdout),
 		StartedAt:  startedAt,
+		Stdin:      os.Stdin,
+		Stderr:     os.Stderr,
 		Detect: func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error) {
 			warn := func(line string) { fmt.Fprintln(os.Stderr, line) }
 			return detectionOf(at, environment(), home, warn).Detect(context.Background(), harnesses, by)
@@ -490,6 +496,17 @@ type runningSessions interface {
 	Root(shipID string) int
 }
 
+// keptGuardRules are the guard rules kept in the state folder, as a pass asks which settings version a ship's rules are of.
+type keptGuardRules struct{ store guardfile.Store }
+
+func (k keptGuardRules) KeptVersion(ctx context.Context, shipID string) (int, bool, error) {
+	return k.store.KeptVersion(ctx, shipID)
+}
+
+func (k keptGuardRules) Forget(ctx context.Context, shipID string) error {
+	return k.store.Forget(ctx, shipID)
+}
+
 // sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
 const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
 
@@ -582,7 +599,7 @@ func environment() map[string]string {
 }
 
 // newPass is one pass of the run loop with this machine's adapters: the fleet over /api/v1 with the trierarch's crew token, the harnesses the configuration offers, worktrees of the configured repositories, and the state file.
-func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string, firstRestartDelay time.Duration) (func(isKeyCutOff bool) error, error) {
+func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string, firstRestartDelay time.Duration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
 	env := environment()
 	client := fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
 	pastaMissing, pastaErr := checkPastaAppArmor(container.Machine{}, runtime.GOOS, "/")
@@ -631,7 +648,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	}
 	running := sessionRuntime(at, program, configuration)
 	proxy := modelProxy(at, program)
-	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
+	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, program, running, proxy, offers)
 	if err != nil {
 		return nil, err
 	}
@@ -712,6 +729,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Fleet:             client,
 		Sessions:          running,
 		Harnesses:         harnesses,
+		GuardRules:        keptGuardRules{store: guardfile.Store{Guards: at.Guard}},
 		Workspace:         places,
 		FolderProcesses:   folderProcessesOf(configuration.Runtime),
 		Store:             saved,
@@ -791,12 +809,12 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
-	return func(isKeyCutOff bool) error {
+	return func(ctx context.Context, isKeyCutOff bool) error {
 		ask.Once()
 		askConfiguration.Once()
 		current := pass
 		current.Workspace, current.Repositories, current.Folders = placesOf()
-		if err := current.Run(); err != nil {
+		if err := current.Run(ctx); err != nil {
 			return err
 		}
 		if err := reporter.Report(isKeyCutOff); err != nil {
@@ -975,7 +993,7 @@ func (o *offers) options() map[string]map[string][]string {
 var adapters = []string{"claude-code", "codex", "copilot"}
 
 // harnessesOf are the adapters of the harnesses the configuration offers, each with the aeolus-fleet plugin its harness installed, and their names, the default first. Each plugin is looked for at use, so a missing one is reported without stopping the trierarch and an installation is found without a restart. A configured harness this trierarch has no adapter for stops it at start, so no request for it is ever crewed.
-func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running runningSessions, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
+func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, program string, running runningSessions, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
 	for name := range configuration.Harnesses {
 		if !slices.Contains(adapters, name) {
 			return nil, nil, fmt.Errorf("this trierarch has no adapter for the harness %s: it offers %s", name, strings.Join(adapters, ", "))
@@ -1013,6 +1031,9 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				Events:          events,
 				ProxyURL:        proxyURL,
 				Sessions:        at.Sessions,
+				Program:         program,
+				Guards:          at.Guard,
+				Config:          at.Config,
 				Homes:           homesOf(at, configuration.Runtime),
 				// In containers, a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
 				MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime),

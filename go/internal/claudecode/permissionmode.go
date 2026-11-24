@@ -55,6 +55,17 @@ func modeInFile(path string) (string, bool) {
 
 // managedMode is the managed settings' default mode: managed-settings.json, then each visible `.json` in managed-settings.d in alphabetical order, the last that names one winning.
 func managedMode(folder string) (string, bool) {
+	mode, found := "", false
+	for _, file := range managedFiles(folder) {
+		if each, ok := modeInFile(file); ok {
+			mode, found = each, true
+		}
+	}
+	return mode, found
+}
+
+// managedFiles are the managed settings files in the order Claude Code reads them: managed-settings.json, then each visible `.json` in managed-settings.d in alphabetical order.
+func managedFiles(folder string) []string {
 	dropIns := filepath.Join(folder, "managed-settings.d")
 	files := []string{filepath.Join(folder, "managed-settings.json")}
 	entries, _ := os.ReadDir(dropIns)
@@ -63,13 +74,7 @@ func managedMode(folder string) (string, bool) {
 			files = append(files, filepath.Join(dropIns, entry.Name()))
 		}
 	}
-	mode, found := "", false
-	for _, file := range files {
-		if each, ok := modeInFile(file); ok {
-			mode, found = each, true
-		}
-	}
-	return mode, found
+	return files
 }
 
 // commandLineMode is the default mode `--settings` gives, a file or JSON; a relative file is the folder's, so without a folder it is unknown.

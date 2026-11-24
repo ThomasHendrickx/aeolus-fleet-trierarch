@@ -65,7 +65,7 @@ func TestARequestForAModelCodexListsOnlyOnceConfirmedAgainAfterTheTrierarchStart
 	}
 	running := &startedSessions{}
 	env := map[string]string{"AEOLUS_CODEX_PLUGIN_ROOT": filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), "AEOLUS_CODEX_PLUGIN_DATA": t.TempDir()}
-	harnesses, _, err := harnessesOf(held.configured, paths.Paths{Sessions: t.TempDir()}, env, t.TempDir(), running, modelproxy.Runtime{}, held)
+	harnesses, _, err := harnessesOf(held.configured, paths.Paths{Sessions: t.TempDir()}, env, t.TempDir(), "/usr/local/bin/aeolus-trierarch", running, modelproxy.Runtime{}, held)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestConfiguredHarnessesStartWithoutPluginsAndFindEachInstallationAtCrewTime
 				configuration.Harnesses[name] = config.Harness{}
 			}
 			held := &offers{configured: configuration}
-			wired, offered, err := harnessesOf(configuration, paths.Paths{Sessions: t.TempDir()}, map[string]string{}, home, &startedSessions{}, modelproxy.Runtime{}, held)
+			wired, offered, err := harnessesOf(configuration, paths.Paths{Sessions: t.TempDir()}, map[string]string{}, home, "/usr/local/bin/aeolus-trierarch", &startedSessions{}, modelproxy.Runtime{}, held)
 			if err != nil {
 				t.Fatalf("harnessesOf without plugins: %v", err)
 			}

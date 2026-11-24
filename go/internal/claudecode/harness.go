@@ -70,6 +70,12 @@ type Harness struct {
 	// Homes is where each ship crewed before the ship folders has a home of its own, for sessions in containers, which its container gets
 	// as its home (decision 0039); a ship crewed fresh has it in its ship's folder. Empty on the host, where every session shares the user's.
 	Homes string
+	// Program is the trierarch's own file, which every session's guard hook runs as guard check.
+	Program string
+	// Guards holds each ship's guard folder, which keeps its rules, settings and refusals.
+	Guards string
+	// Config is the trierarch's configuration file as it runs, which guard check protects; empty for the default one.
+	Config string
 	// MoveWithinUserNamespace moves a ship's home whose own top the host user cannot give its write to the trash within the runtime's user
 	// namespace; nil on the host.
 	MoveWithinUserNamespace func(from string, to string) error
@@ -109,6 +115,24 @@ func (h Harness) userOf(entry reconciler.Entry) string {
 		return h.User
 	}
 	return UserSettings(h.homeOf(entry), "")
+}
+
+// configDirectoryOf is the Claude configuration folder the entry's session on the host is started with, false when it reads the user's:
+// a ship crewed in a ship folder before the ship homes went keeps the one in its ship's home, where its identity is.
+func (h Harness) configDirectoryOf(entry reconciler.Entry) (string, bool) {
+	if h.Homes != "" || h.pluginOf(entry).Crews == h.Plugin.Crews {
+		return "", false
+	}
+	return filepath.Join(h.homeOf(entry), ".claude"), true
+}
+
+// sessionUserOf is the user settings file the entry's session loads, as it is started: the one of the configuration folder it is
+// started with.
+func (h Harness) sessionUserOf(entry reconciler.Entry) string {
+	if directory, ok := h.configDirectoryOf(entry); ok {
+		return UserSettings("", directory)
+	}
+	return h.userOf(entry)
 }
 
 // privateFolderMode is a ship's home's mode: only its owner reads it, as it holds the ship's crew token.
@@ -231,10 +255,26 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	}
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
 	// --mcp-config takes every word up to the next flag, so it comes last.
-	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder))
+	isGuarded := h.IsGuarded()
+	commandFlags := flags
+	if isGuarded {
+		commandFlags = withoutSettingsFlag(flags)
+	}
+	command := CommandLine(commandFlags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder))
+	if isGuarded {
+		configured, err := configuredSettings(flags, entry.Folder)
+		if err != nil {
+			return err
+		}
+		guardSettings, err := h.writeGuardSettings(entry.ShipID, configured)
+		if err != nil {
+			return err
+		}
+		command = append(command, settingsFlag, guardSettings)
+	}
 	shipPlugin := h.pluginOf(entry)
-	if h.Homes == "" && shipPlugin.Crews != h.Plugin.Crews {
-		env["CLAUDE_CONFIG_DIR"] = filepath.Join(h.homeOf(entry), ".claude")
+	if directory, ok := h.configDirectoryOf(entry); ok {
+		env["CLAUDE_CONFIG_DIR"] = directory
 		env["AEOLUS_DATA"] = shipPlugin.Data
 		env["AEOLUS_CREWS"] = shipPlugin.Crews
 		command = append(command, "--plugin-dir", h.Plugin.Root)

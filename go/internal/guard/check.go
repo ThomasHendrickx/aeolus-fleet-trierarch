@@ -12,8 +12,8 @@ import (
 	"unicode/utf8"
 )
 
-// defaultDeadline is guard check's own deadline, below the hook's timeout.
-const defaultDeadline = 5 * time.Second
+// Deadline is guard check's own deadline, below the hook's timeout.
+const Deadline = 5 * time.Second
 
 // summaryLength is how much of the call a refusal record keeps.
 const summaryLength = 200
@@ -97,7 +97,7 @@ func (c Checker) deadline() time.Duration {
 	if c.Deadline > 0 {
 		return c.Deadline
 	}
-	return defaultDeadline
+	return Deadline
 }
 
 // Check reads the call from input and answers within the deadline. Anything
@@ -199,6 +199,16 @@ func (c Checker) record(result outcome) Refusal {
 	}
 	return refusal
 }
+
+// FailedRefusal is the refusal kept of a call guard check could not check, as guard failed with the cause, at the time given: no tool,
+// no summary, as the call was not read.
+func FailedRefusal(at time.Time, cause string) Refusal {
+	return Refusal{At: at, Rule: failed(cause).rule}
+}
+
+// Failed is the answer that refuses a call guard check could not check, as
+// guard failed with the cause: before a Checker can run, it fails closed too.
+func Failed(cause string) Answer { return deny(failed(cause)) }
 
 // deny is the answer that refuses the call for the verdict.
 func deny(refusal *verdict) Answer {

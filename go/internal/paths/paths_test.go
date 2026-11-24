@@ -51,3 +51,11 @@ func TestTheSocketPathLimitIsTheSystems(t *testing.T) {
 		}
 	}
 }
+
+func TestTheGuardFoldersAreApartFromTheShipsFolders(t *testing.T) {
+	at := Of("/home/me", "")
+
+	if at.Guard != "/home/me/.aeolus/trierarch/guard" {
+		t.Fatalf("Guard = %q", at.Guard)
+	}
+}

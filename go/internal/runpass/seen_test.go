@@ -1,6 +1,7 @@
 package runpass
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -99,7 +100,7 @@ func TestAFailedSnapshotWriteFailsThePassAndKeepsItsReasonUntilSuccess(t *testin
 	p.pass.Seen = saved
 	p.run(t)
 	saved.failure = errors.New("seen snapshot unwritable")
-	err := p.pass.Run()
+	err := p.pass.Run(context.Background())
 	if !errors.Is(err, saved.failure) {
 		t.Fatalf("Run = %v, want %v", err, saved.failure)
 	}
@@ -121,7 +122,7 @@ func TestAFailedSnapshotFileSaveNamesTheSnapshotInThePassFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.pass.Seen = seen.File{Path: path}
-	if err := p.pass.Run(); err == nil {
+	if err := p.pass.Run(context.Background()); err == nil {
 		t.Fatal("Run succeeded with an unwritable snapshot")
 	}
 	failure := p.store.state.PassFailure

@@ -1,6 +1,7 @@
 package runpass
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -463,6 +464,8 @@ type aStore struct {
 	// unreadableAfter is how many loads succeed before the state file is unreadable; 0 keeps it readable.
 	unreadableAfter int
 	loads           int
+	// isUnwritable fails every save while it holds.
+	isUnwritable bool
 }
 
 func (s *aStore) Load() (reconciler.State, error) {
@@ -472,7 +475,13 @@ func (s *aStore) Load() (reconciler.State, error) {
 	}
 	return s.state, nil
 }
-func (s *aStore) Save(state reconciler.State) error { s.state, s.saves = state, s.saves+1; return nil }
+func (s *aStore) Save(state reconciler.State) error {
+	if s.isUnwritable {
+		return errors.New("the state file cannot be written")
+	}
+	s.state, s.saves = state, s.saves+1
+	return nil
+}
 
 type aPass struct {
 	sockets   *someSockets
@@ -558,7 +567,7 @@ func aRequest(status string) reconciler.Request {
 
 func (p *aPass) run(t *testing.T) {
 	t.Helper()
-	if err := p.pass.Run(); err != nil {
+	if err := p.pass.Run(context.Background()); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
 }
@@ -2946,11 +2955,11 @@ func TestEveryPassEmptiesTheTrashAndLogsWhatItCouldNotRemoveOnce(t *testing.T) {
 	bin := &aTrash{left: []trash.Left{aLeftClone(now)}}
 	pass.pass.Trash = bin
 
-	if err := pass.pass.Run(); err != nil {
+	if err := pass.pass.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	bin.left[0].IsNew = false
-	if err := pass.pass.Run(); err != nil {
+	if err := pass.pass.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2971,7 +2980,7 @@ func TestArgoIsToldOnceOfWhatTheTrashCouldNotRemoveForADay(t *testing.T) {
 	pass.pass.Trash = bin
 
 	for range 2 {
-		if err := pass.pass.Run(); err != nil {
+		if err := pass.pass.Run(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2987,7 +2996,7 @@ func TestArgoIsNotToldOfWhatTheTrashCouldNotRemoveForLessThanADay(t *testing.T) 
 	bin := &aTrash{left: []trash.Left{aLeftClone(now.Add(-24*time.Hour + time.Millisecond))}}
 	pass.pass.Trash = bin
 
-	if err := pass.pass.Run(); err != nil {
+	if err := pass.pass.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3210,7 +3219,7 @@ func TestAShipWhoseCrewAgainInAFreshShipsFolderIsInterruptedKeepsItsMarkAndIsCre
 	pass.workspace.gone = map[string]bool{"/ships/" + scout: true}
 	pass.harness.launchFails = errors.New("the harness could not start")
 
-	_ = pass.pass.Run()
+	_ = pass.pass.Run(context.Background())
 
 	if !pass.store.state.Entries[scout].IsShipFolderGone {
 		t.Fatalf("entry %+v", pass.store.state.Entries[scout])
