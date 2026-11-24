@@ -54,7 +54,8 @@ type ToolRules struct {
 	Allow []string `json:"allow"`
 }
 
-// decodeSets reads the kept sets, refusing a field the rule set file does not have.
+// decodeSets reads the kept sets, refusing a field the rule set file does not
+// have and a git action off the closed list of 4.1.
 func decodeSets(raw []json.RawMessage) ([]Set, error) {
 	sets := make([]Set, 0, len(raw))
 	for index, entry := range raw {
@@ -63,6 +64,11 @@ func decodeSets(raw []json.RawMessage) ([]Set, error) {
 		var set Set
 		if err := decoder.Decode(&set); err != nil {
 			return nil, fmt.Errorf("decode set %d: %w", index, err)
+		}
+		for _, action := range set.Rules.Git.Deny {
+			if !gitActions[action] {
+				return nil, fmt.Errorf("decode set %d: git action %q is not on the closed list", index, action)
+			}
 		}
 		sets = append(sets, set)
 	}

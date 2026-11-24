@@ -18,6 +18,9 @@ const (
 // gitActionOrder is the order a set's git rules are reported in.
 var gitActionOrder = []string{gitPush, gitForcePush, gitSkipHooks, gitRewriteHistory, gitDeleteBranch, gitChangeRemote, gitChangeConfig}
 
+// gitActions are the actions a set's git rules may deny.
+var gitActions = setOf(gitActionOrder)
+
 // gitCommands are git's own commands, and filter-repo, which 4.1 names. Any
 // other is an alias or a git-<name> program the guard cannot read.
 var gitCommands = setOf(strings.Fields(`add am annotate apply archive bisect blame branch bundle cat-file
