@@ -22,6 +22,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardrules"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
@@ -97,7 +98,9 @@ type Machine struct {
 	McpConfiguration func(at paths.Paths) *mcpconfiguration.File
 	// McpFleet is the trierarch's own ship as the MCP configuration asks it; none when nil.
 	McpFleet func(kept crew.File) McpFleet
-	Sessions func(at paths.Paths) Sessions
+	// GuardRules keeps assignment rules under the configured fleet identity.
+	GuardRules func(at paths.Paths, identity guardrules.Identity) receiving.GuardKeeper
+	Sessions   func(at paths.Paths) Sessions
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
 	// ReadKey is the API key the operator types, not shown, or pipes in.
@@ -527,6 +530,10 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
+	guard, err := machine.loadGuardRules(at, kept)
+	if err != nil {
+		return answer{}, err
+	}
 	pass, err := machine.NewPass(at, kept, configuration)
 	if err != nil {
 		return answer{}, err
@@ -547,7 +554,7 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		if machine.OwnShip == nil {
 			return
 		}
-		loop := receiving.Loop{Ship: machine.OwnShip(kept), Log: machine.Log, Interval: machine.PassEvery, KeyWaitMax: KeyWaitMax, Pause: pause, PluginShipID: kept.PluginShipID, OnKeyCutOff: isKeyCutOff.Store}
+		loop := receiving.Loop{Ship: machine.OwnShip(kept), Log: machine.Log, Interval: machine.PassEvery, KeyWaitMax: KeyWaitMax, Pause: pause, PluginShipID: kept.PluginShipID, OnKeyCutOff: isKeyCutOff.Store, GuardRules: guard}
 		if machine.Trusted != nil {
 			loop.Trusted = machine.Trusted(at, configuration)
 		}
@@ -597,6 +604,22 @@ func (m Machine) loadMcpConfiguration(at paths.Paths, kept crew.File) (*mcpconfi
 	held := m.McpConfiguration(at)
 	held.Load(mcpconfiguration.Identity{FleetID: fleetID, PluginShipID: kept.PluginShipID})
 	return held, nil
+}
+
+// loadGuardRules binds rules to the fleet's identity, never to identity fields
+// supplied by an incoming message.
+func (m Machine) loadGuardRules(at paths.Paths, kept crew.File) (receiving.GuardKeeper, error) {
+	if m.GuardRules == nil || kept.PluginShipID == "" {
+		return nil, nil
+	}
+	if m.McpFleet == nil {
+		return nil, errors.New("cannot read the fleet identity for guard rules")
+	}
+	fleetID, err := m.McpFleet(kept).FleetID()
+	if err != nil {
+		return nil, fmt.Errorf("read the fleet for guard rules: %w", err)
+	}
+	return m.GuardRules(at, guardrules.Identity{FleetID: fleetID, PluginShipID: kept.PluginShipID}), nil
 }
 
 // removeSuperseded removes what an older trierarch kept that none reads any more, each by the trierarch's own path; one that cannot be removed is logged and tried again at the next start.
