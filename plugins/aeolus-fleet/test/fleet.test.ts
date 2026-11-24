@@ -355,6 +355,19 @@ describe('aeolus-fleet calls', () => {
     ]);
   });
 
+  it('states the recorded model on calls and queued mic words', async () => {
+    fleet = await crewedAt([{ status: 200, body: {} }]);
+    writeFileSync((await identityFile()).replace(/\.identity$/, '.model'), 'gpt-6-astra\n');
+    await run('aeolus-fleet.sh', { args: ['openCall', '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5","question":"Ready?","idempotencyKey":"call-1"}'] });
+    await run('aeolus-fleet.sh', { args: ['requestMic', '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5","payload":"Hello"}'] });
+    await run('aeolus-fleet.sh', { args: ['requestMic', '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5"}'] });
+    expect(fleet.calls.map((call): unknown => JSON.parse(call.body))).toEqual([
+      { meetingId: 'mtg_01m5qbm1q6rsy6gf15c9w4a8s5', question: 'Ready?', idempotencyKey: 'call-1', model: 'gpt-6-astra' },
+      { meetingId: 'mtg_01m5qbm1q6rsy6gf15c9w4a8s5', payload: 'Hello', model: 'gpt-6-astra' },
+      { meetingId: 'mtg_01m5qbm1q6rsy6gf15c9w4a8s5' },
+    ]);
+  });
+
   it('names every call it makes in its usage, the meeting calls among them', async () => {
     const result = await run('aeolus-fleet.sh');
 
