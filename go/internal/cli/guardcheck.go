@@ -82,7 +82,7 @@ func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Ans
 		Now:       now,
 		Home:      machine.HomeDirectory,
 		Boundary:  guard.Boundary{ShipFolder: resolvedPath(shipFolder), Repositories: repositories},
-		Protected: guard.ClaudeCodeProtected(resolvedPath(machine.HomeDirectory), resolvedPath(shipFolder), resolvedPath(guardfile.Folder(at.Guard, shipID)), resolvedPath(at.Config)),
+		Protected: guard.ClaudeCodeProtected(resolvedPath(machine.HomeDirectory), resolvedPath(guardfile.Folder(at.Guard, shipID)), resolvedPath(at.Config), append([]string{resolvedPath(shipFolder), resolvedPath(entry.Folder)}, repositories...)...),
 	}
 	return checker.Check(ctx, machine.Stdin)
 }

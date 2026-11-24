@@ -272,13 +272,17 @@ func wildcard(pattern, text string) bool {
 
 // ClaudeCodeProtected are the paths no call of a Claude Code session writes:
 // the guard's state folder, the trierarch's configuration and the harness's
-// settings, ~/.claude/settings*.json and every .claude/settings*.json in the
-// ship's folder (design 4.6, step 2).
-func ClaudeCodeProtected(home, shipFolder, guardFolder, configuration string) []string {
-	return []string{
+// settings, ~/.claude/settings*.json and every .claude/settings*.json in each
+// of its workspaces, the ship's folder and every folder its session works in
+// (design 4.6, step 2).
+func ClaudeCodeProtected(home, guardFolder, configuration string, workspaces ...string) []string {
+	protected := []string{
 		guardFolder + "/**",
 		configuration,
 		home + "/.claude/settings*.json",
-		shipFolder + "/**/.claude/settings*.json",
 	}
+	for _, workspace := range workspaces {
+		protected = append(protected, workspace+"/**/.claude/settings*.json")
+	}
+	return protected
 }

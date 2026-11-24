@@ -18,11 +18,16 @@ import (
 
 const guardSettingsFile = "settings.json"
 
-// GuardCommand is the hook's command: the trierarch's program, quoted for the shell the hook runs in, checking a call of the ship.
-// Claude Code blocks a call only on exit code 2 and runs it on any other failure, so every failure of the program (killed, gone,
-// exited with another code) exits 2: the guard fails closed.
-func GuardCommand(program string, shipID string) string {
-	return shellQuoted(program) + " guard check --ship " + shipID + " || exit 2"
+// GuardCommand is the hook's command: the trierarch's program, quoted for the shell the hook runs in, checking a call of the ship
+// with the trierarch's configuration, none for the default one: the session's environment does not carry it. Claude Code blocks a
+// call only on exit code 2 and runs it on any other failure, so every failure of the program (killed, gone, exited with another
+// code) exits 2: the guard fails closed.
+func GuardCommand(program string, shipID string, configuration string) string {
+	command := shellQuoted(program) + " guard check --ship " + shipID
+	if configuration != "" {
+		command += " --config " + shellQuoted(configuration)
+	}
+	return command + " || exit 2"
 }
 
 // guardTimeout is the hook's timeout in seconds, above guard check's own 5-second deadline: Claude Code runs a call whose hook passes
@@ -91,7 +96,7 @@ func (h Harness) writeGuardSettings(shipID string, configured map[string]any) (s
 	if h.Guards == "" || h.Program == "" {
 		return "", errors.New("claude-code has no guard: the trierarch's program or state folder is unknown")
 	}
-	text, err := GuardSettings(GuardCommand(h.Program, shipID), configured)
+	text, err := GuardSettings(GuardCommand(h.Program, shipID, h.Config), configured)
 	if err != nil {
 		return "", fmt.Errorf("make the guard settings: %w", err)
 	}

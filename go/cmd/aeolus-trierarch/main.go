@@ -1029,6 +1029,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				Sessions:        at.Sessions,
 				Program:         program,
 				Guards:          at.Guard,
+				Config:          at.Config,
 				Homes:           homesOf(at, configuration.Runtime),
 				// In containers, a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
 				MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime),

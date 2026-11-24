@@ -74,6 +74,8 @@ type Harness struct {
 	Program string
 	// Guards holds each ship's guard folder, which keeps its rules, settings and refusals.
 	Guards string
+	// Config is the trierarch's configuration file as it runs, which guard check protects; empty for the default one.
+	Config string
 	// MoveWithinUserNamespace moves a ship's home whose own top the host user cannot give its write to the trash within the runtime's user
 	// namespace; nil on the host.
 	MoveWithinUserNamespace func(from string, to string) error

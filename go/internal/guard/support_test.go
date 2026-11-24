@@ -65,7 +65,7 @@ func aChecker(sets ...json.RawMessage) (Checker, *memoryRefusals) {
 		Now:       func() time.Time { return checkedAt },
 		Home:      home,
 		Boundary:  Boundary{ShipFolder: shipFolder, Repositories: []string{repository}},
-		Protected: ClaudeCodeProtected(home, shipFolder, stateDir, configFile),
+		Protected: ClaudeCodeProtected(home, stateDir, configFile, shipFolder),
 	}, refusals
 }
 
