@@ -103,11 +103,17 @@ func (c Checker) deadline() time.Duration {
 // Check reads the call from input and answers within the deadline. Anything
 // that goes wrong refuses the call: the guard fails closed. Recording a
 // refusal runs within the same deadline and recovery, so a refusal it cannot
-// record is refused as guard failed.
-func (c Checker) Check(ctx context.Context, input io.Reader) Answer {
+// record is refused as guard failed. Check reads input itself and closes it
+// at the deadline, so a read that stalls stops there.
+func (c Checker) Check(ctx context.Context, input io.ReadCloser) Answer {
 	bounded, cancel := context.WithTimeout(ctx, c.deadline())
 	defer cancel()
-	result, cause := guarded(bounded, func() outcome { return c.evaluate(bounded, input) })
+	context.AfterFunc(bounded, func() { _ = input.Close() })
+	read, cause := readWithin(bounded, input)
+	var result outcome
+	if cause == "" {
+		result, cause = guarded(bounded, func() outcome { return c.evaluate(bounded, read) })
+	}
 	if cause != "" {
 		result = outcome{refusal: failed(cause)}
 	}
@@ -125,6 +131,24 @@ func (c Checker) Check(ctx context.Context, input io.Reader) Answer {
 		return deny(failed(cause))
 	}
 	return deny(result.refusal)
+}
+
+// readWithin reads the call from input in the caller, which closes input at
+// ctx's deadline. The cause is why it read no call, "" when it did.
+func readWithin(ctx context.Context, input io.Reader) (read call, cause string) {
+	defer func() {
+		if recover() != nil {
+			read, cause = call{}, "panic"
+		}
+	}()
+	read, err := readCall(input)
+	switch {
+	case ctx.Err() != nil:
+		return call{}, "deadline"
+	case err != nil:
+		return call{}, "input unreadable"
+	}
+	return read, ""
 }
 
 // guarded runs step within ctx's deadline and its own panic recovery. The
@@ -152,11 +176,7 @@ func guarded[T any](ctx context.Context, step func() T) (T, string) {
 	}
 }
 
-func (c Checker) evaluate(ctx context.Context, input io.Reader) outcome {
-	read, err := readCall(input)
-	if err != nil {
-		return outcome{refusal: failed("input unreadable")}
-	}
+func (c Checker) evaluate(ctx context.Context, read call) outcome {
 	raw, err := c.Sets.Sets(ctx)
 	if err != nil {
 		return outcome{call: read, refusal: failed("rules unreadable")}
