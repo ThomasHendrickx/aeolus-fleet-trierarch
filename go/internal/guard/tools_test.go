@@ -1,6 +1,10 @@
 package guard
 
-import "testing"
+import (
+	"os"
+	"regexp"
+	"testing"
+)
 
 func TestEachClaudeCodeToolIsCheckedAsItsKind(t *testing.T) {
 	tests := []struct {
@@ -20,6 +24,10 @@ func TestEachClaudeCodeToolIsCheckedAsItsKind(t *testing.T) {
 		{"Grep", map[string]any{"pattern": "x"}, "file-read"},
 		{"LS", map[string]any{"path": repository}, "file-read"},
 		{"NotebookRead", map[string]any{"notebook_path": repository + "/a.ipynb"}, "file-read"},
+		{"Skill", map[string]any{"skill": "go"}, "file-read"},
+		{"ToolSearch", map[string]any{"query": "x"}, "file-read"},
+		{"SlashCommand", map[string]any{"command": "/x"}, "file-read"},
+		{"TodoWrite", map[string]any{"todos": []any{}}, "file-read"},
 		{"WebFetch", map[string]any{"url": "https://example.com"}, "web"},
 		{"WebSearch", map[string]any{"query": "x"}, "web"},
 		{"Task", map[string]any{"prompt": "x"}, "agent"},
@@ -84,4 +92,33 @@ func TestAChosenSetCannotLoosenTheFloor(t *testing.T) {
 	)
 
 	refusedAs(t, checker, aCall("WebFetch", map[string]any{"url": "https://example.com"}), "Refused by the guard: tools.deny web, in floor @ 1111111.")
+}
+
+func TestTheToolsTheTrierarchDisallowsStayUnknown(t *testing.T) {
+	for _, tool := range []string{"AskUserQuestion", "EnterPlanMode", "ExitPlanMode"} {
+		checker, _ := aChecker(aSet("empty", "abcdef1", `{}`))
+		refusedAs(t, checker, aCall(tool, map[string]any{}), "Refused by the guard: unknown tool: "+tool+".")
+	}
+}
+
+// docsToolRow is a row of the Claude Code tool table in docs/trierarch.md.
+var docsToolRow = regexp.MustCompile("(?m)^\\| `([A-Za-z]+)` \\| `([a-z-]+)` \\|$")
+
+func TestTheDocsTableIsTheClaudeCodeToolMap(t *testing.T) {
+	docs, err := os.ReadFile("../../../docs/trierarch.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	documented := map[string]string{}
+	for _, row := range docsToolRow.FindAllStringSubmatch(string(docs), -1) {
+		documented[row[1]] = row[2]
+	}
+	if len(documented) != len(claudeCodeKinds) {
+		t.Errorf("docs list %d tools, the guard maps %d", len(documented), len(claudeCodeKinds))
+	}
+	for tool, kind := range documented {
+		if got := claudeCodeKind(tool); got != kind {
+			t.Errorf("docs map %s to %s, the guard to %q", tool, kind, got)
+		}
+	}
 }
