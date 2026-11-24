@@ -50,6 +50,9 @@ func judgeSet(set *Set, read call, shell *analysis) *verdict {
 		if refusal := judgeCommand(set, run); refusal != nil {
 			return refusal
 		}
+		if refusal := judgeGit(set, run); refusal != nil {
+			return refusal
+		}
 	}
 	return nil
 }

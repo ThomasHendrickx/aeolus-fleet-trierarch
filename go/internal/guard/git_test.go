@@ -138,7 +138,7 @@ func TestTheGitBypassesAreClosed(t *testing.T) {
 		{"a flag from a variable", "git commit $FLAGS -m x", "Refused by the guard: unresolvable: argument $FLAGS of git commit."},
 		{"a subcommand from a variable", `git "$SUB"`, `Refused by the guard: unresolvable: git subcommand "$SUB".`},
 		{"a refspec from a variable", `git push origin "$REF"`, "Refused by the guard: git.deny push, in rules @ abcdef1."},
-		{"a global option from a variable", `git "$OPT" push`, `Refused by the guard: unresolvable: argument "$OPT" of git.`},
+		{"a global option from a variable", `git "$OPT" push`, `Refused by the guard: unresolvable: git subcommand "$OPT".`},
 		{"a -c pair from a variable", `git -c "$PAIR" commit -m x`, `Refused by the guard: unresolvable: argument "$PAIR" of git.`},
 		{"git in sh -c", `sh -c 'git push'`, "Refused by the guard: git.deny push, in rules @ abcdef1."},
 		{"git in eval", `eval git push`, "Refused by the guard: git.deny push, in rules @ abcdef1."},

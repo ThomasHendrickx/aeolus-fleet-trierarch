@@ -47,10 +47,16 @@ func (a *analysis) cannotResolve(what string) {
 type state struct {
 	cwd  string
 	vars map[string]string
+	// gitEnv are the GIT_* variables set, literal or not: git reads them.
+	gitEnv map[string]word
+}
+
+func newState(cwd string) *state {
+	return &state{cwd: cwd, vars: map[string]string{}, gitEnv: map[string]word{}}
 }
 
 func (s *state) copy() *state {
-	return &state{cwd: s.cwd, vars: maps.Clone(s.vars)}
+	return &state{cwd: s.cwd, vars: maps.Clone(s.vars), gitEnv: maps.Clone(s.gitEnv)}
 }
 
 // merge keeps what both paths through the input agree on.
@@ -63,6 +69,8 @@ func (s *state) merge(other *state) {
 			delete(s.vars, name)
 		}
 	}
+	// A GIT_* variable either path sets may be set.
+	maps.Copy(s.gitEnv, other.gitEnv)
 }
 
 // analyzer reads shell input into its analysis.
@@ -87,7 +95,7 @@ func analyzeShell(source, cwd, home string) (*analysis, error) {
 		return nil, err
 	}
 	a := &analyzer{home: home, out: &analysis{}}
-	a.stmts(file.Stmts, &state{cwd: cwd, vars: map[string]string{}})
+	a.stmts(file.Stmts, newState(cwd))
 	return a.out, nil
 }
 
@@ -243,6 +251,9 @@ func (a *analyzer) assign(assign *syntax.Assign, st *state, env map[string]word)
 		env[name] = value
 		return
 	}
+	if strings.HasPrefix(name, "GIT_") {
+		st.gitEnv[name] = value
+	}
 	if value.literal {
 		st.vars[name] = value.text
 	} else {
@@ -356,6 +367,15 @@ func init() {
 		"xargs":   (*analyzer).xargs,
 		"find":    (*analyzer).find,
 		"watch":   (*analyzer).watch,
+		"git":     (*analyzer).git,
+	}
+}
+
+// git reads the shell command a git !alias runs.
+func (a *analyzer) git(c runCall) {
+	read := readGit(invocation{name: c.name, args: c.args, env: c.env, state: c.state})
+	if read.shellAlias != "" {
+		a.script(read.shellAlias, "git alias", c.state.copy())
 	}
 }
 
@@ -682,7 +702,7 @@ func (a *analyzer) literalStdin(input shellInput) (string, bool) {
 	}
 	switch redirect.Op {
 	case syntax.WordHdoc:
-		value := a.word(redirect.Word, &state{vars: map[string]string{}})
+		value := a.word(redirect.Word, newState(""))
 		return value.text, value.literal
 	case syntax.Hdoc, syntax.DashHdoc:
 		if redirect.Hdoc == nil {
