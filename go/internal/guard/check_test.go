@@ -66,6 +66,7 @@ func TestTheGuardFailsClosed(t *testing.T) {
 		{"on rules it cannot read", aShellCall("ls"), "Refused by the guard: guard failed: rules unreadable.", memorySets{err: errors.New("gone")}},
 		{"on rules it cannot decode", aShellCall("ls"), "Refused by the guard: guard failed: rules unreadable.", memorySets{sets: []json.RawMessage{json.RawMessage(`{"name":1}`)}}},
 		{"on a rule type it does not know", aShellCall("ls"), "Refused by the guard: guard failed: rules unreadable.", memorySets{sets: []json.RawMessage{aSet("odd", "abc", `{"reads":{"deny":["x"]}}`)}}},
+		{"on a git action not on the closed list", aShellCall("ls"), "Refused by the guard: guard failed: rules unreadable.", memorySets{sets: []json.RawMessage{aSet("typo", "abc", `{"git":{"deny":["pussh"]}}`)}}},
 		{"on a command it cannot parse", aShellCall("echo 'unterminated"), "Refused by the guard: guard failed: shell input unparsable.", nil},
 	}
 	for _, tt := range tests {
