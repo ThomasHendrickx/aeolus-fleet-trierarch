@@ -157,7 +157,7 @@ func main() {
 		},
 		McpConfiguration: heldMcpConfigurationOf,
 		GuardRules: func(at paths.Paths, identity guardrules.Identity) receiving.GuardKeeper {
-			return &guardrules.Keeper{Identity: identity, Store: guardfile.Store{Ships: at.Ships}}
+			return &guardrules.Keeper{Identity: identity, Store: guardfile.Store{Guards: at.Guard}}
 		},
 		McpFleet: func(kept crew.File) cli.McpFleet {
 			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
@@ -499,6 +499,10 @@ func (k keptGuardRules) KeptVersion(shipID string) (int, bool, error) {
 	return k.store.KeptVersion(context.Background(), shipID)
 }
 
+func (k keptGuardRules) Forget(shipID string) error {
+	return k.store.Forget(context.Background(), shipID)
+}
+
 // sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
 const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
 
@@ -721,7 +725,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Fleet:             client,
 		Sessions:          running,
 		Harnesses:         harnesses,
-		GuardRules:        keptGuardRules{store: guardfile.Store{Ships: at.Ships}},
+		GuardRules:        keptGuardRules{store: guardfile.Store{Guards: at.Guard}},
 		Workspace:         places,
 		FolderProcesses:   folderProcessesOf(configuration.Runtime),
 		Store:             saved,
@@ -1024,7 +1028,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				ProxyURL:        proxyURL,
 				Sessions:        at.Sessions,
 				Program:         program,
-				Ships:           at.Ships,
+				Guards:          at.Guard,
 				Homes:           homesOf(at, configuration.Runtime),
 				// In containers, a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
 				MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime),

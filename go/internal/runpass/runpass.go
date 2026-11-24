@@ -114,6 +114,8 @@ type Guarded interface {
 type GuardRules interface {
 	// KeptVersion is the settings version of the rules kept for the ship, false when none are kept.
 	KeptVersion(shipID string) (int, bool, error)
+	// Forget removes the ship's guard folder, its rules, settings and refusals, as its request is released.
+	Forget(shipID string) error
 }
 
 // GuardRulesWait is how long a crew waits for the rules of its settings version before its request is given back (design 4.5).
@@ -1044,6 +1046,11 @@ func (p Pass) release(state reconciler.State, entry reconciler.Entry) (reconcile
 	}
 	if err := p.endWorkspace(entry); err != nil {
 		return state, err
+	}
+	if p.GuardRules != nil {
+		if err := p.GuardRules.Forget(entry.ShipID); err != nil {
+			return state, err
+		}
 	}
 	if state, err = p.remove(state, entry.ShipID); err != nil {
 		return state, err

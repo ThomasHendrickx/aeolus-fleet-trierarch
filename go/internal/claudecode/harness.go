@@ -72,8 +72,8 @@ type Harness struct {
 	Homes string
 	// Program is the trierarch's own file, which every session's guard hook runs as guard check.
 	Program string
-	// Ships is the state folder's ships directory, where each ship's guard folder keeps its rules, settings and refusals.
-	Ships string
+	// Guards holds each ship's guard folder, which keeps its rules, settings and refusals.
+	Guards string
 	// MoveWithinUserNamespace moves a ship's home whose own top the host user cannot give its write to the trash within the runtime's user
 	// namespace; nil on the host.
 	MoveWithinUserNamespace func(from string, to string) error

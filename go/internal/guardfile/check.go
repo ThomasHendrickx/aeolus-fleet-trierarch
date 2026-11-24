@@ -16,9 +16,9 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 )
 
-// Folder is the ship's guard folder in the state folder's ships directory: its rules, settings and refusals.
-func Folder(ships string, shipID string) string {
-	return filepath.Join(ships, shipID, "guard")
+// Folder is the ship's guard folder among the guard folders: its rules, settings and refusals.
+func Folder(guards string, shipID string) string {
+	return filepath.Join(guards, shipID)
 }
 
 // Sets are the rule sets kept for one ship, as guard check reads them.
@@ -74,7 +74,7 @@ func (s Store) GuardStatus(ctx context.Context, shipID string) (guard.Status, bo
 	if status.Sets == nil {
 		status.Sets = []guard.AppliedSet{}
 	}
-	lines, err := secrets.ReadPrivate(filepath.Join(Folder(s.Ships, shipID), refusalsFile))
+	lines, err := secrets.ReadPrivate(filepath.Join(Folder(s.Guards, shipID), refusalsFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return status, true, nil
 	}
@@ -100,7 +100,7 @@ func (s Store) GuardStatus(ctx context.Context, shipID string) (guard.Status, bo
 
 // Refusals appends each refusal of a ship to refusals.jsonl in its guard folder, one JSON object a line, mode 600.
 type Refusals struct {
-	Ships  string
+	Guards string
 	ShipID string
 }
 
@@ -116,7 +116,7 @@ func (r Refusals) Append(ctx context.Context, refusal guard.Refusal) error {
 	if err != nil {
 		return fmt.Errorf("encode refusal: %w", err)
 	}
-	folder := Folder(r.Ships, r.ShipID)
+	folder := Folder(r.Guards, r.ShipID)
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		return fmt.Errorf("make guard folder: %w", err)
 	}

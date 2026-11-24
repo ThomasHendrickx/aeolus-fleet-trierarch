@@ -92,6 +92,8 @@ type Paths struct {
 	SealingKey string
 	// Repositories holds the clones of the trusted repositories, one folder per repository.
 	Repositories string
+	// Guard holds a guard folder per ship, `guard/<shipId>/`, apart from the ship folders: its rules, its session's settings and its refusals, which a ship folder's removal and sweep never touch.
+	Guard string
 }
 
 // Of the user's home folder, with the configuration at config when it is not empty.
@@ -130,5 +132,6 @@ func Of(homeDirectory string, config string) Paths {
 		},
 		SealingKey:   filepath.Join(home, "sealing-key"),
 		Repositories: filepath.Join(home, "repositories"),
+		Guard:        filepath.Join(home, "guard"),
 	}
 }

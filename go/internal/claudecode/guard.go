@@ -88,14 +88,14 @@ func withoutSettingsFlag(flags []string) []string {
 
 // writeGuardSettings writes the ship's guard settings, with the configured ones, in its guard folder, mode 600, and answers their file.
 func (h Harness) writeGuardSettings(shipID string, configured map[string]any) (string, error) {
-	if h.Ships == "" || h.Program == "" {
+	if h.Guards == "" || h.Program == "" {
 		return "", errors.New("claude-code has no guard: the trierarch's program or state folder is unknown")
 	}
 	text, err := GuardSettings(GuardCommand(h.Program, shipID), configured)
 	if err != nil {
 		return "", fmt.Errorf("make the guard settings: %w", err)
 	}
-	file := filepath.Join(guardfile.Folder(h.Ships, shipID), guardSettingsFile)
+	file := filepath.Join(guardfile.Folder(h.Guards, shipID), guardSettingsFile)
 	if err := secrets.WritePrivate(file, text); err != nil {
 		return "", fmt.Errorf("write the guard settings: %w", err)
 	}

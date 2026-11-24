@@ -13,15 +13,14 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 )
 
-// Store holds rules in <state>/ships/<shipId>/guard/rules.json. Ships is the
-// state folder's ships directory, independent of the workspace location.
-type Store struct{ Ships string }
+// Store holds rules in rules.json in the ship's guard folder. Guards holds every ship's guard folder, apart from the ship folders.
+type Store struct{ Guards string }
 
 func (s Store) path(shipID string) (string, error) {
 	if !crew.IsShipID(shipID) {
 		return "", fmt.Errorf("invalid guard rules ship id")
 	}
-	return filepath.Join(s.Ships, shipID, "guard", "rules.json"), nil
+	return filepath.Join(Folder(s.Guards, shipID), "rules.json"), nil
 }
 
 // Read reads complete rules, or nil when they have not arrived. Other failures
@@ -75,6 +74,21 @@ func (s Store) Write(ctx context.Context, shipID string, text []byte) error {
 	}
 	if err := secrets.WritePrivate(path, text); err != nil {
 		return fmt.Errorf("write guard rules: %w", err)
+	}
+	return nil
+}
+
+// Forget removes the ship's whole guard folder, its rules, settings and refusals, as its request goes. A folder already gone is
+// nothing to do.
+func (s Store) Forget(ctx context.Context, shipID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !crew.IsShipID(shipID) {
+		return fmt.Errorf("invalid guard rules ship id")
+	}
+	if err := os.RemoveAll(Folder(s.Guards, shipID)); err != nil {
+		return fmt.Errorf("remove guard folder: %w", err)
 	}
 	return nil
 }

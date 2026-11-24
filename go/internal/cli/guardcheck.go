@@ -76,13 +76,13 @@ func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Ans
 		now = time.Now
 	}
 	checker := guard.Checker{
-		Sets:      guardfile.Sets{Store: guardfile.Store{Ships: at.Ships}, ShipID: shipID},
+		Sets:      guardfile.Sets{Store: guardfile.Store{Guards: at.Guard}, ShipID: shipID},
 		Links:     guardfile.Links{},
-		Refusals:  guardfile.Refusals{Ships: at.Ships, ShipID: shipID},
+		Refusals:  guardfile.Refusals{Guards: at.Guard, ShipID: shipID},
 		Now:       now,
 		Home:      machine.HomeDirectory,
 		Boundary:  guard.Boundary{ShipFolder: resolvedPath(shipFolder), Repositories: repositories},
-		Protected: guard.ClaudeCodeProtected(resolvedPath(machine.HomeDirectory), resolvedPath(shipFolder), resolvedPath(guardfile.Folder(at.Ships, shipID)), resolvedPath(at.Config)),
+		Protected: guard.ClaudeCodeProtected(resolvedPath(machine.HomeDirectory), resolvedPath(shipFolder), resolvedPath(guardfile.Folder(at.Guard, shipID)), resolvedPath(at.Config)),
 	}
 	return checker.Check(ctx, machine.Stdin)
 }
