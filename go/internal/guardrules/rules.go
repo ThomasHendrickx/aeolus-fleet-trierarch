@@ -42,5 +42,18 @@ func Read(payload string, configured Identity) (Assignment, error) {
 		message.FleetID != configured.FleetID || message.PluginShipID != configured.PluginShipID {
 		return Assignment{}, fmt.Errorf("%w: fleet or plugin ship does not match", ErrRefused)
 	}
+	// JSON object order is not rule content. Arrays keep their order because
+	// the first refusing rule determines the refusal shown to the session.
+	for index, raw := range message.Sets {
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return Assignment{}, fmt.Errorf("%w: invalid set: %w", ErrRefused, err)
+		}
+		canonical, err := json.Marshal(value)
+		if err != nil {
+			return Assignment{}, fmt.Errorf("%w: encode set: %w", ErrRefused, err)
+		}
+		message.Sets[index] = canonical
+	}
 	return message, nil
 }
