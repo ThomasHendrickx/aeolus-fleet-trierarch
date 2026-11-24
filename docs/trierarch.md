@@ -346,6 +346,37 @@ A ship crewed by hand before its trierarch crews it counts as crewed: the triera
 
 The trierarch's own ship takes no work by message: a ping gets pong, and any other delivery is acknowledged and logged as not handled. Only the crew requests assigned to it start or stop a session on the machine.
 
+### The guard check
+
+`aeolus-trierarch guard check` checks one tool call of a guarded session before it runs, against the guard's own protection and the rule sets kept for the session (aeolus-fleet docs/design/guard, sections 4.1 and 4.6). It reads Claude Code's PreToolUse hook input and answers within its own 5-second deadline. A call it lets run gets no answer and exit code 0. A call it refuses gets Claude Code's deny, the same reason on stderr and exit code 2, so neither a deny nor the blocking code lets it through: `Refused by the guard: tools.deny web, in no-web @ 8d41e07.`, or for a refusal by the mechanism itself, which names no set and no commit, `Refused by the guard: unknown tool: Teleport.` Anything that goes wrong refuses the call as `guard failed: <cause>`: input it cannot read, rules it cannot read or decode (a field the rule set file does not have too), shell input that does not parse, a panic and its deadline.
+
+Each tool is checked as a harness-neutral kind. Claude Code's tools map so; an MCP tool `mcp__<server>__<tool>` is `mcp:<server>/<tool>`, and any other tool is unknown, refused as `unknown tool: <name>` while any rule set applies (AskUserQuestion, EnterPlanMode and ExitPlanMode among them, which every Claude Code session disallows anyway):
+
+| Tool | Kind |
+| --- | --- |
+| `Bash` | `shell` |
+| `BashOutput` | `shell` |
+| `KillShell` | `shell` |
+| `Write` | `file-write` |
+| `Edit` | `file-write` |
+| `MultiEdit` | `file-write` |
+| `NotebookEdit` | `file-write` |
+| `Read` | `file-read` |
+| `Glob` | `file-read` |
+| `Grep` | `file-read` |
+| `LS` | `file-read` |
+| `NotebookRead` | `file-read` |
+| `Skill` | `file-read` |
+| `ToolSearch` | `file-read` |
+| `SlashCommand` | `file-read` |
+| `TodoWrite` | `file-read` |
+| `WebFetch` | `web` |
+| `WebSearch` | `web` |
+| `Task` | `agent` |
+| `Agent` | `agent` |
+
+Skill, ToolSearch and SlashCommand only read text into the session, and TodoWrite changes only the session's own list. `tools.deny` and `tools.allow` match kinds, `*` standing for any characters (`mcp:linear/*`). Every set refuses on its own: a call runs only when each set lets it, and the first refusing rule names the refusal.
+
 ### Crashed and Restart
 
 A session that dies is restarted by the trierarch on its own. When its restart budget is spent, the trierarch writes status `crashed` and sends the ship's owner a plain-text report naming the ship, how often its session crashed and why its last start (#397) or turn failed: a human decides. For Claude Code, Codex and Copilot, the latest failed turn reason also appears in the blocked status. Before either report, secrets and URL credentials are replaced with `[redacted]`, whitespace is collapsed to one line, and the reason is capped at 200 characters, ending in an ellipsis when shortened. A later successful turn clears an earlier error, including as the cause of a start. The operator's Restart writes the request again as an exact copy, and Edit writes it with new settings: either is a new settings version. The trierarch treats a new version of its crew record as the signal: it stops the running session and crews the ship again with that version, in the same ship folder (The ship folder above), as a first start: a fresh session with that version's first prompt, never the old conversation continued (#443). A crashed request starts again with a fresh restart budget. It is no release: the ship is crewed again under the lease it holds, with the crew token the state keeps, since core removes the crew request on a release (#367), and its repositories stay.

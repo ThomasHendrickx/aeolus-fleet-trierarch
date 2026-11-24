@@ -17,7 +17,8 @@ const (
 	kindAgent     = "agent"
 )
 
-// claudeCodeKinds maps Claude Code's tools onto the guard's kinds.
+// claudeCodeKinds maps Claude Code's tools onto the guard's kinds, as the
+// table in docs/trierarch.md ("The guard check") lists them.
 var claudeCodeKinds = map[string]string{
 	"Bash":         kindShell,
 	"BashOutput":   kindShell,
@@ -31,6 +32,10 @@ var claudeCodeKinds = map[string]string{
 	"Grep":         kindFileRead,
 	"LS":           kindFileRead,
 	"NotebookRead": kindFileRead,
+	"Skill":        kindFileRead,
+	"ToolSearch":   kindFileRead,
+	"SlashCommand": kindFileRead,
+	"TodoWrite":    kindFileRead,
 	"WebFetch":     kindWeb,
 	"WebSearch":    kindWeb,
 	"Task":         kindAgent,
