@@ -136,6 +136,8 @@ type Entry struct {
 	// CrewToken is the one its register gave, kept in the state only (decision 0026).
 	CrewToken  string `json:"crewToken,omitempty"`
 	HasStarted bool   `json:"hasStarted"`
+	// GuardWaitSince is when its session first waited for the guard rules of its settings version to start, cleared once it starts.
+	GuardWaitSince string `json:"guardWaitSince,omitempty"`
 	// GuardReported is the settings version and refusal count of the guard last reported for it, as `<version>:<count>`.
 	GuardReported string `json:"guardReported,omitempty"`
 	// UsageLimitTold is the occurrence whose notice was sent, kept across passes and restarts (#1629).

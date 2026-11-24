@@ -133,21 +133,8 @@ func guardedOf(harness Harness) (Guarded, bool) {
 	return guarded, true
 }
 
-// guardProblem is why the harness cannot start the entry's session guarded, "" when it can or has no guard.
-func guardProblem(harness Harness, entry reconciler.Entry) string {
-	guarded, ok := guardedOf(harness)
-	if !ok {
-		return ""
-	}
-	return guarded.GuardProblem(entry)
-}
-
-// hasGuardRules is whether the rules of the entry's settings version are kept, as a guarded session needs to start; always for a
-// harness without the guard.
-func (p Pass) hasGuardRules(harness Harness, entry reconciler.Entry) (bool, error) {
-	if _, ok := guardedOf(harness); !ok {
-		return true, nil
-	}
+// hasGuardRules is whether the rules of the entry's settings version are kept, as a guarded session needs to start.
+func (p Pass) hasGuardRules(entry reconciler.Entry) (bool, error) {
 	if p.GuardRules == nil {
 		return false, nil
 	}
@@ -158,18 +145,101 @@ func (p Pass) hasGuardRules(harness Harness, entry reconciler.Entry) (bool, erro
 	return ok && version == entry.SettingsVersion, nil
 }
 
-// waitsForGuardRules is whether the crew waits for the rules of its settings version, and why it is given back once they did not
-// arrive within GuardRulesWait of its crewing.
-func (p Pass) waitsForGuardRules(harness Harness, entry reconciler.Entry) (bool, string, error) {
-	has, err := p.hasGuardRules(harness, entry)
-	if err != nil || has {
-		return false, "", err
+// guardGate is what the guard's start conditions say of a start of the entry's session (guard design 4.5, 4.6): it starts; it waits
+// for the rules of its settings version, its wait kept in the entry from its first; or its request is given back, with why, once they
+// did not arrive within GuardRulesWait of that first wait, or when the settings it would load disable hooks.
+type guardGate struct {
+	isWaiting bool
+	givenBack string
+	// entry is the entry with its wait kept.
+	entry reconciler.Entry
+}
+
+// guardGateOf is the guard's start conditions for the entry's session now, the one place every start of a guarded session asks
+// them. The settings are read only of an entry with a folder: a crew asks again once its folder is made, before it registers.
+func (p Pass) guardGateOf(harness Harness, entry reconciler.Entry) (guardGate, error) {
+	guarded, ok := guardedOf(harness)
+	if !ok {
+		return guardGate{entry: entry}, nil
 	}
-	since, err := time.Parse(time.RFC3339, entry.Since)
-	if err == nil && p.Now().Sub(since) >= GuardRulesWait {
-		return false, guardRulesDidNotArrive, nil
+	has, err := p.hasGuardRules(entry)
+	if err != nil {
+		return guardGate{entry: entry}, err
 	}
-	return true, "", nil
+	if !has {
+		if entry.GuardWaitSince == "" {
+			entry.GuardWaitSince = p.Now().UTC().Format(time.RFC3339)
+		}
+		since, err := time.Parse(time.RFC3339, entry.GuardWaitSince)
+		if err == nil && p.Now().Sub(since) >= GuardRulesWait {
+			return guardGate{givenBack: guardRulesDidNotArrive, entry: entry}, nil
+		}
+		return guardGate{isWaiting: true, entry: entry}, nil
+	}
+	entry.GuardWaitSince = ""
+	if entry.Folder == "" {
+		return guardGate{entry: entry}, nil
+	}
+	return guardGate{givenBack: guarded.GuardProblem(entry), entry: entry}, nil
+}
+
+// isWaitingForGuardRules is whether the entry's session, which would start again, waits for the rules of its settings version: it
+// waited for them before and its wait is not over. The first wait begins at a start, which keeps it.
+func (p Pass) isWaitingForGuardRules(harness Harness, entry reconciler.Entry) bool {
+	if entry.GuardWaitSince == "" {
+		return false
+	}
+	gate, err := p.guardGateOf(harness, entry)
+	return err != nil || gate.isWaiting
+}
+
+// heldByGuard asks the guard's start conditions of the entry's session: held when it waits, its wait kept, or when its request was
+// given back.
+func (p Pass) heldByGuard(state reconciler.State, harness Harness, entry reconciler.Entry) (reconciler.State, guardGate, bool, error) {
+	gate, err := p.guardGateOf(harness, entry)
+	switch {
+	case err != nil:
+		return state, gate, true, err
+	case gate.givenBack != "":
+		state, err = p.giveBack(state, entry.ShipID, entry.SettingsVersion, gate.givenBack, &gate.entry)
+		return state, gate, true, err
+	case gate.isWaiting:
+		state, err = p.put(state, gate.entry)
+		return state, gate, true, err
+	}
+	return state, gate, false, nil
+}
+
+// sessionStart is one start of a session: the entry as kept, the entry as its harness starts it, and how.
+type sessionStart struct {
+	entry    reconciler.Entry
+	starting reconciler.Entry
+	// isFirstStart starts it with its first prompt; isAgain starts the session of one that died, its messages kept for the new one.
+	isFirstStart bool
+	isAgain      bool
+	launchID     string
+}
+
+// startSession starts a session as every path does, a crew, a start again, an upgrade's and a recovery's: only once the guard's
+// start conditions let it, so no path starts a guarded session without them. A session that waits keeps its wait in its entry; one
+// that cannot start guarded gives its request back. The entry answered is the one kept, false when it did not start.
+func (p Pass) startSession(state reconciler.State, harness Harness, start sessionStart) (reconciler.State, reconciler.Entry, bool, error) {
+	state, gate, isHeld, err := p.heldByGuard(state, harness, start.entry)
+	if err != nil || isHeld {
+		return state, gate.entry, false, err
+	}
+	if start.isAgain {
+		if err := harness.SessionDied(start.entry); err != nil {
+			return state, start.entry, false, err
+		}
+	}
+	if err := p.Workspace.WriteRootFiles(start.starting); err != nil {
+		return state, start.entry, false, err
+	}
+	if err := harness.Launch(start.starting, start.isFirstStart, start.launchID); err != nil {
+		return state, start.entry, false, err
+	}
+	return state, gate.entry, true, nil
 }
 
 // Workspace makes and removes a ship's workspace, and lists every folder under the root.
@@ -600,8 +670,8 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed, snaps
 		if entry.State == "restarting" || (entry.State == "running" && !hasSession) {
 			if problem := p.startProblem(entry, p.loginOf(entry)); problem != "" {
 				observed.StartProblems[shipID] = problem
-			} else if has, err := p.hasGuardRules(harness, entry); ok && (err != nil || !has) {
-				// It waits, restarting, until the rules of its settings version are kept again.
+			} else if ok && p.isWaitingForGuardRules(harness, entry) {
+				// It waits, restarting, until the rules of its settings version are kept again, or its wait is over.
 				observed.StartProblems[shipID] = "waiting for the guard rules of its settings version"
 			}
 		}
@@ -789,16 +859,11 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	}
 	// A guarded session starts only with the rules of its settings version (guard design 4.5): it waits for them, and is given back
 	// before it registers when they did not arrive in time.
-	isWaiting, notArrived, err := p.waitsForGuardRules(harness, entry)
-	if err != nil {
+	state, gate, isHeld, err := p.heldByGuard(state, harness, entry)
+	if err != nil || isHeld {
 		return state, err
 	}
-	if notArrived != "" {
-		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, notArrived, &entry)
-	}
-	if isWaiting {
-		return state, nil
-	}
+	entry = gate.entry
 	if entry.IsOldLayout && entry.CrewToken != "" {
 		return p.crewInTheShipFolderLayout(state, entry, harness)
 	}
@@ -865,8 +930,8 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
 	}
 	// Settings that keep the guard from running are this computer's state too: given back before it registers (guard design 4.6).
-	if problem := guardProblem(harness, entry); problem != "" {
-		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
+	if state, _, isHeld, err := p.heldByGuard(state, harness, entry); err != nil || isHeld {
+		return state, err
 	}
 	crewToken := entry.CrewToken
 	if !isUnderItsLease {
@@ -890,10 +955,8 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	launchID := p.NewLaunchID()
 	starting := entry
 	starting.Login = login
-	if err := p.Workspace.WriteRootFiles(starting); err != nil {
-		return state, err
-	}
-	if err := harness.Launch(starting, !entry.HasStarted, launchID); err != nil {
+	state, entry, isStarted, err := p.startSession(state, harness, sessionStart{entry: entry, starting: starting, isFirstStart: !entry.HasStarted, launchID: launchID})
+	if err != nil || !isStarted {
 		return state, err
 	}
 	entry.CrewFailures = 0
@@ -990,10 +1053,8 @@ func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.En
 	starting := entry
 	starting.Login = login
 	starting.FirstPrompt = "This is a continuation of an existing crew request in a fresh session. Your previous conversation is unavailable. Recover the current task and progress from the fleet before acting; do not repeat completed work."
-	if err := p.Workspace.WriteRootFiles(starting); err != nil {
-		return state, err
-	}
-	if err := harness.Launch(starting, true, launchID); err != nil {
+	state, entry, isStarted, err := p.startSession(state, harness, sessionStart{entry: entry, starting: starting, isFirstStart: true, launchID: launchID})
+	if err != nil || !isStarted {
 		return state, err
 	}
 	entry.IsShipFolderGone, entry.HasStarted, entry.LaunchedAt, entry.LaunchID = false, true, p.Now().UTC().Format(isoMillis), launchID
@@ -1008,20 +1069,12 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 	if err != nil || entry.Folder == "" {
 		return state, err
 	}
-	if err := harness.SessionDied(entry); err != nil {
-		return state, err
-	}
-	if problem := guardProblem(harness, entry); problem != "" {
-		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
-	}
 	launchID := p.NewLaunchID()
 	login := p.loginOf(entry)
 	starting := entry
 	starting.Login = login
-	if err := p.Workspace.WriteRootFiles(starting); err != nil {
-		return state, err
-	}
-	if err := harness.Launch(starting, false, launchID); err != nil {
+	state, entry, isStarted, err := p.startSession(state, harness, sessionStart{entry: entry, starting: starting, isAgain: true, launchID: launchID})
+	if err != nil || !isStarted {
 		return state, err
 	}
 	entry.LaunchedAt, entry.LaunchID = p.Now().UTC().Format(isoMillis), launchID
