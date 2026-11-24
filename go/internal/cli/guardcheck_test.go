@@ -166,6 +166,54 @@ func TestGuardCheckProtectsTheGuardsOwnFilesTheConfigurationAndTheHarnessSetting
 	}
 }
 
+func TestGuardCheckProtectsTheConfigurationItIsGiven(t *testing.T) {
+	machine, _, folder := aGuardedShip(t, noPublishRules)
+	configuration := filepath.Join(machine.HomeDirectory, "elsewhere", "trierarch.json")
+	at := paths.Of(machine.HomeDirectory, configuration)
+	if err := os.MkdirAll(filepath.Dir(at.State), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	machine.Stdin = io.NopCloser(strings.NewReader(aHookCall(t, folder, "Write", map[string]any{"file_path": configuration, "content": "{}"})))
+	machine.Stderr = &stderr
+
+	_, code := Main([]string{"guard", "check", "--ship", guardedShip, "--config", configuration}, machine)
+
+	if want := "Refused by the guard: protected: " + configuration + "."; code != 2 || strings.TrimSpace(stderr.String()) != want {
+		t.Fatalf("guard check = %q, %d, want %q", stderr.String(), code, want)
+	}
+}
+
+func TestGuardCheckProtectsTheProjectSettingsOfAConfiguredFolderOutsideTheShipsFolder(t *testing.T) {
+	machine, at, _ := aGuardedShip(t, noPublishRules)
+	configured := filepath.Join(machine.HomeDirectory, "projects", "site")
+	if err := os.MkdirAll(configured, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	crewed, err := (state.File{Path: at.State}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := crewed.Entries[guardedShip]
+	entry.Folder, entry.Workspace = configured, reconciler.Workspace{Kind: "folder", Name: "site"}
+	crewed.Entries[guardedShip] = entry
+	if err := (state.File{Path: at.State}).Save(crewed); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{
+		filepath.Join(configured, ".claude", "settings.json"),
+		filepath.Join(configured, "packages", "web", ".claude", "settings.local.json"),
+	} {
+		call, _ := json.Marshal(map[string]any{"session_id": "s1", "cwd": configured, "hook_event_name": "PreToolUse", "tool_name": "Write", "tool_input": map[string]any{"file_path": target, "content": "{}"}})
+
+		_, stderr, code := guardCheck(machine, guardedShip, string(call))
+
+		if want := "Refused by the guard: protected: " + target + "."; code != 2 || strings.TrimSpace(stderr) != want {
+			t.Errorf("guard check of a write to %s = %q, %d, want %q", target, stderr, code, want)
+		}
+	}
+}
+
 func TestGuardCheckKeepsWritesInsideTheShipsFolder(t *testing.T) {
 	machine, _, folder := aGuardedShip(t, noPublishRules)
 	outside := filepath.Join(machine.HomeDirectory, "elsewhere.txt")

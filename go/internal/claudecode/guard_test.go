@@ -54,6 +54,22 @@ func TestEverySessionStartsWithTheGuardHookInItsSettings(t *testing.T) {
 	}
 }
 
+func TestTheGuardHookChecksWithTheConfigurationTheTrierarchRunsWith(t *testing.T) {
+	harness, running := aGuardedHarness(t)
+	harness.Config = "/etc/aeolus fleet/trierarch.json"
+	entry := anEntry(t)
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, _ := guardSettingsOf(t, running.started[0].Command)
+	hook := settings["hooks"].(map[string]any)["PreToolUse"].([]any)[0].(map[string]any)["hooks"].([]any)[0].(map[string]any)
+	if want := `'/opt/aeolus trierarch/aeolus-trierarch' guard check --ship ` + scout + ` --config '/etc/aeolus fleet/trierarch.json' || exit 2`; hook["command"] != want {
+		t.Fatalf("hook command = %q, want %q", hook["command"], want)
+	}
+}
+
 func TestTheGuardSettingsComeBeforeTheMcpConfigurationWhichTakesEveryWordUpToTheNextFlag(t *testing.T) {
 	harness, running := aGuardedHarness(t)
 	entry := anEntry(t)
