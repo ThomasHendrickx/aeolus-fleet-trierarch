@@ -3,13 +3,9 @@
 package guardrules
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 )
 
 // ContentType carries resolved guard rules from the trierarch plugin ship.
@@ -35,29 +31,16 @@ type Assignment struct {
 
 // Read checks the rules message for the configured fleet and plugin ship.
 func Read(payload string, configured Identity) (Assignment, error) {
-	var message struct {
-		FleetID         *string            `json:"fleetId"`
-		PluginShipID    *string            `json:"pluginShipId"`
-		ShipID          *string            `json:"shipId"`
-		SettingsVersion *int               `json:"settingsVersion"`
-		Sets            *[]json.RawMessage `json:"sets"`
-	}
-	decoder := json.NewDecoder(bytes.NewBufferString(payload))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&message) != nil || decoder.Decode(&struct{}{}) != io.EOF ||
-		message.FleetID == nil || message.PluginShipID == nil || message.ShipID == nil ||
-		message.SettingsVersion == nil || message.Sets == nil {
+	if !messageSchema(json.RawMessage(payload)) {
 		return Assignment{}, fmt.Errorf("%w: invalid message", ErrRefused)
 	}
+	var message Assignment
+	if err := json.Unmarshal([]byte(payload), &message); err != nil {
+		return Assignment{}, fmt.Errorf("%w: invalid message: %w", ErrRefused, err)
+	}
 	if configured.FleetID == "" || configured.PluginShipID == "" ||
-		*message.FleetID != configured.FleetID || *message.PluginShipID != configured.PluginShipID {
+		message.FleetID != configured.FleetID || message.PluginShipID != configured.PluginShipID {
 		return Assignment{}, fmt.Errorf("%w: fleet or plugin ship does not match", ErrRefused)
 	}
-	if !crew.IsShipID(*message.ShipID) || *message.SettingsVersion < 1 {
-		return Assignment{}, fmt.Errorf("%w: invalid ship or settings version", ErrRefused)
-	}
-	return Assignment{
-		FleetID: *message.FleetID, PluginShipID: *message.PluginShipID, ShipID: *message.ShipID,
-		SettingsVersion: *message.SettingsVersion, Sets: *message.Sets,
-	}, nil
+	return message, nil
 }
