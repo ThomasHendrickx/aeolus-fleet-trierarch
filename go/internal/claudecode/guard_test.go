@@ -42,7 +42,7 @@ func TestEverySessionStartsWithTheGuardHookInItsSettings(t *testing.T) {
 	}
 	want := map[string]any{"hooks": map[string]any{"PreToolUse": []any{map[string]any{
 		"matcher": "*",
-		"hooks":   []any{map[string]any{"type": "command", "command": `'/opt/aeolus trierarch/aeolus-trierarch' guard check --ship ` + scout}},
+		"hooks":   []any{map[string]any{"type": "command", "command": `'/opt/aeolus trierarch/aeolus-trierarch' guard check --ship ` + scout + ` || exit 2`}},
 	}}}}
 	if got, _ := json.Marshal(written); string(got) != mustJSON(t, want) {
 		t.Fatalf("settings = %s, want %s", got, mustJSON(t, want))

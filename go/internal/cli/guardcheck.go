@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
@@ -60,11 +61,15 @@ func guardAnswer(words []string, machine Machine) guard.Answer {
 	if machine.Stdin == nil {
 		return guard.Failed("input unreadable")
 	}
+	now := machine.Now
+	if now == nil {
+		now = time.Now
+	}
 	checker := guard.Checker{
 		Sets:      guardfile.Sets{Store: guardfile.Store{Ships: at.Ships}, ShipID: shipID},
 		Links:     guardfile.Links{},
 		Refusals:  guardfile.Refusals{Ships: at.Ships, ShipID: shipID},
-		Now:       machine.Now,
+		Now:       now,
 		Home:      machine.HomeDirectory,
 		Boundary:  guard.Boundary{ShipFolder: resolvedPath(shipFolder), Repositories: repositories},
 		Protected: guard.ClaudeCodeProtected(resolvedPath(machine.HomeDirectory), resolvedPath(shipFolder), resolvedPath(guardfile.Folder(at.Ships, shipID)), resolvedPath(at.Config)),

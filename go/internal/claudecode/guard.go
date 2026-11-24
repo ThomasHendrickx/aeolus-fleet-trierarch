@@ -19,8 +19,10 @@ import (
 const guardSettingsFile = "settings.json"
 
 // GuardCommand is the hook's command: the trierarch's program, quoted for the shell the hook runs in, checking a call of the ship.
+// Claude Code blocks a call only on exit code 2 and runs it on any other failure, so every failure of the program (killed, gone,
+// exited with another code) exits 2: the guard fails closed.
 func GuardCommand(program string, shipID string) string {
-	return shellQuoted(program) + " guard check --ship " + shipID
+	return shellQuoted(program) + " guard check --ship " + shipID + " || exit 2"
 }
 
 // GuardSettings are the guard's settings for the ship: one PreToolUse hook, matcher *, running the command.
