@@ -123,3 +123,19 @@ func TestCancelledStorageDoesNotPersistRules(t *testing.T) {
 		t.Fatalf("Read = %q, %v, want nothing persisted", text, err)
 	}
 }
+
+func TestTheKeptVersionIsTheSettingsVersionOfTheRulesKeptForTheShip(t *testing.T) {
+	store := Store{Ships: filepath.Join(t.TempDir(), "ships")}
+	if _, ok, err := store.KeptVersion(context.Background(), shipID); ok || err != nil {
+		t.Fatalf("KeptVersion before any rules = %v, %v, want none", ok, err)
+	}
+	if err := store.Write(context.Background(), shipID, []byte(payload)); err != nil {
+		t.Fatal(err)
+	}
+
+	version, ok, err := store.KeptVersion(context.Background(), shipID)
+
+	if version != 3 || !ok || err != nil {
+		t.Fatalf("KeptVersion = %d, %v, %v, want 3", version, ok, err)
+	}
+}

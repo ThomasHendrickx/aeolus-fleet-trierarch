@@ -228,3 +228,14 @@ func TestConfiguredSettingsThatAreNoJSONObjectStartNothing(t *testing.T) {
 		t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
 	}
 }
+
+func TestSessionsOnTheHostStartGuardedAndInAContainerNotYet(t *testing.T) {
+	harness, _ := aGuardedHarness(t)
+	if !harness.IsGuarded() {
+		t.Fatal("IsGuarded on the host = false, want true")
+	}
+	harness.Homes = t.TempDir()
+	if harness.IsGuarded() {
+		t.Fatal("IsGuarded in a container = true, want false")
+	}
+}
