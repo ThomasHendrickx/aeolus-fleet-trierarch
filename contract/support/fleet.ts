@@ -18,6 +18,9 @@ export interface RepositoriesAt {
   readonly harness: string;
 }
 
+/** The content type the trierarch plugin's ship sends a crew's guard rules in. */
+const GUARD_RULES_TYPE = 'application/vnd.aeolus.trierarch.guard-rules+json';
+
 /** The workspace a crew request names for a ship folder of the repositories. */
 const repositoriesOf = (at: RepositoriesAt) => ({ kind: 'repositories' as const, main: { repository: at.main }, subRepositories: (at.subRepositories ?? []).map((repository) => ({ repository })) });
 
@@ -28,6 +31,10 @@ export interface Fleet {
   readonly database: PrismaClient;
   /** The trierarch ship's id and the secret its setup line carries. */
   readonly trierarchShip: { readonly shipId: ShipId; readonly secret: string };
+  /** The trierarch plugin's ship the setup line names: the guard rules of every crew come from it, as the plugin sends them. */
+  readonly pluginShip: ShipId;
+  /** Makes the ship the trierarch plugin's ship, as a test's own setup line names it. */
+  usePluginShip(shipId: ShipId): void;
   /** Commissions a ship argo can request a crew for; with `owner`, a ship of that name answers for it instead of argo; with `scopes`, the ship holds them. */
   commission(name: string, at?: { owner?: ShipId; scopes?: readonly string[] }): Promise<ShipId>;
   /** Requests a crew for the ship in a ship folder of the main repository and the sub-repositories given, none without, with the harness and the options given, and assigns it to the machine's trierarch. */
@@ -116,12 +123,25 @@ export async function aFleet(): Promise<Fleet> {
   const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
   const commissioned = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'test-machine', type: 'trierarch', kind: 'trierarch', scopes: ['crew:run'] }));
   const trierarchShip = { shipId: commissioned.shipId, secret: secretOf(commissioned.secret) };
+  let pluginShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'default-trierarch-plugin', type: 'reviewer' })).shipId;
+  /** Sends the trierarch the guard rules of the ship's settings version, none of them, as the trierarch plugin sends them for every assignment (guard design 4.4). */
+  const sendGuardRules = async (shipId: ShipId, settingsVersion: number): Promise<void> => {
+    const caller: ShipCaller = { shipId: pluginShip, fleetId: argo.fleetId, kind: 'agent', scopes: argo.scopes };
+    const payload = JSON.stringify({ fleetId: argo.fleetId, pluginShipId: pluginShip, shipId, settingsVersion, sets: [] });
+    unwrap(await useCases.sendMessage(caller, { selector: { kind: 'ship', shipId: trierarchShip.shipId }, payload, contentType: GUARD_RULES_TYPE, model: 'claude-sonnet-5-5', idempotencyKey: newKey() }));
+  };
   return {
     url,
     useCases,
     argo,
     database,
     trierarchShip,
+    get pluginShip() {
+      return pluginShip;
+    },
+    usePluginShip: (shipId) => {
+      pluginShip = shipId;
+    },
     commission: async (name, at = {}) => {
       const { shipId } = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name, type: 'reviewer', ...(at.scopes !== undefined && { scopes: [...at.scopes] }) }));
       if (at.owner !== undefined) {
@@ -130,15 +150,18 @@ export async function aFleet(): Promise<Fleet> {
       return shipId;
     },
     crewInRepositories: async (shipId, { options = {}, ...at }) => {
-      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: at.harness, workspace: repositoriesOf(at), options } }));
+      const { settingsVersion } = unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: at.harness, workspace: repositoriesOf(at), options } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
+      await sendGuardRules(shipId, settingsVersion);
     },
     crewInFolder: async (shipId, { folder, harness }) => {
-      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'folder', name: folder }, options: {} } }));
+      const { settingsVersion } = unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'folder', name: folder }, options: {} } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
+      await sendGuardRules(shipId, settingsVersion);
     },
     requestCrewAgainInRepositories: async (shipId, at) => {
-      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: at.harness, workspace: repositoriesOf(at), options: {} } }));
+      const { settingsVersion } = unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: at.harness, workspace: repositoriesOf(at), options: {} } }));
+      await sendGuardRules(shipId, settingsVersion);
     },
     removeCrewRequest: async (shipId) => {
       unwrap(await useCases.removeCrewRequest(argo, { shipId }));
