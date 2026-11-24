@@ -54,6 +54,9 @@ func TestEverySessionStartsWithTheGuardHookInItsSettings(t *testing.T) {
 	if info, err := os.Stat(settings); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("settings mode = %v, %v, want 600", info, err)
 	}
+	if info, err := os.Stat(filepath.Dir(settings)); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("guard folder mode = %v, %v, want 700", info, err)
+	}
 }
 
 func TestTheGuardHookChecksWithTheConfigurationTheTrierarchRunsWith(t *testing.T) {

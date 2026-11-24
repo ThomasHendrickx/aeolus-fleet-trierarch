@@ -212,6 +212,46 @@ func TestAStalledRulesReadEndsWithItsContext(t *testing.T) {
 	}
 }
 
+func folderModeOf(t *testing.T, folder string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Mode().Perm()
+}
+
+func TestTheRulesAreKeptInAGuardFolderOnlyItsOwnerOpens(t *testing.T) {
+	guards := filepath.Join(t.TempDir(), "guard")
+
+	if err := (Store{Guards: guards}).Write(context.Background(), shipID, []byte(payload)); err != nil {
+		t.Fatal(err)
+	}
+
+	if mode := folderModeOf(t, filepath.Join(guards, shipID)); mode != 0o700 {
+		t.Fatalf("guard folder mode = %o, want 700", mode)
+	}
+}
+
+func TestARefusalKeptInAGuardFolderOthersOpenLeavesItToItsOwnerAlone(t *testing.T) {
+	guards := filepath.Join(t.TempDir(), "guard")
+	folder := filepath.Join(guards, shipID)
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (Refusals{Guards: guards, ShipID: shipID}).Append(context.Background(), guard.Refusal{Tool: "Bash", Rule: "git.deny push"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if mode := folderModeOf(t, folder); mode != 0o700 {
+		t.Fatalf("guard folder mode = %o, want 700", mode)
+	}
+}
+
 func TestForgettingAShipRemovesItsWholeGuardFolder(t *testing.T) {
 	guards := filepath.Join(t.TempDir(), "guard")
 	store := Store{Guards: guards}
