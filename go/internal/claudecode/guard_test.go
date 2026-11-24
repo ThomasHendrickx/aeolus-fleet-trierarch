@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -42,7 +43,7 @@ func TestEverySessionStartsWithTheGuardHookInItsSettings(t *testing.T) {
 	}
 	want := map[string]any{"hooks": map[string]any{"PreToolUse": []any{map[string]any{
 		"matcher": "*",
-		"hooks":   []any{map[string]any{"type": "command", "command": `'/opt/aeolus trierarch/aeolus-trierarch' guard check --ship ` + scout + ` || exit 2`}},
+		"hooks":   []any{map[string]any{"type": "command", "command": `'/opt/aeolus trierarch/aeolus-trierarch' guard check --ship ` + scout + ` || exit 2`, "timeout": 30}},
 	}}}}
 	if got, _ := json.Marshal(written); string(got) != mustJSON(t, want) {
 		t.Fatalf("settings = %s, want %s", got, mustJSON(t, want))
@@ -153,5 +154,77 @@ func TestASessionInAContainerStartsWithoutTheGuardWhichDoesNotReachItYet(t *test
 
 	if command := running.started[0].Command; slices.Contains(command, "--settings") {
 		t.Fatalf("command %q, want no guard settings in a container", command)
+	}
+}
+
+// guardSettingsOf are the guard settings the session started with, as JSON, and how often its command names --settings.
+func guardSettingsOf(t *testing.T, command []string) (map[string]any, int) {
+	t.Helper()
+	named := 0
+	file := ""
+	for at, word := range command {
+		if word == "--settings" && at+1 < len(command) {
+			named, file = named+1, command[at+1]
+		} else if strings.HasPrefix(word, "--settings=") {
+			named++
+		}
+	}
+	text, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(text, &settings); err != nil {
+		t.Fatalf("settings %s is no JSON: %v", text, err)
+	}
+	return settings, named
+}
+
+func TestAConfiguredSettingsFileStillAppliesWithTheGuardHookAdded(t *testing.T) {
+	harness, running := aGuardedHarness(t)
+	harness.Settings = func() config.Harness {
+		return config.Harness{Flags: []string{"--model", "opus", "--settings", "configured.json"}, Options: map[string]config.Option{}}
+	}
+	entry := anEntry(t)
+	withSettings(t, filepath.Join(entry.Folder, "configured.json"), `{"env":{"TEAM":"red"},"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo own"}]}],"Stop":[{"hooks":[{"type":"command","command":"echo stop"}]}]}}`)
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, named := guardSettingsOf(t, running.started[0].Command)
+	want := `{"env":{"TEAM":"red"},"hooks":{"PreToolUse":[{"hooks":[{"command":"echo own","type":"command"}],"matcher":"Bash"},{"hooks":[{"command":"'/opt/aeolus trierarch/aeolus-trierarch' guard check --ship ` + scout + ` || exit 2","timeout":30,"type":"command"}],"matcher":"*"}],"Stop":[{"hooks":[{"command":"echo stop","type":"command"}]}]}}`
+	if got := mustJSON(t, settings); named != 1 || got != want {
+		t.Fatalf("--settings named %d times, settings %s, want once and %s", named, got, want)
+	}
+}
+
+func TestConfiguredInlineSettingsStillApplyWithTheGuardHookAdded(t *testing.T) {
+	harness, running := aGuardedHarness(t)
+	harness.Settings = func() config.Harness {
+		return config.Harness{Flags: []string{`--settings={"env":{"TEAM":"blue"}}`}, Options: map[string]config.Option{}}
+	}
+	entry := anEntry(t)
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	settings, named := guardSettingsOf(t, running.started[0].Command)
+	if env, _ := settings["env"].(map[string]any); named != 1 || env["TEAM"] != "blue" || settings["hooks"] == nil {
+		t.Fatalf("--settings named %d times, settings %v, want once with the configured env and the guard hook", named, settings)
+	}
+}
+
+func TestConfiguredSettingsThatAreNoJSONObjectStartNothing(t *testing.T) {
+	harness, running := aGuardedHarness(t)
+	harness.Settings = func() config.Harness {
+		return config.Harness{Flags: []string{"--settings", "configured.json"}, Options: map[string]config.Option{}}
+	}
+	entry := anEntry(t)
+	withSettings(t, filepath.Join(entry.Folder, "configured.json"), `[1]`)
+
+	if err := harness.Launch(entry, true, "launch-1"); err == nil || len(running.started) != 0 {
+		t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
 	}
 }
