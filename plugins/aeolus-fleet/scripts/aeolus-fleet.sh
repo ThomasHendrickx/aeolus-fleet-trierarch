@@ -11,7 +11,7 @@
 #   aeolus-fleet.sh receive|send|ask|report|inbox|setStatement [<json input>|-]   - reads the input from stdin
 #   aeolus-fleet.sh ack|pong <deliveryId>
 #   aeolus-fleet.sh delivery <deliveryId>   - a delivery the crew acknowledged, read again whole (#342)
-#   aeolus-fleet.sh openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern
+#   aeolus-fleet.sh openMeeting|openCall|ackMeetingUpTo|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern
 #     |addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting
 #       [<json input>|-]   - a meeting's calls (decision 0061), reading the input from stdin with -
 #   aeolus-fleet.sh pushReceive|handed|turn <json input>   - the watcher's and the hooks' calls (#756), never the model's
@@ -46,7 +46,7 @@ MAX_SECONDS="${AEOLUS_CALL_MAX_SECONDS:-60}"
 BUSY_WAITS="${AEOLUS_BUSY_WAITS:-1 2 4 8}"
 
 usage() {
-  echo "usage: aeolus-fleet.sh register|receive|ack|pong|send|report|inbox|setStatement|whoami|reportLog|discover|deregister|protocol|pushReceive|handed|handled|notHandled|turn|openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern|addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting ..." >&2
+  echo "usage: aeolus-fleet.sh register|receive|ack|pong|send|report|inbox|setStatement|whoami|reportLog|discover|deregister|protocol|pushReceive|handed|handled|notHandled|turn|openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern|addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting|openCall|ackMeetingUpTo ..." >&2
   exit 2
 }
 
@@ -211,7 +211,7 @@ fi
 
 case "$command" in
   receive|send|ask|report|inbox|setStatement|pushReceive|handed|turn \
-    | openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern \
+    | openMeeting|openCall|ackMeetingUpTo|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern \
     | addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting)
     input="${2:-}"
     [ -n "$input" ] || input='{}'
@@ -245,7 +245,7 @@ esac
 # open's and an add's notices state it): it is added last, so it wins over a
 # model the input states (the last of two keys counts).
 model_file="$(aeolus_model_file)"
-if { [ "$command" = send ] || [ "$command" = ask ] || [ "$command" = openMeeting ] || [ "$command" = addToMeeting ]; } && model="$(head -n 1 "$model_file" 2>/dev/null)"; then
+if { [ "$command" = send ] || [ "$command" = ask ] || [ "$command" = openMeeting ] || [ "$command" = openCall ] || [ "$command" = addToMeeting ]; } && model="$(head -n 1 "$model_file" 2>/dev/null)"; then
   model="$(aeolus_json_escape "$model")"
   input="$(printf '%s' "$input" | sed -e ':a' -e '$!{N;ba' -e '}' -e 's/[[:space:]]*$//')"
   if printf '%s' "$input" | grep -Eq '^[[:space:]]*\{[[:space:]]*\}$'; then

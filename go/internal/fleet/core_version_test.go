@@ -18,7 +18,7 @@ func TestTheMinimumCoreVersionSupportsSendingWithoutAModel(t *testing.T) {
 }
 
 func TestTheMinimumCoreVersionSupportsMeetingCalls(t *testing.T) {
- if slices.Compare(versionOf(MinimumCoreVersion), []int{0, 46, 0}) < 0 {
-  t.Fatalf("meeting calls need core 0.46.0, got %s", MinimumCoreVersion)
- }
+	if slices.Compare(versionOf(MinimumCoreVersion), []int{0, 46, 0}) < 0 {
+		t.Fatalf("meeting calls need core 0.46.0, got %s", MinimumCoreVersion)
+	}
 }
