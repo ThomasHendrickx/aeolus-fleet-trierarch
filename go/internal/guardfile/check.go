@@ -21,6 +21,25 @@ func Folder(guards string, shipID string) string {
 	return filepath.Join(guards, shipID)
 }
 
+// folderMode is a guard folder's mode: only its owner opens it.
+const folderMode = 0o700
+
+// MakeFolder makes the ship's guard folder, mode 700, the guard folders made too, and leaves one already there to its owner alone,
+// whoever made it: every write to it goes through here first. It answers the folder.
+func MakeFolder(guards string, shipID string) (string, error) {
+	if !crew.IsShipID(shipID) {
+		return "", errors.New("invalid guard folder ship id")
+	}
+	folder := Folder(guards, shipID)
+	if err := os.MkdirAll(folder, folderMode); err != nil {
+		return "", fmt.Errorf("make guard folder: %w", err)
+	}
+	if err := os.Chmod(folder, folderMode); err != nil {
+		return "", fmt.Errorf("make guard folder its owner's: %w", err)
+	}
+	return folder, nil
+}
+
 // Sets are the rule sets kept for one ship, as guard check reads them.
 type Sets struct {
 	Store  Store
@@ -75,7 +94,9 @@ func (s Store) GuardStatus(ctx context.Context, shipID string) (guard.Status, bo
 	if status.Sets == nil {
 		status.Sets = []guard.AppliedSet{}
 	}
-	lines, err := Within(ctx, func() ([]byte, error) { return secrets.ReadPrivate(filepath.Join(Folder(s.Guards, shipID), refusalsFile)) })
+	lines, err := Within(ctx, func() ([]byte, error) {
+		return secrets.ReadPrivate(filepath.Join(Folder(s.Guards, shipID), refusalsFile))
+	})
 	if errors.Is(err, fs.ErrNotExist) {
 		return status, true, nil
 	}
@@ -117,9 +138,9 @@ func (r Refusals) Append(ctx context.Context, refusal guard.Refusal) error {
 	if err != nil {
 		return fmt.Errorf("encode refusal: %w", err)
 	}
-	folder := Folder(r.Guards, r.ShipID)
-	if err := os.MkdirAll(folder, 0o700); err != nil {
-		return fmt.Errorf("make guard folder: %w", err)
+	folder, err := MakeFolder(r.Guards, r.ShipID)
+	if err != nil {
+		return err
 	}
 	file, err := os.OpenFile(filepath.Join(folder, refusalsFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {

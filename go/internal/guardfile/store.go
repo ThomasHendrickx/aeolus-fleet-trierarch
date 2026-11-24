@@ -92,6 +92,9 @@ func (s Store) Write(ctx context.Context, shipID string, text []byte) error {
 	if err != nil {
 		return err
 	}
+	if _, err := MakeFolder(s.Guards, shipID); err != nil {
+		return err
+	}
 	if err := secrets.WritePrivate(path, text); err != nil {
 		return fmt.Errorf("write guard rules: %w", err)
 	}

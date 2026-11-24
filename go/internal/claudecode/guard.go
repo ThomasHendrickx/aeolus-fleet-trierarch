@@ -101,7 +101,11 @@ func (h Harness) writeGuardSettings(shipID string, configured map[string]any) (s
 	if err != nil {
 		return "", fmt.Errorf("make the guard settings: %w", err)
 	}
-	file := filepath.Join(guardfile.Folder(h.Guards, shipID), guardSettingsFile)
+	folder, err := guardfile.MakeFolder(h.Guards, shipID)
+	if err != nil {
+		return "", err
+	}
+	file := filepath.Join(folder, guardSettingsFile)
 	if err := secrets.WritePrivate(file, text); err != nil {
 		return "", fmt.Errorf("write the guard settings: %w", err)
 	}
