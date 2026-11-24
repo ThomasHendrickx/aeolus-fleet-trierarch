@@ -1,6 +1,7 @@
 package runpass
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -16,19 +17,21 @@ type guardedHarness struct {
 	problem string
 }
 
-func (h guardedHarness) GuardProblem(reconciler.Entry) string { return h.problem }
+func (h guardedHarness) GuardProblem(context.Context, reconciler.Entry) (string, error) {
+	return h.problem, nil
+}
 
 func (guardedHarness) IsGuarded() bool { return true }
 
 // someGuardRules are the settings versions whose rules are kept, by ship.
 type someGuardRules map[string]int
 
-func (r someGuardRules) KeptVersion(shipID string) (int, bool, error) {
+func (r someGuardRules) KeptVersion(_ context.Context, shipID string) (int, bool, error) {
 	version, ok := r[shipID]
 	return version, ok, nil
 }
 
-func (r someGuardRules) Forget(shipID string) error {
+func (r someGuardRules) Forget(_ context.Context, shipID string) error {
 	delete(r, shipID)
 	return nil
 }
@@ -249,5 +252,38 @@ func TestAReleaseForgetsTheShipsGuardFolder(t *testing.T) {
 
 	if _, ok := rules[scout]; ok || len(pass.store.state.Entries) != 0 {
 		t.Fatalf("rules %v, entries %+v, want the guard folder forgotten with the request", rules, pass.store.state.Entries)
+	}
+}
+
+// stalledGuardRules are rules whose every read stalls until its context ends.
+type stalledGuardRules struct{}
+
+func (stalledGuardRules) KeptVersion(ctx context.Context, _ string) (int, bool, error) {
+	<-ctx.Done()
+	return 0, false, ctx.Err()
+}
+
+func (stalledGuardRules) Forget(ctx context.Context, _ string) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestAStalledGuardRulesReadHoldsThePassNoLongerThanItsContext(t *testing.T) {
+	pass, _ := aGuardedPass(t, someGuardRules{})
+	pass.pass.GuardRules = stalledGuardRules{}
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	ended := make(chan error, 1)
+
+	go func() { ended <- pass.pass.Run(ctx) }()
+
+	select {
+	case <-ended:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the pass still ran 3 seconds after its context ended")
+	}
+	if len(pass.harness.launches) != 0 || registered(pass.fleet.calls) {
+		t.Fatalf("calls %q, launches %d, want nothing started without its rules read", pass.fleet.calls, len(pass.harness.launches))
 	}
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -215,9 +216,9 @@ func TestRunRefusesARuntimeThatCannotHoldASessionToItsShipBeforeAnyPass(t *testi
 	machine, at := aCheckedMachine(t)
 	inContainers(t, &machine, at, true)
 	passes := 0
-	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
 		passes++
-		return func(bool) error { return nil }, nil
+		return func(context.Context, bool) error { return nil }, nil
 	}
 
 	output, code := Main([]string{"run"}, machine)

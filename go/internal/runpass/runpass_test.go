@@ -1,6 +1,7 @@
 package runpass
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -566,7 +567,7 @@ func aRequest(status string) reconciler.Request {
 
 func (p *aPass) run(t *testing.T) {
 	t.Helper()
-	if err := p.pass.Run(); err != nil {
+	if err := p.pass.Run(context.Background()); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
 }
@@ -2954,11 +2955,11 @@ func TestEveryPassEmptiesTheTrashAndLogsWhatItCouldNotRemoveOnce(t *testing.T) {
 	bin := &aTrash{left: []trash.Left{aLeftClone(now)}}
 	pass.pass.Trash = bin
 
-	if err := pass.pass.Run(); err != nil {
+	if err := pass.pass.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	bin.left[0].IsNew = false
-	if err := pass.pass.Run(); err != nil {
+	if err := pass.pass.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2979,7 +2980,7 @@ func TestArgoIsToldOnceOfWhatTheTrashCouldNotRemoveForADay(t *testing.T) {
 	pass.pass.Trash = bin
 
 	for range 2 {
-		if err := pass.pass.Run(); err != nil {
+		if err := pass.pass.Run(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2995,7 +2996,7 @@ func TestArgoIsNotToldOfWhatTheTrashCouldNotRemoveForLessThanADay(t *testing.T) 
 	bin := &aTrash{left: []trash.Left{aLeftClone(now.Add(-24*time.Hour + time.Millisecond))}}
 	pass.pass.Trash = bin
 
-	if err := pass.pass.Run(); err != nil {
+	if err := pass.pass.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3218,7 +3219,7 @@ func TestAShipWhoseCrewAgainInAFreshShipsFolderIsInterruptedKeepsItsMarkAndIsCre
 	pass.workspace.gone = map[string]bool{"/ships/" + scout: true}
 	pass.harness.launchFails = errors.New("the harness could not start")
 
-	_ = pass.pass.Run()
+	_ = pass.pass.Run(context.Background())
 
 	if !pass.store.state.Entries[scout].IsShipFolderGone {
 		t.Fatalf("entry %+v", pass.store.state.Entries[scout])

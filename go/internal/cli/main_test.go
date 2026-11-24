@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -101,8 +102,8 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		Stop:                  make(chan struct{}),
 		CoreVersionRefusal:    func(string) string { return "" },
 		ContainerHost:         func(string) container.Host { return aRuntime{} },
-		NewPass: func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
-			return func(bool) error { return nil }, nil
+		NewPass: func(paths.Paths, crew.File, config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
+			return func(context.Context, bool) error { return nil }, nil
 		},
 		PassEvery: time.Millisecond,
 		Sessions:  func(paths.Paths) Sessions { return &aSessionRuntime{} },
@@ -389,8 +390,8 @@ func runHoldingMcpConfiguration(t *testing.T, persistedFor mcpconfiguration.Iden
 	var isHeld bool
 	stop := make(chan struct{})
 	machine.Stop = stop
-	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
-		return func(bool) error {
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
+		return func(context.Context, bool) error {
 			atFirstPass, isHeld = held.Current()
 			close(stop)
 			return nil

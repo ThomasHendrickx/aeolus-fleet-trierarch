@@ -1,6 +1,7 @@
 package runpass
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -15,7 +16,7 @@ import (
 // someGuardStatuses are what each guarded session applied and refused, by ship.
 type someGuardStatuses map[string]guard.Status
 
-func (s someGuardStatuses) GuardStatus(shipID string) (guard.Status, bool, error) {
+func (s someGuardStatuses) GuardStatus(_ context.Context, shipID string) (guard.Status, bool, error) {
 	status, ok := s[shipID]
 	return status, ok, nil
 }
@@ -147,7 +148,7 @@ func TestARefusalReportedButNotKeptAsReportedIsReportedAgainUnderTheSameKey(t *t
 	statuses[scout] = aGuardStatus(1)
 	saved := reconciler.State{Entries: maps.Clone(pass.store.state.Entries)}
 	pass.store.isUnwritable = true
-	if err := pass.pass.Run(); err == nil {
+	if err := pass.pass.Run(context.Background()); err == nil {
 		t.Fatal("a pass whose state cannot be written succeeded")
 	}
 	// The state file holds what it held before the pass.

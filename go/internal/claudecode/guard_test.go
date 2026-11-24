@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -125,7 +126,7 @@ func TestEverySettingsFileASessionLoadsThatDisablesHooksKeepsItFromStarting(t *t
 			file := fileOf(harness, entry.Folder)
 			withSettings(t, file, `{"disableAllHooks":true}`)
 
-			if got, want := harness.GuardProblem(entry), "guard disabled by settings: "+file; got != want {
+			if got, want := harness.GuardProblem(context.Background(), entry), "guard disabled by settings: "+file; got != want {
 				t.Fatalf("GuardProblem = %q, want %q", got, want)
 			}
 			if len(running.started) != 0 {
@@ -149,8 +150,19 @@ func TestASessionOnTheHostThatKeepsItsShipHomeIsCheckedAgainstTheUserSettingsOfT
 	file := filepath.Join(home, ".claude", "settings.json")
 	withSettings(t, file, `{"disableAllHooks":true}`)
 
-	if got, want := harness.GuardProblem(entry), "guard disabled by settings: "+file; got != want {
+	if got, want := harness.GuardProblem(context.Background(), entry), "guard disabled by settings: "+file; got != want {
 		t.Fatalf("GuardProblem = %q, want %q", got, want)
+	}
+}
+
+func TestSettingsThatCannotBeReadWithinTheContextKeepTheSessionFromStarting(t *testing.T) {
+	harness, _ := aGuardedHarness(t)
+	entry := anEntry(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if problem, err := harness.GuardProblem(ctx, entry); err == nil {
+		t.Fatalf("GuardProblem = %q, nil, want its context's end", problem)
 	}
 }
 
@@ -160,7 +172,7 @@ func TestManagedSettingsThatAllowOnlyManagedHooksDisableTheGuard(t *testing.T) {
 	file := filepath.Join(harness.Managed, "managed-settings.json")
 	withSettings(t, file, `{"allowManagedHooksOnly":true}`)
 
-	if got, want := harness.GuardProblem(entry), "guard disabled by settings: "+file; got != want {
+	if got, want := harness.GuardProblem(context.Background(), entry), "guard disabled by settings: "+file; got != want {
 		t.Fatalf("GuardProblem = %q, want %q", got, want)
 	}
 }
@@ -174,7 +186,7 @@ func TestSettingsThatKeepHooksOrThatTheSessionDoesNotLoadLetItStart(t *testing.T
 	withSettings(t, harness.User, `{"disableAllHooks":false,"permissions":{"defaultMode":"default"}}`)
 	withSettings(t, filepath.Join(entry.Folder, ".claude", "settings.json"), `{"disableAllHooks":true}`)
 
-	if got := harness.GuardProblem(entry); got != "" {
+	if got := harness.GuardProblem(context.Background(), entry); got != "" {
 		t.Fatalf("GuardProblem = %q, want none", got)
 	}
 }

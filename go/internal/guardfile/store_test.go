@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -184,6 +185,30 @@ func TestTheGuardStatusNamesTheSettingsVersionItsRulesWereKeptFor(t *testing.T) 
 
 	if err != nil || status.SettingsVersion != 3 {
 		t.Fatalf("GuardStatus = %d, %v, want settings version 3", status.SettingsVersion, err)
+	}
+}
+
+func TestAStalledRulesReadEndsWithItsContext(t *testing.T) {
+	guards := filepath.Join(t.TempDir(), "guard")
+	if err := os.MkdirAll(filepath.Join(guards, shipID), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(guards, shipID, "rules.json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	read := make(chan error, 1)
+
+	go func() { _, err := (Store{Guards: guards}).Read(ctx, shipID); read <- err }()
+
+	select {
+	case err := <-read:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Read = %v, want its context's end", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the read still ran 3 seconds after its context ended")
 	}
 }
 
