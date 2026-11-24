@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardrules"
@@ -13,7 +14,7 @@ import (
 const (
 	shipID   = "shp_01m6jyczpnpp5c0vxh54c966cy"
 	pluginID = "shp_01m6jyczpnpp5c0vxh54c966cz"
-	payload  = `{"fleetId":"flt_01m3tb1zgr5h2ffee12xnch8sv","pluginShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","shipId":"shp_01m6jyczpnpp5c0vxh54c966cy","settingsVersion":3,"sets":[]}`
+	payload  = `{"fleetId":"flt_01m3tb1zgr5h2ffee12xnch8sv","pluginShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","shipId":"shp_01m6jyczpnpp5c0vxh54c966cy","settingsVersion":3,"sets":[{"name":"no-push","repository":"fleet/rules","commit":"8d41e079bd56801e1e2acf18f094c22ade5ec8a9","file":"no-push.yaml","floor":true,"rules":{"git":{"deny":["push"]}}}]}`
 )
 
 func aKeeper(root string) *guardrules.Keeper {
@@ -31,8 +32,11 @@ func TestRulesAreKeptOutsideRepositoriesAndSurviveAProcessRestart(t *testing.T) 
 
 	restarted := aKeeper(ships)
 	got, ok, err := restarted.Current(context.Background(), shipID)
-	if err != nil || !ok || got.SettingsVersion != 3 {
+	if err != nil || !ok || got.SettingsVersion != 3 || len(got.Sets) != 1 {
 		t.Fatalf("Current after restart = %+v, %v, %v, want version 3", got, ok, err)
+	}
+	if !strings.Contains(string(got.Sets[0]), `"commit":"8d41e079bd56801e1e2acf18f094c22ade5ec8a9"`) || !strings.Contains(string(got.Sets[0]), `"git":{"deny":["push"]}`) {
+		t.Fatalf("restarted rules = %s, want the pinned no-push resolution", got.Sets[0])
 	}
 	path := filepath.Join(ships, shipID, "guard", "rules.json")
 	info, err := os.Stat(path)
