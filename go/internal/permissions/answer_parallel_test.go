@@ -25,11 +25,11 @@ func TestTwoOpenPermissionAsksTakeTheirOwnAnswersWhenTheOwnerAnswersOutOfOrder(t
 		switch r.URL.Path {
 		case "/api/v1/ship/whoami":
 			fmt.Fprint(w, `{"ownerShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","ownerName":"person"}`)
-		case "/api/v1/ship/send":
-			var message struct{ Payload string }
-			_ = json.NewDecoder(r.Body).Decode(&message)
+		case "/api/v1/ship/ask":
 			var q struct{ ID string }
-			_ = json.Unmarshal([]byte(message.Payload), &q)
+			if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+				t.Error(err)
+			}
 			ids = append(ids, q.ID)
 			msg := "msg_01m6jyczpnpp5c0vxh54c966cx"
 			if len(ids) == 2 {
