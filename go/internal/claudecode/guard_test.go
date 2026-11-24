@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 )
 
 // aGuardedHarness is a harness whose sessions get the guard: its program and the state folder's ships directory.
@@ -115,6 +116,25 @@ func TestEverySettingsFileASessionLoadsThatDisablesHooksKeepsItFromStarting(t *t
 				t.Fatalf("started %+v, want nothing", running.started)
 			}
 		})
+	}
+}
+
+func TestASessionOnTheHostThatKeepsItsShipHomeIsCheckedAgainstTheUserSettingsOfThatHome(t *testing.T) {
+	harness, _ := aGuardedHarness(t)
+	entry := anEntry(t)
+	entry.ShipFolder = t.TempDir()
+	home := filepath.Join(entry.ShipFolder, "home")
+	shipPlugin := harness.Plugin
+	shipPlugin.Data = filepath.Join(home, ".claude", "plugins", "data", plugin.DataFolder)
+	shipPlugin.Crews = filepath.Join(home, ".aeolus", "crews", "claude-code")
+	if err := shipPlugin.WriteIdentity(entry.Folder, anIdentity(), "crew-token"); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(home, ".claude", "settings.json")
+	withSettings(t, file, `{"disableAllHooks":true}`)
+
+	if got, want := harness.GuardProblem(entry), "guard disabled by settings: "+file; got != want {
+		t.Fatalf("GuardProblem = %q, want %q", got, want)
 	}
 }
 
