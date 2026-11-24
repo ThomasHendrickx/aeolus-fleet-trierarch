@@ -200,6 +200,12 @@ func (c Checker) record(result outcome) Refusal {
 	return refusal
 }
 
+// FailedRefusal is the refusal kept of a call guard check could not check, as guard failed with the cause, at the time given: no tool,
+// no summary, as the call was not read.
+func FailedRefusal(at time.Time, cause string) Refusal {
+	return Refusal{At: at, Rule: failed(cause).rule}
+}
+
 // Failed is the answer that refuses a call guard check could not check, as
 // guard failed with the cause: before a Checker can run, it fails closed too.
 func Failed(cause string) Answer { return deny(failed(cause)) }

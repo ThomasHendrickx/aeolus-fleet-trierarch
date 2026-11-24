@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -46,13 +47,25 @@ func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Ans
 		configPath = variable(machine.Environ, "AEOLUS_TRIERARCH_CONFIG")
 	}
 	at := paths.Of(machine.HomeDirectory, configPath)
+	now := machine.Now
+	if now == nil {
+		now = time.Now
+	}
+	refusals := guardfile.Refusals{Guards: at.Guard, ShipID: shipID}
+	// A call of a known ship, one whose guard folder is kept, refused before it could be checked is kept too.
+	failed := func(cause string) guard.Answer {
+		if _, err := os.Stat(guardfile.Folder(at.Guard, shipID)); err == nil {
+			_ = refusals.Append(ctx, guard.FailedRefusal(now(), cause))
+		}
+		return guard.Failed(cause)
+	}
 	crewed, err := (state.File{Path: at.State}).Load()
 	if err != nil {
-		return guard.Failed("state unreadable")
+		return failed("state unreadable")
 	}
 	entry, ok := crewed.Entries[shipID]
 	if !ok || entry.Folder == "" {
-		return guard.Failed("ship not crewed here")
+		return failed("ship not crewed here")
 	}
 	shipFolder := entry.ShipFolder
 	if shipFolder == "" {
@@ -60,7 +73,7 @@ func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Ans
 	}
 	repositories, err := workspace.RepositoryFolders(entry.Folder)
 	if err != nil {
-		return guard.Failed("ship's folder unreadable")
+		return failed("ship's folder unreadable")
 	}
 	for index, repository := range repositories {
 		repositories[index] = resolvedPath(repository)
@@ -69,16 +82,12 @@ func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Ans
 		repositories = []string{resolvedPath(entry.Folder)}
 	}
 	if machine.Stdin == nil {
-		return guard.Failed("input unreadable")
-	}
-	now := machine.Now
-	if now == nil {
-		now = time.Now
+		return failed("input unreadable")
 	}
 	checker := guard.Checker{
 		Sets:      guardfile.Sets{Store: guardfile.Store{Guards: at.Guard}, ShipID: shipID},
 		Links:     guardfile.Links{},
-		Refusals:  guardfile.Refusals{Guards: at.Guard, ShipID: shipID},
+		Refusals:  refusals,
 		Now:       now,
 		Home:      machine.HomeDirectory,
 		Boundary:  guard.Boundary{ShipFolder: resolvedPath(shipFolder), Repositories: repositories},
