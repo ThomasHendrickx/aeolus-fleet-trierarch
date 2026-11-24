@@ -77,6 +77,10 @@ import (
 )
 
 func main() {
+	// Guard check is a session's hook: its deadline holds from its first instruction, before anything a trierarch does as it starts.
+	if cli.IsGuardCheck(os.Args[1:]) {
+		guardCheckMain(os.Args[1:])
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Println(err)

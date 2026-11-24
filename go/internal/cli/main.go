@@ -233,6 +233,11 @@ type answer struct {
 	code int
 }
 
+// IsGuardCheck is whether the command line is guard check, a session's hook, which its program runs before anything else it does.
+func IsGuardCheck(args []string) bool {
+	return len(args) > 1 && args[0] == "guard" && args[1] == "check"
+}
+
 // Main runs one command line of aeolus-trierarch and answers what it says and its exit status.
 func Main(args []string, machine Machine) (string, int) {
 	// The hold takes its own words: the trierarch starts it, never a person.
@@ -243,7 +248,7 @@ func Main(args []string, machine Machine) (string, int) {
 		return "", modelproxy.Main(args[1:], Version)
 	}
 	// Guard check is a session's hook, never a person's command: it answers only as the hook.
-	if len(args) > 1 && args[0] == "guard" && args[1] == "check" {
+	if IsGuardCheck(args) {
 		return guardCheckCommand(args[2:], machine)
 	}
 	command, ok := parse(args)
