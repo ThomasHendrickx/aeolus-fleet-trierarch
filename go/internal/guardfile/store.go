@@ -33,7 +33,7 @@ func (s Store) Read(ctx context.Context, shipID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	text, err := secrets.ReadPrivate(path)
+	text, err := Within(ctx, func() ([]byte, error) { return secrets.ReadPrivate(path) })
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -41,6 +41,26 @@ func (s Store) Read(ctx context.Context, shipID string) ([]byte, error) {
 		return nil, fmt.Errorf("read guard rules: %w", err)
 	}
 	return text, nil
+}
+
+// Within reads in a goroutine of its own and answers at ctx's end whatever the read waits on, so a file that never answers, a pipe
+// or a stalled file system, holds its caller no longer than ctx. The read itself cannot be stopped: it is left to end on its own.
+func Within(ctx context.Context, read func() ([]byte, error)) ([]byte, error) {
+	type result struct {
+		text []byte
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		text, err := read()
+		done <- result{text, err}
+	}()
+	select {
+	case got := <-done:
+		return got.text, got.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // KeptVersion is the settings version of the rules kept for the ship, false when none are kept.

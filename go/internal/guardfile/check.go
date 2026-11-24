@@ -75,7 +75,7 @@ func (s Store) GuardStatus(ctx context.Context, shipID string) (guard.Status, bo
 	if status.Sets == nil {
 		status.Sets = []guard.AppliedSet{}
 	}
-	lines, err := secrets.ReadPrivate(filepath.Join(Folder(s.Guards, shipID), refusalsFile))
+	lines, err := Within(ctx, func() ([]byte, error) { return secrets.ReadPrivate(filepath.Join(Folder(s.Guards, shipID), refusalsFile)) })
 	if errors.Is(err, fs.ErrNotExist) {
 		return status, true, nil
 	}

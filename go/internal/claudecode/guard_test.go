@@ -11,6 +11,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
 
 // aGuardedHarness is a harness whose sessions get the guard: its program and the state folder's ships directory.
@@ -96,6 +97,16 @@ func mustJSON(t *testing.T, value any) string {
 }
 
 // withSettings writes the settings text to the file, its folder made.
+// problemOf is why the entry's session cannot start guarded, its settings read.
+func problemOf(t *testing.T, harness Harness, entry reconciler.Entry) string {
+	t.Helper()
+	problem, err := harness.GuardProblem(context.Background(), entry)
+	if err != nil {
+		t.Fatalf("GuardProblem: %v", err)
+	}
+	return problem
+}
+
 func withSettings(t *testing.T, file string, text string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
@@ -126,7 +137,7 @@ func TestEverySettingsFileASessionLoadsThatDisablesHooksKeepsItFromStarting(t *t
 			file := fileOf(harness, entry.Folder)
 			withSettings(t, file, `{"disableAllHooks":true}`)
 
-			if got, want := harness.GuardProblem(context.Background(), entry), "guard disabled by settings: "+file; got != want {
+			if got, want := problemOf(t, harness, entry), "guard disabled by settings: "+file; got != want {
 				t.Fatalf("GuardProblem = %q, want %q", got, want)
 			}
 			if len(running.started) != 0 {
@@ -150,7 +161,7 @@ func TestASessionOnTheHostThatKeepsItsShipHomeIsCheckedAgainstTheUserSettingsOfT
 	file := filepath.Join(home, ".claude", "settings.json")
 	withSettings(t, file, `{"disableAllHooks":true}`)
 
-	if got, want := harness.GuardProblem(context.Background(), entry), "guard disabled by settings: "+file; got != want {
+	if got, want := problemOf(t, harness, entry), "guard disabled by settings: "+file; got != want {
 		t.Fatalf("GuardProblem = %q, want %q", got, want)
 	}
 }
@@ -172,7 +183,7 @@ func TestManagedSettingsThatAllowOnlyManagedHooksDisableTheGuard(t *testing.T) {
 	file := filepath.Join(harness.Managed, "managed-settings.json")
 	withSettings(t, file, `{"allowManagedHooksOnly":true}`)
 
-	if got, want := harness.GuardProblem(context.Background(), entry), "guard disabled by settings: "+file; got != want {
+	if got, want := problemOf(t, harness, entry), "guard disabled by settings: "+file; got != want {
 		t.Fatalf("GuardProblem = %q, want %q", got, want)
 	}
 }
@@ -186,7 +197,7 @@ func TestSettingsThatKeepHooksOrThatTheSessionDoesNotLoadLetItStart(t *testing.T
 	withSettings(t, harness.User, `{"disableAllHooks":false,"permissions":{"defaultMode":"default"}}`)
 	withSettings(t, filepath.Join(entry.Folder, ".claude", "settings.json"), `{"disableAllHooks":true}`)
 
-	if got := harness.GuardProblem(context.Background(), entry); got != "" {
+	if got := problemOf(t, harness, entry); got != "" {
 		t.Fatalf("GuardProblem = %q, want none", got)
 	}
 }

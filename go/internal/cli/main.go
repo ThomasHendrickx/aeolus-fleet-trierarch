@@ -85,8 +85,8 @@ type Machine struct {
 	CoreVersionRefusal func(fleetURL string) string
 	// ContainerHost is the machine as the container runtime's check reads it, with the model token file given (decision 0039).
 	ContainerHost func(modelToken string) container.Host
-	// NewPass is one pass of the run loop, with the crew file and configuration run read; the pass is told whether the fleet's key is cut off, which the trierarch's own report says.
-	NewPass   func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error)
+	// NewPass is one pass of the run loop, with the crew file and configuration run read; the pass is given the run's context, which ends as it stops, and told whether the fleet's key is cut off, which the trierarch's own report says.
+	NewPass   func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error)
 	PassEvery time.Duration
 	// InitStableFor is how long init waits for the service to keep one process; none is timings.InitStability.
 	InitStableFor time.Duration
@@ -577,7 +577,7 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		loop.Run(stopped)
 	}()
 	for {
-		if err := pass(isKeyCutOff.Load()); err != nil {
+		if err := pass(stopped, isKeyCutOff.Load()); err != nil {
 			machine.Log("the pass failed: " + err.Error())
 		}
 		select {

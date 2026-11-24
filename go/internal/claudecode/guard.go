@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,21 +113,31 @@ func (h Harness) IsGuarded() bool { return h.Homes == "" }
 
 // GuardProblem is why the entry's session cannot start guarded, "" when it can: the first settings file it would load that disables
 // hooks, `disableAllHooks`, or in the managed settings `allowManagedHooksOnly`, which leaves the guard's hook out too. The request is
-// given back with it (design 4.6).
-func (h Harness) GuardProblem(entry reconciler.Entry) string {
+// given back with it (design 4.6). Settings it cannot read within ctx are an error: the session does not start until they are read.
+func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (string, error) {
 	flags, err := h.Settings().LaunchFlags(entry.Options)
 	if err != nil {
-		return ""
+		return "", nil
 	}
+	read := func(file string) ([]byte, error) { return readSettings(ctx, file) }
 	for _, file := range managedFiles(h.Managed) {
-		if disablesHooks(readSettings(file), true) {
-			return guardDisabledBy(file)
+		text, err := read(file)
+		if err != nil {
+			return "", err
+		}
+		if disablesHooks(text, true) {
+			return guardDisabledBy(file), nil
 		}
 	}
 	if settings, ok := valueOf(flags, settingsFlag); ok {
-		text, file := commandLineSettings(settings, entry.Folder)
+		text, file := commandLineSource(settings, entry.Folder)
+		if text == nil {
+			if text, err = read(file); err != nil {
+				return "", err
+			}
+		}
 		if disablesHooks(text, false) {
-			return guardDisabledBy(file)
+			return guardDisabledBy(file), nil
 		}
 	}
 	for _, source := range sourcesOf(flags) {
@@ -134,33 +145,53 @@ func (h Harness) GuardProblem(entry reconciler.Entry) string {
 		if source != "user" {
 			file = filepath.Join(entry.Folder, ".claude", map[string]string{"local": "settings.local.json", "project": "settings.json"}[source])
 		}
-		if disablesHooks(readSettings(file), false) {
-			return guardDisabledBy(file)
+		text, err := read(file)
+		if err != nil {
+			return "", err
+		}
+		if disablesHooks(text, false) {
+			return guardDisabledBy(file), nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func guardDisabledBy(file string) string { return "guard disabled by settings: " + file }
 
-// readSettings is a settings file's text, none when it cannot be read.
-func readSettings(file string) []byte {
-	text, err := os.ReadFile(file)
-	if err != nil {
-		return nil
+// readSettings is a settings file's text, none when it cannot be read; an error only when ctx ends before it is read.
+func readSettings(ctx context.Context, file string) ([]byte, error) {
+	text, err := guardfile.Within(ctx, func() ([]byte, error) { return os.ReadFile(file) })
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
-	return text
+	if err != nil {
+		return nil, nil
+	}
+	return text, nil
 }
 
 // commandLineSettings are the text `--settings` gives, a file or JSON, and what names it: its file, a relative one the folder's.
 func commandLineSettings(settings string, folder string) ([]byte, string) {
+	text, file := commandLineSource(settings, folder)
+	if text != nil {
+		return text, file
+	}
+	read, err := os.ReadFile(file)
+	if err != nil {
+		return nil, file
+	}
+	return read, file
+}
+
+// commandLineSource is what `--settings` names: its JSON, named as the flag, or no text and its file, a relative one the folder's.
+func commandLineSource(settings string, folder string) ([]byte, string) {
 	if strings.HasPrefix(strings.TrimLeft(settings, " \t\r\n"), "{") {
 		return []byte(settings), settingsFlag
 	}
 	if !filepath.IsAbs(settings) {
 		settings = filepath.Join(folder, settings)
 	}
-	return readSettings(settings), settings
+	return nil, settings
 }
 
 // disablesHooks is whether settings text turns hooks off, the managed settings' allowManagedHooksOnly too; text that is no JSON

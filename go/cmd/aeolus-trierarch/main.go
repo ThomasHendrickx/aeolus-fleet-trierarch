@@ -148,7 +148,7 @@ func main() {
 			return fleet.CoreVersionRefusal(fleetURL, cli.Version, fleet.MinimumCoreVersion)
 		},
 		ContainerHost: func(modelToken string) container.Host { return container.Machine{ModelToken: modelToken} },
-		NewPass: func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error) {
+		NewPass: func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
 			return newPass(at, kept, configuration, home, program, timed.FirstRestartDelay)
 		},
 		PassEvery:     timed.PassInterval,
@@ -499,12 +499,12 @@ type runningSessions interface {
 // keptGuardRules are the guard rules kept in the state folder, as a pass asks which settings version a ship's rules are of.
 type keptGuardRules struct{ store guardfile.Store }
 
-func (k keptGuardRules) KeptVersion(shipID string) (int, bool, error) {
-	return k.store.KeptVersion(context.Background(), shipID)
+func (k keptGuardRules) KeptVersion(ctx context.Context, shipID string) (int, bool, error) {
+	return k.store.KeptVersion(ctx, shipID)
 }
 
-func (k keptGuardRules) Forget(shipID string) error {
-	return k.store.Forget(context.Background(), shipID)
+func (k keptGuardRules) Forget(ctx context.Context, shipID string) error {
+	return k.store.Forget(ctx, shipID)
 }
 
 // sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
@@ -599,7 +599,7 @@ func environment() map[string]string {
 }
 
 // newPass is one pass of the run loop with this machine's adapters: the fleet over /api/v1 with the trierarch's crew token, the harnesses the configuration offers, worktrees of the configured repositories, and the state file.
-func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string, firstRestartDelay time.Duration) (func(isKeyCutOff bool) error, error) {
+func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string, firstRestartDelay time.Duration) (func(ctx context.Context, isKeyCutOff bool) error, error) {
 	env := environment()
 	client := fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
 	pastaMissing, pastaErr := checkPastaAppArmor(container.Machine{}, runtime.GOOS, "/")
@@ -809,12 +809,12 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
-	return func(isKeyCutOff bool) error {
+	return func(ctx context.Context, isKeyCutOff bool) error {
 		ask.Once()
 		askConfiguration.Once()
 		current := pass
 		current.Workspace, current.Repositories, current.Folders = placesOf()
-		if err := current.Run(); err != nil {
+		if err := current.Run(ctx); err != nil {
 			return err
 		}
 		if err := reporter.Report(isKeyCutOff); err != nil {

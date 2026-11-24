@@ -1,6 +1,7 @@
 package runpass
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 // GuardStatuses read what the guard applies to each ship and what it refused.
 type GuardStatuses interface {
 	// GuardStatus is the ship's guard status; false when no rules are kept for it.
-	GuardStatus(shipID string) (guard.Status, bool, error)
+	GuardStatus(ctx context.Context, shipID string) (guard.Status, bool, error)
 }
 
 // GuardReports report each guarded session's guard to the fleet (aeolus-fleet docs/design/guard, section 4.8): its status with the
@@ -26,7 +27,7 @@ type GuardReports interface {
 // reportGuards reports the guard of each guarded session that started, with the settings version its rules were kept for once its
 // entry is at that version: each refusal not reported yet, then its status when its version or refusal count changed. Each report
 // is kept as it is made, so one that fails is logged and only it, and what follows it, is tried again on the next pass.
-func (p Pass) reportGuards(state reconciler.State) reconciler.State {
+func (p Pass) reportGuards(ctx context.Context, state reconciler.State) reconciler.State {
 	if p.GuardStatuses == nil || p.GuardReports == nil {
 		return state
 	}
@@ -35,7 +36,9 @@ func (p Pass) reportGuards(state reconciler.State) reconciler.State {
 		if _, ok := guardedOf(p.Harnesses[entry.Harness]); !ok || !entry.HasStarted || entry.Folder == "" || entry.State == "releasing" {
 			continue
 		}
-		status, ok, err := p.GuardStatuses.GuardStatus(shipID)
+		read, cancel := context.WithTimeout(ctx, guardReadWait)
+		status, ok, err := p.GuardStatuses.GuardStatus(read, shipID)
+		cancel()
 		if err != nil {
 			p.Log(fmt.Sprintf("The guard of %s (%s) was not read: %v; the next pass tries again", nameOf(entry), shipID, err))
 			continue
