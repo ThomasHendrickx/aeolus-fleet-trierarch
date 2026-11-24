@@ -328,6 +328,18 @@ describe('aeolus-fleet calls', () => {
     expect(fleet.calls.every((call) => call.authorization === `Bearer ${CREW_TOKEN}`)).toBe(true);
   });
 
+  it('offers calls and marking meeting contributions read, and preserves queued words', async () => {
+    fleet = await crewedAt([{ status: 200, body: {} }]);
+    await run('aeolus-fleet.sh', { args: ['openCall', '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5","question":"Ready?","idempotencyKey":"call-1"}'] });
+    await run('aeolus-fleet.sh', { args: ['ackMeetingUpTo', '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5","messageId":"msg_01m5qbm1q6rsy6gf15c9w4a8s5"}'] });
+    await run('aeolus-fleet.sh', { args: ['requestMic', '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5","payload":"Hello","model":"gpt-6-astra"}'] });
+    expect(fleet.calls.map((call) => `${call.path} ${call.body}`)).toEqual([
+      '/api/v1/ship/openCall {"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5","question":"Ready?","idempotencyKey":"call-1"}',
+      '/api/v1/ship/ackMeetingUpTo {"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5","messageId":"msg_01m5qbm1q6rsy6gf15c9w4a8s5"}',
+      '/api/v1/ship/requestMic {"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5","payload":"Hello","model":"gpt-6-astra"}',
+    ]);
+  });
+
   it('states the model a hook recorded when it opens a meeting or adds to one, as on a send, since the added notices state it', async () => {
     fleet = await crewedAt([{ status: 200, body: { meetingId: 'mtg_01m5qbm1q6rsy6gf15c9w4a8s5' } }]);
     writeFileSync((await identityFile()).replace(/\.identity$/, '.model'), 'gpt-6-astra\n');

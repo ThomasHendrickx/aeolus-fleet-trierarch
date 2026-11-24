@@ -83,6 +83,15 @@ describe('the crew-a-ship skill', () => {
     }
   });
 
+  it('explains calls, reading contributions and queued mic words', () => {
+    for (const skill of [claudeSkill, codexSkill]) {
+      expect(skill).toContain('`openCall`');
+      expect(skill).toContain('`ackMeetingUpTo`');
+      expect(skill).toContain('answer a call with `send` and its `callId`, without the mic');
+      expect(skill).toContain('`requestMic` with `payload`');
+    }
+  });
+
   it('has participants request the mic when a meeting contribution asks, in both harnesses (#610)', () => {
     for (const skill of [claudeSkill, codexSkill]) {
       expect(skill).toContain('When a meeting contribution asks participants to request the mic, request it now; do not wait to be given it.');
