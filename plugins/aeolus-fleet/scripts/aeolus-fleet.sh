@@ -245,7 +245,7 @@ esac
 # open's and an add's notices state it): it is added last, so it wins over a
 # model the input states (the last of two keys counts).
 model_file="$(aeolus_model_file)"
-if { [ "$command" = send ] || [ "$command" = ask ] || [ "$command" = openMeeting ] || [ "$command" = openCall ] || [ "$command" = addToMeeting ]; } && model="$(head -n 1 "$model_file" 2>/dev/null)"; then
+if { [ "$command" = send ] || [ "$command" = ask ] || [ "$command" = openMeeting ] || [ "$command" = openCall ] || [ "$command" = addToMeeting ] || { [ "$command" = requestMic ] && printf '%s' "$input" | grep -Eq '"payload"[[:space:]]*:'; }; } && model="$(head -n 1 "$model_file" 2>/dev/null)"; then
   model="$(aeolus_json_escape "$model")"
   input="$(printf '%s' "$input" | sed -e ':a' -e '$!{N;ba' -e '}' -e 's/[[:space:]]*$//')"
   if printf '%s' "$input" | grep -Eq '^[[:space:]]*\{[[:space:]]*\}$'; then
