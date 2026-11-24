@@ -8,8 +8,8 @@ type Status struct {
 	// SettingsVersion is the settings version the rules it applies were kept for, which it is reported with; not part of the status.
 	SettingsVersion int             `json:"-"`
 	Sets            []AppliedSet    `json:"sets"`
-	Refusals int             `json:"refusals"`
-	Recent   []RecentRefusal `json:"recent"`
+	Refusals        int             `json:"refusals"`
+	Recent          []RecentRefusal `json:"recent"`
 }
 
 // AppliedSet is a rule set the guard applies, at the commit it was resolved to, and whether the fleet's floor names it.
