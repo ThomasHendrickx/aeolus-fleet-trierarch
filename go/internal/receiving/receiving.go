@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardrules"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
@@ -37,6 +38,11 @@ type Keeper interface {
 // ConfigurationKeeper applies the MCP configuration the trierarch plugin's ship sent, persisted before it answers.
 type ConfigurationKeeper interface {
 	Apply(configuration mcpconfiguration.Configuration) (mcpconfiguration.Outcome, error)
+}
+
+// GuardKeeper persists the plugin's rules before the delivery is acknowledged.
+type GuardKeeper interface {
+	Accept(context.Context, string, string) (guardrules.Outcome, error)
 }
 
 // Confirmer tells the trierarch plugin's ship, as the trierarch's own ship, that a configuration is persisted.
@@ -84,6 +90,8 @@ type Loop struct {
 	Trusted Keeper
 	// McpConfiguration takes the fleet's MCP configuration; it is handled as any other message without it.
 	McpConfiguration *McpConfiguration
+	// GuardRules keeps resolved guard rules; without it they are not handled.
+	GuardRules GuardKeeper
 	// OnKeyCutOff is told at the first refusal (true) and when a receive passes again (false).
 	OnKeyCutOff func(isCutOff bool)
 }
@@ -143,9 +151,18 @@ func (l Loop) takeMcpConfiguration(delivery Delivery) error {
 	return taken.Confirm.ConfirmMcpConfiguration(l.PluginShipID, mcpconfiguration.AppliedPayload(configuration))
 }
 
-func (l Loop) handle(delivery Delivery) error {
+func (l Loop) handle(ctx context.Context, delivery Delivery) error {
 	if IsPing(delivery.ContentType) {
 		return l.Ship.Pong(delivery.DeliveryID)
+	}
+	if delivery.ContentType == guardrules.ContentType && l.GuardRules != nil {
+		outcome, err := l.GuardRules.Accept(ctx, delivery.SenderShipID, delivery.Payload)
+		if outcome == guardrules.Refused {
+			l.Log(fmt.Sprintf("Not handled: guard rules (%v). The stored rules stay unchanged.", err))
+		} else if err != nil {
+			return err
+		}
+		return l.Ship.Ack(delivery.DeliveryID)
 	}
 	if delivery.ContentType == trusted.ListContentType && l.Trusted != nil {
 		if err := l.takeTrusted(delivery); err != nil {
@@ -172,7 +189,7 @@ func (l Loop) step(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	for _, delivery := range deliveries {
-		if err := l.handle(delivery); err != nil {
+		if err := l.handle(ctx, delivery); err != nil {
 			return false, err
 		}
 	}
