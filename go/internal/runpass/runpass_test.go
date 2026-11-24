@@ -463,6 +463,8 @@ type aStore struct {
 	// unreadableAfter is how many loads succeed before the state file is unreadable; 0 keeps it readable.
 	unreadableAfter int
 	loads           int
+	// failSaves is how many of the next saves fail.
+	failSaves int
 }
 
 func (s *aStore) Load() (reconciler.State, error) {
@@ -472,7 +474,14 @@ func (s *aStore) Load() (reconciler.State, error) {
 	}
 	return s.state, nil
 }
-func (s *aStore) Save(state reconciler.State) error { s.state, s.saves = state, s.saves+1; return nil }
+func (s *aStore) Save(state reconciler.State) error {
+	if s.failSaves > 0 {
+		s.failSaves--
+		return errors.New("the state file cannot be written")
+	}
+	s.state, s.saves = state, s.saves+1
+	return nil
+}
 
 type aPass struct {
 	sockets   *someSockets
