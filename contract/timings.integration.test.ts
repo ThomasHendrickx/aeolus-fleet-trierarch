@@ -39,6 +39,15 @@ async function aCrewingMachineAt(timings: Timings): Promise<{ fleet: Fleet; mach
   return { fleet, machine };
 }
 
+/** Starts a single service for timing its passes, without the repository setup that restarts it. */
+async function aMachineForPassTimings(timings: Timings): Promise<Machine> {
+  fleet = await aFleet();
+  machine = await aMachine({ timings });
+  const ran = await machine.trierarch(setupLineOf(fleet), { input: fleet.trierarchShip.secret });
+  expect(ran.status, `${ran.stdout}${ran.stderr}`).toBe(0);
+  return machine;
+}
+
 const seenSchema = z.object({ passAt: z.string() });
 
 /** The time of the last pass the trierarch saw through, none before its first. */
@@ -100,8 +109,9 @@ describe('at its production timings, the trierarch', () => {
   });
 
   it('runs its passes 5 s apart', async () => {
-    const { machine: crewing } = await aCrewingMachineAt('production');
+    const crewing = await aMachineForPassTimings('production');
 
+    expect(crewing.serviceLog().match(/runs as pid/g)).toHaveLength(1);
     for (const gap of await gapsBetweenPasses(crewing, 2)) {
       expect(gap).toBeGreaterThanOrEqual(PRODUCTION_PASS_INTERVAL_MS);
       expect(gap).toBeLessThan(PRODUCTION_PASS_INTERVAL_MS + LATE_BY_AT_MOST_MS);
@@ -129,7 +139,7 @@ describe('at its production timings, the trierarch', () => {
 
 describe("at the suite's shortened timings, the trierarch", () => {
   it('runs its passes the shortened pass interval apart', async () => {
-    const { machine: crewing } = await aCrewingMachineAt('shortened');
+    const crewing = await aMachineForPassTimings('shortened');
 
     for (const gap of await gapsBetweenPasses(crewing, 2)) {
       expect(gap).toBeGreaterThanOrEqual(PASS_INTERVAL_MS);
