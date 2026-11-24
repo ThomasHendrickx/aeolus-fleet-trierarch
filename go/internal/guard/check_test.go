@@ -126,3 +126,55 @@ func equalPointer(a, b *string) bool {
 	}
 	return *a == *b
 }
+
+// stuckRefusals never keeps a refusal until released.
+type stuckRefusals struct{ release chan struct{} }
+
+func (s stuckRefusals) Append(context.Context, Refusal) error {
+	<-s.release
+	return nil
+}
+
+// panickingRefusals breaks while it keeps a refusal.
+type panickingRefusals struct{}
+
+func (panickingRefusals) Append(context.Context, Refusal) error { panic("broken") }
+
+// failingRefusals cannot keep a refusal.
+type failingRefusals struct{}
+
+func (failingRefusals) Append(context.Context, Refusal) error {
+	return errors.New("refusals.jsonl: disk full")
+}
+
+func TestARefusalTheGuardCannotRecordIsRefusedAsGuardFailed(t *testing.T) {
+	stuck := stuckRefusals{release: make(chan struct{})}
+	t.Cleanup(func() { close(stuck.release) })
+	tests := []struct {
+		name     string
+		refusals RefusalLog
+		want     string
+	}{
+		{"when recording hangs past the deadline", stuck, "Refused by the guard: guard failed: deadline."},
+		{"when recording panics", panickingRefusals{}, "Refused by the guard: guard failed: panic."},
+		{"when recording fails", failingRefusals{}, "Refused by the guard: guard failed: refusal unrecorded."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checker, _ := aChecker(aSet("no-web", "8d41e07aa1b2", `{"tools":{"deny":["web"]}}`))
+			checker.Refusals = tt.refusals
+			checker.Deadline = 20 * time.Millisecond
+
+			answered := make(chan Answer, 1)
+			go func() { answered <- check(t, checker, aCall("WebFetch", map[string]any{"url": "https://example.com"})) }()
+			select {
+			case answer := <-answered:
+				if got := reason(t, answer); got != tt.want {
+					t.Errorf("check refused as %q, want %q", got, tt.want)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("check gave no answer within a second, want a refusal by its deadline")
+			}
+		})
+	}
+}
