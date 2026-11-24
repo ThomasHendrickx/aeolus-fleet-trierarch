@@ -166,7 +166,7 @@ func (s realGuardedSession) run(t *testing.T, program string) realGuardResult {
 	marker := filepath.Join(s.folder, "ran")
 	model := aBashModel(t, "touch "+marker)
 	harness := Harness{Program: program, Ships: s.at.Ships}
-	settings, err := harness.writeGuardSettings(realGuardShip)
+	settings, err := harness.writeGuardSettings(realGuardShip, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,20 +25,75 @@ func GuardCommand(program string, shipID string) string {
 	return shellQuoted(program) + " guard check --ship " + shipID + " || exit 2"
 }
 
-// GuardSettings are the guard's settings for the ship: one PreToolUse hook, matcher *, running the command.
-func GuardSettings(command string) ([]byte, error) {
-	hook := map[string]any{"type": "command", "command": command}
-	return json.Marshal(map[string]any{"hooks": map[string]any{"PreToolUse": []any{map[string]any{"matcher": "*", "hooks": []any{hook}}}}})
+// guardTimeout is the hook's timeout in seconds, above guard check's own 5-second deadline: Claude Code runs a call whose hook passes
+// its timeout, so the guard must answer, and stop, first.
+const guardTimeout = 30
+
+// GuardSettings are the guard's settings for the ship: the configured settings, none when nil, with one PreToolUse hook added, matcher
+// *, running the command. Claude Code takes only the last --settings, so the configured ones come with the guard's.
+func GuardSettings(command string, configured map[string]any) ([]byte, error) {
+	settings := map[string]any{}
+	for key, value := range configured {
+		settings[key] = value
+	}
+	hooks := map[string]any{}
+	if configuredHooks, ok := settings["hooks"].(map[string]any); ok {
+		for event, matchers := range configuredHooks {
+			hooks[event] = matchers
+		}
+	} else if settings["hooks"] != nil {
+		return nil, errors.New("the configured settings' hooks are no object")
+	}
+	preToolUse, ok := hooks["PreToolUse"].([]any)
+	if !ok && hooks["PreToolUse"] != nil {
+		return nil, errors.New("the configured settings' PreToolUse hooks are no list")
+	}
+	hook := map[string]any{"type": "command", "command": command, "timeout": guardTimeout}
+	hooks["PreToolUse"] = append(append([]any{}, preToolUse...), map[string]any{"matcher": "*", "hooks": []any{hook}})
+	settings["hooks"] = hooks
+	return json.Marshal(settings)
 }
 
-// writeGuardSettings writes the ship's guard settings in its guard folder, mode 600, and answers their file.
-func (h Harness) writeGuardSettings(shipID string) (string, error) {
+// configuredSettings are the settings the configuration's --settings names, a file or JSON, none when it names none.
+func configuredSettings(flags []string, folder string) (map[string]any, error) {
+	named, ok := valueOf(flags, settingsFlag)
+	if !ok {
+		return nil, nil
+	}
+	text, file := commandLineSettings(named, folder)
+	if text == nil {
+		return nil, fmt.Errorf("the configured settings %s cannot be read", file)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(text, &settings); err != nil || settings == nil {
+		return nil, fmt.Errorf("the configured settings %s are no JSON object", file)
+	}
+	return settings, nil
+}
+
+// withoutSettingsFlag are the flags without --settings and its value: the guard's settings carry them.
+func withoutSettingsFlag(flags []string) []string {
+	kept := []string{}
+	for at := 0; at < len(flags); at++ {
+		switch {
+		case flags[at] == settingsFlag && at+1 < len(flags):
+			at++
+		case strings.HasPrefix(flags[at], settingsFlag+"="):
+		default:
+			kept = append(kept, flags[at])
+		}
+	}
+	return kept
+}
+
+// writeGuardSettings writes the ship's guard settings, with the configured ones, in its guard folder, mode 600, and answers their file.
+func (h Harness) writeGuardSettings(shipID string, configured map[string]any) (string, error) {
 	if h.Ships == "" || h.Program == "" {
 		return "", errors.New("claude-code has no guard: the trierarch's program or state folder is unknown")
 	}
-	text, err := GuardSettings(GuardCommand(h.Program, shipID))
+	text, err := GuardSettings(GuardCommand(h.Program, shipID), configured)
 	if err != nil {
-		return "", fmt.Errorf("encode the guard settings: %w", err)
+		return "", fmt.Errorf("make the guard settings: %w", err)
 	}
 	file := filepath.Join(guardfile.Folder(h.Ships, shipID), guardSettingsFile)
 	if err := secrets.WritePrivate(file, text); err != nil {
