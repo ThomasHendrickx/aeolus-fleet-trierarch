@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,9 +13,9 @@ import (
 	"time"
 )
 
-// TestGuardCheckExitsAtItsDeadlineWhenItsWorkIsStuck runs guard check as the hook does, its state a pipe no one writes, so reading
-// it never ends: the process itself refuses the call and exits at its 5-second deadline, before the hook's timeout.
-func TestGuardCheckExitsAtItsDeadlineWhenItsWorkIsStuck(t *testing.T) {
+// aStuckGuardCheck is guard check as the hook runs it, its state a pipe no one writes, so reading it never ends.
+func aStuckGuardCheck(t *testing.T) *exec.Cmd {
+	t.Helper()
 	program := filepath.Join(t.TempDir(), "aeolus-trierarch")
 	if output, err := exec.Command("go", "build", "-o", program, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, output)
@@ -30,27 +31,79 @@ func TestGuardCheckExitsAtItsDeadlineWhenItsWorkIsStuck(t *testing.T) {
 	command := exec.Command(program, "guard", "check", "--ship", "shp_01m6jyczpnpp5c0vxh54c966cy")
 	command.Env = []string{"HOME=" + home, "PATH=" + os.Getenv("PATH")}
 	command.Stdin = strings.NewReader(`{"tool_name":"Read","tool_input":{"file_path":"README.md"},"cwd":"/"}`)
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
+	return command
+}
+
+// exitOf runs the command to its end, at most 15 seconds: how it exited and after how long.
+func exitOf(t *testing.T, command *exec.Cmd) (error, time.Duration) {
+	t.Helper()
 	started := time.Now()
 	done := make(chan error, 1)
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
 	go func() { done <- command.Wait() }()
-	var err error
 	select {
-	case err = <-done:
+	case err := <-done:
+		return err, time.Since(started)
 	case <-time.After(15 * time.Second):
 		_ = command.Process.Kill()
 		t.Fatal("guard check still ran 15 seconds after it started")
+		return nil, 0
 	}
-	took := time.Since(started)
+}
+
+func exitCodeOf(err error) int {
 	var exited *exec.ExitError
-	if !errors.As(err, &exited) || exited.ExitCode() != 2 || strings.TrimSpace(stderr.String()) != "Refused by the guard: guard failed: deadline." {
+	if !errors.As(err, &exited) {
+		return 0
+	}
+	return exited.ExitCode()
+}
+
+// TestGuardCheckExitsAtItsDeadlineWhenItsWorkIsStuck: the process itself refuses the call and exits at its 5-second deadline, before
+// the hook's timeout.
+func TestGuardCheckExitsAtItsDeadlineWhenItsWorkIsStuck(t *testing.T) {
+	command := aStuckGuardCheck(t)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+
+	err, took := exitOf(t, command)
+
+	if exitCodeOf(err) != 2 || strings.TrimSpace(stderr.String()) != "Refused by the guard: guard failed: deadline." {
 		t.Fatalf("guard check = %v, %q, want exit 2 and the deadline refusal", err, stderr.String())
 	}
-	if took < 4*time.Second || took > 8*time.Second {
-		t.Fatalf("guard check exited after %s, want at its 5-second deadline", took)
+	if took < 4*time.Second || took > 5500*time.Millisecond {
+		t.Fatalf("guard check exited after %s, want within its 5-second deadline", took)
+	}
+}
+
+// TestGuardCheckExitsWithinItsDeadlineWhenItsAnswerCannotBeWritten: its stderr a pipe no one reads that is full already, the refusal
+// it writes at its deadline never ends, and the process exits with 2 all the same, within its deadline.
+func TestGuardCheckExitsWithinItsDeadlineWhenItsAnswerCannotBeWritten(t *testing.T) {
+	command := aStuckGuardCheck(t)
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reader.Close() }()
+	if err := writer.SetWriteDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := writer.Write(bytes.Repeat([]byte("x"), 4096)); err != nil {
+			break
+		}
+	}
+	if err := writer.SetWriteDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	command.Stderr, command.Stdout = writer, io.Discard
+
+	err, took := exitOf(t, command)
+	_ = writer.Close()
+
+	if exitCodeOf(err) != 2 || took > 5500*time.Millisecond {
+		t.Fatalf("guard check = %v after %s, want exit 2 within its 5-second deadline", err, took)
 	}
 }
