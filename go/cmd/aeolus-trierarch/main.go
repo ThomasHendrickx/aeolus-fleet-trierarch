@@ -40,6 +40,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardrules"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
@@ -154,6 +156,9 @@ func main() {
 			return trustedRepositories(at, configuration, home)
 		},
 		McpConfiguration: heldMcpConfigurationOf,
+		GuardRules: func(at paths.Paths, identity guardrules.Identity) receiving.GuardKeeper {
+			return &guardrules.Keeper{Identity: identity, Store: guardfile.Store{Ships: at.Ships}}
+		},
 		McpFleet: func(kept crew.File) cli.McpFleet {
 			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
 		},
