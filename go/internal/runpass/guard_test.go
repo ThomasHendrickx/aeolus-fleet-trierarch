@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
 // guardedHarness is the harness whose sessions start guarded, its settings disabling the guard as its problem says.
@@ -103,6 +104,94 @@ func TestASessionStartsAgainOnlyWithTheRulesOfItsSettingsVersion(t *testing.T) {
 
 	if len(pass.harness.launches) != 1 {
 		t.Fatalf("launches %d, want no start again without its rules", len(pass.harness.launches))
+	}
+}
+
+func givenBack(calls []string, reason string) bool {
+	return slices.Contains(calls, "giveBack "+scout+" 1 mac-mini: "+reason)
+}
+
+func TestAnIdleSessionAnotherVersionStartedStartsAgainOnlyWithTheRulesOfItsSettingsVersion(t *testing.T) {
+	rules := someGuardRules{scout: 1}
+	pass, _ := aGuardedPass(t, rules)
+	pass.crewed(t)
+	delete(rules, scout)
+	pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "running", IsOtherVersion: true}}
+	pass.harness.turns[folder] = reconciler.TurnIdle
+
+	pass.run(t)
+
+	if len(pass.harness.launches) != 1 || len(pass.harness.died) != 0 {
+		t.Fatalf("launches %d, died %q, want no start again without its rules", len(pass.harness.launches), pass.harness.died)
+	}
+}
+
+func TestASessionWhoseRulesDidNotArriveWithinTenMinutesOfItsStartAgainIsGivenBack(t *testing.T) {
+	for name, observed := range map[string][]sessions.Observed{
+		"after its session ended":          nil,
+		"after another version started it": {{ShipID: scout, Status: "running", IsOtherVersion: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rules := someGuardRules{scout: 1}
+			pass, _ := aGuardedPass(t, rules)
+			pass.crewed(t)
+			delete(rules, scout)
+			pass.sessions.observed = observed
+			pass.harness.turns[folder] = reconciler.TurnIdle
+			pass.run(t)
+			pass.pass.Now = func() time.Time { return now.Add(10*time.Minute - time.Second) }
+			pass.run(t)
+			if givenBack(pass.fleet.calls, "guard rules did not arrive") {
+				t.Fatalf("calls %q, want it waiting within ten minutes", pass.fleet.calls)
+			}
+
+			pass.pass.Now = func() time.Time { return now.Add(10 * time.Minute) }
+			pass.run(t)
+			pass.run(t)
+
+			if !givenBack(pass.fleet.calls, "guard rules did not arrive") || len(pass.harness.launches) != 1 {
+				t.Fatalf("calls %q, launches %d, want it given back, never started again", pass.fleet.calls, len(pass.harness.launches))
+			}
+		})
+	}
+}
+
+func TestAShipCrewedAgainInAFreshShipFolderWhoseSettingsDisableTheGuardIsGivenBack(t *testing.T) {
+	for name, recover := range map[string]func(*aPass){
+		"its ship's folder removed by hand": func(pass *aPass) {
+			pass.workspace.gone = map[string]bool{pass.store.state.Entries[scout].ShipFolder: true}
+		},
+		"crewed before the ship folder layout": func(pass *aPass) { pass.crewedInTheOldLayout(t) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			pass, guarded := aGuardedPass(t, someGuardRules{scout: 1})
+			pass.crewed(t)
+			recover(pass)
+			pass.fleet.calls = nil
+			guarded.problem = hooksOff
+
+			pass.run(t)
+			pass.run(t)
+
+			if !givenBack(pass.fleet.calls, hooksOff) || len(pass.harness.launches) != 1 {
+				t.Fatalf("calls %q, launches %d, want it given back, never started", pass.fleet.calls, len(pass.harness.launches))
+			}
+		})
+	}
+}
+
+func TestAShipCrewedAgainInAFreshShipFolderWaitsForTheRulesOfItsSettingsVersion(t *testing.T) {
+	rules := someGuardRules{scout: 1}
+	pass, _ := aGuardedPass(t, rules)
+	pass.crewed(t)
+	pass.workspace.gone = map[string]bool{pass.store.state.Entries[scout].ShipFolder: true}
+	delete(rules, scout)
+
+	pass.run(t)
+	pass.run(t)
+
+	if len(pass.harness.launches) != 1 {
+		t.Fatalf("launches %d, want no start in the fresh ship folder without its rules", len(pass.harness.launches))
 	}
 }
 
