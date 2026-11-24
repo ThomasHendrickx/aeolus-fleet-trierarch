@@ -254,7 +254,10 @@ type Pass struct {
 	Harnesses      map[string]Harness
 	// GuardRules are the guard rules kept for each ship, which a guarded session starts only with.
 	GuardRules GuardRules
-	Workspace  Workspace
+	// GuardStatuses read each guarded session's guard; GuardReports report it, none until the fleet's core takes it (aeolus-fleet#2070).
+	GuardStatuses GuardStatuses
+	GuardReports  GuardReports
+	Workspace     Workspace
 	// FolderProcesses are stopped in an orphan worktree before it is removed.
 	FolderProcesses FolderProcesses
 	Store           Store
@@ -388,6 +391,7 @@ func (p Pass) Run() error {
 		return err
 	}
 	state = p.reportUsageLimits(state)
+	state = p.reportGuards(state)
 	snapshot := seen.Snapshot{Ships: map[string]seen.Ship{}}
 	next, actions, err := p.reconcile(state, &snapshot)
 	if err != nil {

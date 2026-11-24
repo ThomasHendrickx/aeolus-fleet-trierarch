@@ -8,10 +8,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 )
 
 // Folder is the ship's guard folder in the state folder's ships directory: its rules, settings and refusals.
@@ -48,6 +50,54 @@ func (s Sets) Sets(ctx context.Context) ([]json.RawMessage, error) {
 	return kept.Sets, nil
 }
 
+// refusalsFile is where a ship's refusals are kept in its guard folder.
+const refusalsFile = "refusals.jsonl"
+
+// GuardStatus is what the guard applies to the ship and what it refused: the sets of the rules kept, and the refusals kept, the last
+// twenty of them. False when no rules are kept.
+func (s Store) GuardStatus(ctx context.Context, shipID string) (guard.Status, bool, error) {
+	text, err := s.Read(ctx, shipID)
+	if err != nil || text == nil {
+		return guard.Status{}, false, err
+	}
+	var kept struct {
+		ShipID string             `json:"shipId"`
+		Sets   []guard.AppliedSet `json:"sets"`
+	}
+	if err := json.Unmarshal(text, &kept); err != nil {
+		return guard.Status{}, false, fmt.Errorf("decode guard rules: %w", err)
+	}
+	if kept.ShipID != shipID {
+		return guard.Status{}, false, fmt.Errorf("guard rules do not belong to ship %s", shipID)
+	}
+	status := guard.Status{Sets: kept.Sets, Recent: []guard.RecentRefusal{}}
+	if status.Sets == nil {
+		status.Sets = []guard.AppliedSet{}
+	}
+	lines, err := secrets.ReadPrivate(filepath.Join(Folder(s.Ships, shipID), refusalsFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return status, true, nil
+	}
+	if err != nil {
+		return guard.Status{}, false, fmt.Errorf("read refusals: %w", err)
+	}
+	for _, line := range strings.Split(string(lines), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var refusal guard.Refusal
+		if err := json.Unmarshal([]byte(line), &refusal); err != nil {
+			return guard.Status{}, false, fmt.Errorf("decode refusal: %w", err)
+		}
+		status.Refusals++
+		status.Recent = append(status.Recent, guard.RecentRefusal{At: refusal.At, Tool: refusal.Tool, Rule: refusal.Rule, Set: refusal.Set, Commit: refusal.Commit})
+	}
+	if len(status.Recent) > guard.RecentRefusals {
+		status.Recent = status.Recent[len(status.Recent)-guard.RecentRefusals:]
+	}
+	return status, true, nil
+}
+
 // Refusals appends each refusal of a ship to refusals.jsonl in its guard folder, one JSON object a line, mode 600.
 type Refusals struct {
 	Ships  string
@@ -70,7 +120,7 @@ func (r Refusals) Append(ctx context.Context, refusal guard.Refusal) error {
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		return fmt.Errorf("make guard folder: %w", err)
 	}
-	file, err := os.OpenFile(filepath.Join(folder, "refusals.jsonl"), os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
+	file, err := os.OpenFile(filepath.Join(folder, refusalsFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return fmt.Errorf("open refusals: %w", err)
 	}
