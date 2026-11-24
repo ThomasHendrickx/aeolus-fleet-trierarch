@@ -3,6 +3,7 @@ package guardfile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -41,6 +42,25 @@ func (s Store) Read(ctx context.Context, shipID string) ([]byte, error) {
 		return nil, fmt.Errorf("read guard rules: %w", err)
 	}
 	return text, nil
+}
+
+// KeptVersion is the settings version of the rules kept for the ship, false when none are kept.
+func (s Store) KeptVersion(ctx context.Context, shipID string) (int, bool, error) {
+	text, err := s.Read(ctx, shipID)
+	if err != nil || text == nil {
+		return 0, false, err
+	}
+	var kept struct {
+		ShipID          string `json:"shipId"`
+		SettingsVersion int    `json:"settingsVersion"`
+	}
+	if err := json.Unmarshal(text, &kept); err != nil {
+		return 0, false, fmt.Errorf("decode guard rules: %w", err)
+	}
+	if kept.ShipID != shipID {
+		return 0, false, fmt.Errorf("guard rules do not belong to ship %s", shipID)
+	}
+	return kept.SettingsVersion, true, nil
 }
 
 // Write replaces the file whole through a private, synced temporary file.

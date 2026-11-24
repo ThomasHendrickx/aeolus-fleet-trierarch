@@ -102,19 +102,72 @@ type Harness interface {
 	NotOfferedReason() string
 }
 
-// Guarded is a harness whose sessions start with the guard (aeolus-fleet docs/design/guard, section 4.6).
+// Guarded is a harness whose sessions start with the guard (aeolus-fleet docs/design/guard, sections 4.5 and 4.6).
 type Guarded interface {
+	// IsGuarded is whether its sessions start guarded on this machine.
+	IsGuarded() bool
 	// GuardProblem is why the entry's session cannot start guarded, as the settings it would load disable hooks; "" when it can.
 	GuardProblem(entry reconciler.Entry) string
 }
 
-// guardProblem is why the harness cannot start the entry's session guarded, "" when it can or has no guard yet.
-func guardProblem(harness Harness, entry reconciler.Entry) string {
+// GuardRules are the guard rules the trierarch keeps for each ship.
+type GuardRules interface {
+	// KeptVersion is the settings version of the rules kept for the ship, false when none are kept.
+	KeptVersion(shipID string) (int, bool, error)
+}
+
+// GuardRulesWait is how long a crew waits for the rules of its settings version before its request is given back (design 4.5).
+const GuardRulesWait = 10 * time.Minute
+
+// guardRulesDidNotArrive is why a request whose rules did not arrive in time is given back.
+const guardRulesDidNotArrive = "guard rules did not arrive"
+
+// guardedOf is the harness as it guards its sessions, false when it starts them without the guard.
+func guardedOf(harness Harness) (Guarded, bool) {
 	guarded, ok := harness.(Guarded)
+	if !ok || !guarded.IsGuarded() {
+		return nil, false
+	}
+	return guarded, true
+}
+
+// guardProblem is why the harness cannot start the entry's session guarded, "" when it can or has no guard.
+func guardProblem(harness Harness, entry reconciler.Entry) string {
+	guarded, ok := guardedOf(harness)
 	if !ok {
 		return ""
 	}
 	return guarded.GuardProblem(entry)
+}
+
+// hasGuardRules is whether the rules of the entry's settings version are kept, as a guarded session needs to start; always for a
+// harness without the guard.
+func (p Pass) hasGuardRules(harness Harness, entry reconciler.Entry) (bool, error) {
+	if _, ok := guardedOf(harness); !ok {
+		return true, nil
+	}
+	if p.GuardRules == nil {
+		return false, nil
+	}
+	version, ok, err := p.GuardRules.KeptVersion(entry.ShipID)
+	if err != nil {
+		return false, err
+	}
+	return ok && version == entry.SettingsVersion, nil
+}
+
+// waitsForGuardRules is whether the crew waits for the rules of its settings version, and why it is given back once they did not
+// arrive within GuardRulesWait of its crewing.
+func (p Pass) waitsForGuardRules(harness Harness, entry reconciler.Entry) (bool, string, error) {
+	has, err := p.hasGuardRules(harness, entry)
+	if err != nil || has {
+		return false, "", err
+	}
+	since, err := time.Parse(time.RFC3339, entry.Since)
+	if err == nil && p.Now().Sub(since) >= GuardRulesWait {
+		return false, guardRulesDidNotArrive, nil
+	}
+	return true, "", nil
 }
 
 // Workspace makes and removes a ship's workspace, and lists every folder under the root.
@@ -199,7 +252,9 @@ type Pass struct {
 	Fleet          Fleet
 	Sessions       Sessions
 	Harnesses      map[string]Harness
-	Workspace      Workspace
+	// GuardRules are the guard rules kept for each ship, which a guarded session starts only with.
+	GuardRules GuardRules
+	Workspace  Workspace
 	// FolderProcesses are stopped in an orphan worktree before it is removed.
 	FolderProcesses FolderProcesses
 	Store           Store
@@ -539,6 +594,9 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed, snaps
 		if entry.State == "restarting" || (entry.State == "running" && !hasSession) {
 			if problem := p.startProblem(entry, p.loginOf(entry)); problem != "" {
 				observed.StartProblems[shipID] = problem
+			} else if has, err := p.hasGuardRules(harness, entry); ok && (err != nil || !has) {
+				// It waits, restarting, until the rules of its settings version are kept again.
+				observed.StartProblems[shipID] = "waiting for the guard rules of its settings version"
 			}
 		}
 		if !ok || entry.Folder == "" {
@@ -722,6 +780,18 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	harness, err := p.harnessOf(entry)
 	if err != nil {
 		return state, err
+	}
+	// A guarded session starts only with the rules of its settings version (guard design 4.5): it waits for them, and is given back
+	// before it registers when they did not arrive in time.
+	isWaiting, notArrived, err := p.waitsForGuardRules(harness, entry)
+	if err != nil {
+		return state, err
+	}
+	if notArrived != "" {
+		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, notArrived, &entry)
+	}
+	if isWaiting {
+		return state, nil
 	}
 	if entry.IsOldLayout && entry.CrewToken != "" {
 		return p.crewInTheShipFolderLayout(state, entry, harness)

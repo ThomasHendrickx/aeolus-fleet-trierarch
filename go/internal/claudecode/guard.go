@@ -102,6 +102,9 @@ func (h Harness) writeGuardSettings(shipID string, configured map[string]any) (s
 	return file, nil
 }
 
+// IsGuarded is whether its sessions start guarded: on the host. A session in a container cannot reach guard check on the host yet.
+func (h Harness) IsGuarded() bool { return h.Homes == "" }
+
 // GuardProblem is why the entry's session cannot start guarded, "" when it can: the first settings file it would load that disables
 // hooks, `disableAllHooks`, or in the managed settings `allowManagedHooksOnly`, which leaves the guard's hook out too. The request is
 // given back with it (design 4.6).

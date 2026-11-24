@@ -235,9 +235,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	}
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
 	// --mcp-config takes every word up to the next flag, so it comes last.
-	// A session in a container cannot reach guard check on the host yet: it starts without the guard, and the trierarch reports no
-	// guarded harness there.
-	isGuarded := h.Homes == ""
+	isGuarded := h.IsGuarded()
 	commandFlags := flags
 	if isGuarded {
 		commandFlags = withoutSettingsFlag(flags)

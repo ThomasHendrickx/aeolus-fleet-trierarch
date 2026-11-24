@@ -492,6 +492,13 @@ type runningSessions interface {
 	Root(shipID string) int
 }
 
+// keptGuardRules are the guard rules kept in the state folder, as a pass asks which settings version a ship's rules are of.
+type keptGuardRules struct{ store guardfile.Store }
+
+func (k keptGuardRules) KeptVersion(shipID string) (int, bool, error) {
+	return k.store.KeptVersion(context.Background(), shipID)
+}
+
 // sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
 const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
 
@@ -714,6 +721,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Fleet:             client,
 		Sessions:          running,
 		Harnesses:         harnesses,
+		GuardRules:        keptGuardRules{store: guardfile.Store{Ships: at.Ships}},
 		Workspace:         places,
 		FolderProcesses:   folderProcessesOf(configuration.Runtime),
 		Store:             saved,
