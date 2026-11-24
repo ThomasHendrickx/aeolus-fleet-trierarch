@@ -211,9 +211,7 @@ func detailsOf(in Input) map[string]any {
 		"logins":  shipLoginsOf(in),
 		// A fact for the console, never a label: placement does not read it (decision 0039).
 		"runtime": runtimeOf(in.Configuration),
-		// The harnesses whose sessions start guarded here: placement puts a request with rules only on one (guard design 4.7).
-		"guardedHarnesses": guardedHarnessesOf(named),
-		"version":          in.Version,
+		"version": in.Version,
 	}
 	if notOffered := notOfferedDetailsOf(in, stopped); len(notOffered) > 0 {
 		details["notOffered"] = notOffered
@@ -238,24 +236,6 @@ func detailsOf(in Input) map[string]any {
 		details["machine"] = machine
 	}
 	return details
-}
-
-// guardedHarnesses are the harnesses whose guard exists and is proven against the harness itself: Claude Code's PreToolUse hook, on
-// the host, where its sessions run guard check (aeolus-fleet docs/design/guard, section 4.7).
-var guardedHarnesses = []string{"claude-code"}
-
-// guardedHarnessesOf are the offered harnesses whose sessions start guarded; none in containers, which the guard does not reach yet.
-func guardedHarnessesOf(in Input) []string {
-	guarded := []string{}
-	if runtimeOf(in.Configuration) != "host" {
-		return guarded
-	}
-	for _, harness := range in.Harnesses {
-		if slices.Contains(guardedHarnesses, harness) {
-			guarded = append(guarded, harness)
-		}
-	}
-	return guarded
 }
 
 func runtimeOf(configuration config.Configuration) string {
