@@ -130,7 +130,7 @@ func TestThePathBypassesAreClosed(t *testing.T) {
 		{"a symlink out of the boundary", aShellCall("echo x > out/passwd"), "Refused by the guard: outside the boundary: /etc/passwd."},
 		{"a symlink to a protected file", aWrite(repository + "/settings"), "Refused by the guard: protected: " + home + "/.claude/settings.json."},
 		{"a relative symlink", aWrite(repository + "/rel/x"), "Refused by the guard: outside the boundary: /tmp/x."},
-		{"a symlink made in the same call", aShellCall("ln -s /etc l && echo x > l/passwd"), "Refused by the guard: outside the boundary: /etc/passwd."},
+		{"a symlink made in the same call", aShellCall("ln -sT /etc l && echo x > l/passwd"), "Refused by the guard: outside the boundary: /etc/passwd."},
 		{"a symlink to a protected file made in the same call", aShellCall("ln -sf ~/.claude/settings.json s; echo '{}' > s"), "Refused by the guard: protected: " + home + "/.claude/settings.json."},
 		{"cd before a relative path", aShellCall("cd /tmp && echo x > a"), "Refused by the guard: outside the boundary: /tmp/a."},
 		{"cd up before a relative path", aShellCall("cd ../../../.. && touch x"), "Refused by the guard: outside the boundary: /home/crew/x."},

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 )
 
@@ -99,4 +100,33 @@ func (c call) summary() string {
 		return c.command
 	}
 	return string(c.input)
+}
+
+// fileWrites are the paths a file tool writes, made absolute from the
+// session's working folder.
+func (c call) fileWrites() []writeTarget {
+	if c.kind != kindFileWrite {
+		return nil
+	}
+	var input struct {
+		FilePath     string `json:"file_path"`
+		NotebookPath string `json:"notebook_path"`
+	}
+	if err := json.Unmarshal(c.input, &input); err != nil {
+		return []writeTarget{{unresolvable: "write target of " + c.tool}}
+	}
+	target := input.FilePath
+	if target == "" {
+		target = input.NotebookPath
+	}
+	if target == "" {
+		return []writeTarget{{unresolvable: "write target of " + c.tool}}
+	}
+	if !path.IsAbs(target) {
+		if c.cwd == "" {
+			return []writeTarget{{unresolvable: "write target " + target + " in an unknown working folder"}}
+		}
+		target = path.Join(c.cwd, target)
+	}
+	return []writeTarget{{path: path.Clean(target)}}
 }

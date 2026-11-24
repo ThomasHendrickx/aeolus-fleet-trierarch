@@ -2,11 +2,13 @@ package guard
 
 import (
 	"context"
+	"errors"
+	"path"
 	"strings"
 )
 
 // judge applies the mechanism's checks, then each set on its own (design 4.6).
-func (c Checker) judge(_ context.Context, read call, sets []Set) *verdict {
+func (c Checker) judge(ctx context.Context, read call, sets []Set) *verdict {
 	var shell *analysis
 	if read.kind == kindShell {
 		analyzed, err := analyzeShell(read.command, read.cwd, c.Home)
@@ -15,25 +17,123 @@ func (c Checker) judge(_ context.Context, read call, sets []Set) *verdict {
 		}
 		shell = analyzed
 	}
-	if len(sets) == 0 {
-		return nil
+	targets, made := read.fileWrites(), map[string]string{}
+	if shell != nil {
+		targets, made = shell.writes, shell.links
 	}
-	if read.kind == "" {
-		return mechanism("unknown tool: " + read.tool)
+	writes, refusal := c.resolveWrites(ctx, targets, made)
+	if refusal != nil {
+		return refusal
 	}
-	if shell != nil && len(shell.unresolvable) > 0 {
-		return mechanism("unresolvable: " + shell.unresolvable[0])
+	if refusal := c.protect(writes); refusal != nil {
+		return refusal
+	}
+	if len(sets) > 0 {
+		if read.kind == "" {
+			return mechanism("unknown tool: " + read.tool)
+		}
+		if shell != nil && len(shell.unresolvable) > 0 {
+			return mechanism("unresolvable: " + shell.unresolvable[0])
+		}
+		for _, w := range writes {
+			if w.unresolvable != "" {
+				return mechanism("unresolvable: " + w.unresolvable)
+			}
+		}
+	}
+	if refusal := c.bound(writes); refusal != nil {
+		return refusal
 	}
 	for index := range sets {
-		if refusal := judgeSet(&sets[index], read, shell); refusal != nil {
+		if refusal := c.judgeSet(&sets[index], read, shell, writes); refusal != nil {
 			return refusal
 		}
 	}
 	return nil
 }
 
+// resolvedWrite is a write target with its path made real.
+type resolvedWrite struct {
+	writeTarget
+	real string
+}
+
+func (c Checker) resolveWrites(ctx context.Context, targets []writeTarget, made map[string]string) ([]resolvedWrite, *verdict) {
+	writes := make([]resolvedWrite, 0, len(targets))
+	for _, target := range targets {
+		w := resolvedWrite{writeTarget: target}
+		if target.unresolvable == "" {
+			real, err := c.resolveTarget(ctx, target, made)
+			switch {
+			case errors.Is(err, errLinkLoop):
+				return nil, failed("symbolic link loop")
+			case ctx.Err() != nil:
+				return nil, failed("deadline")
+			case err != nil:
+				return nil, failed("symbolic link unreadable")
+			}
+			w.real = real
+		}
+		writes = append(writes, w)
+	}
+	return writes, nil
+}
+
+// resolveTarget makes a write target real; a write to a path itself
+// follows the links of its folder only.
+func (c Checker) resolveTarget(ctx context.Context, target writeTarget, made map[string]string) (string, error) {
+	if !target.own || target.path == "/" {
+		return c.resolve(ctx, target.path, made)
+	}
+	folder, err := c.resolve(ctx, path.Dir(target.path), made)
+	if err != nil {
+		return "", err
+	}
+	return path.Join(folder, path.Base(target.path)), nil
+}
+
+// protect refuses a write to the guard's own files, its rules or the
+// harness's settings, whatever the rules (design 4.6, step 2).
+func (c Checker) protect(writes []resolvedWrite) *verdict {
+	for _, w := range writes {
+		if w.unresolvable != "" {
+			continue
+		}
+		for _, p := range []string{w.real, w.path} {
+			for _, pattern := range c.Protected {
+				if hits(pattern, w.writeTarget, p) {
+					return mechanism("protected: " + p)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// bound refuses a write outside the ship's folder and its repositories
+// (design 4.6, step 4).
+func (c Checker) bound(writes []resolvedWrite) *verdict {
+	for _, w := range writes {
+		if w.unresolvable == "" && c.repositoryOf(w.real) == "" && !within(w.real, c.Boundary.ShipFolder) {
+			return mechanism("outside the boundary: " + w.real)
+		}
+	}
+	return nil
+}
+
+// repositoryOf is the repository a path lies in, "" when none.
+func (c Checker) repositoryOf(p string) string {
+	found := ""
+	for _, repository := range c.Boundary.Repositories {
+		if within(p, repository) && len(repository) > len(found) {
+			found = path.Clean(repository)
+		}
+	}
+	return found
+}
+
 // judgeSet is one set's verdict on the call: the first refusing rule.
-func judgeSet(set *Set, read call, shell *analysis) *verdict {
+func (c Checker) judgeSet(set *Set, read call, shell *analysis, writes []resolvedWrite) *verdict {
 	tools := set.Rules.Tools
 	for _, pattern := range tools.Deny {
 		if wildcard(pattern, read.kind) {
@@ -43,18 +143,56 @@ func judgeSet(set *Set, read call, shell *analysis) *verdict {
 	if len(tools.Allow) > 0 && !anyWildcard(tools.Allow, read.kind) {
 		return &verdict{rule: "tools.allow lacks " + read.kind, set: set}
 	}
-	if shell == nil {
-		return nil
-	}
-	for _, run := range shell.invocations {
-		if refusal := judgeCommand(set, run); refusal != nil {
-			return refusal
+	if shell != nil {
+		for _, run := range shell.invocations {
+			if refusal := judgeCommand(set, run); refusal != nil {
+				return refusal
+			}
+			if refusal := judgeGit(set, run); refusal != nil {
+				return refusal
+			}
 		}
-		if refusal := judgeGit(set, run); refusal != nil {
+	}
+	for _, w := range writes {
+		if refusal := c.judgeWritePath(set, w); refusal != nil {
 			return refusal
 		}
 	}
 	return nil
+}
+
+// judgeWritePath checks a write against the set's writePaths, globs relative
+// to the repository it lies in.
+func (c Checker) judgeWritePath(set *Set, w resolvedWrite) *verdict {
+	rules := set.Rules.WritePaths
+	if w.unresolvable != "" || (len(rules.Allow) == 0 && len(rules.Deny) == 0) {
+		return nil
+	}
+	repository := c.repositoryOf(w.real)
+	if repository == "" {
+		if len(rules.Allow) > 0 {
+			return &verdict{rule: "writePaths.allow lacks " + w.real, set: set}
+		}
+		return nil
+	}
+	relative := strings.TrimPrefix(strings.TrimPrefix(w.real, repository), "/")
+	if relative == "" {
+		relative = "."
+	}
+	for _, pattern := range rules.Deny {
+		if hits(pattern, w.writeTarget, relative) {
+			return &verdict{rule: "writePaths.deny " + pattern, set: set}
+		}
+	}
+	if len(rules.Allow) == 0 {
+		return nil
+	}
+	for _, pattern := range rules.Allow {
+		if globMatch(pattern, relative) {
+			return nil
+		}
+	}
+	return &verdict{rule: "writePaths.allow lacks " + relative, set: set}
 }
 
 // judgeCommand checks one command the shell runs against the set's command rules.

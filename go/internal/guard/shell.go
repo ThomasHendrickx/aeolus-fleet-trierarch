@@ -5,6 +5,7 @@ import (
 	"maps"
 	"path"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -21,6 +22,12 @@ type word struct {
 	text    string
 	literal bool
 	source  string
+	// expanded is the word with the variables the shell knows put in, as a
+	// path; known is whether that could be done. glob says it holds an
+	// unquoted glob.
+	expanded string
+	known    bool
+	glob     bool
 }
 
 // invocation is one simple command the shell input runs, wrappers included.
@@ -36,6 +43,9 @@ type invocation struct {
 type analysis struct {
 	invocations  []invocation
 	unresolvable []string
+	writes       []writeTarget
+	// links are the symbolic links the input makes, by absolute path.
+	links map[string]string
 }
 
 func (a *analysis) cannotResolve(what string) {
@@ -51,8 +61,8 @@ type state struct {
 	gitEnv map[string]word
 }
 
-func newState(cwd string) *state {
-	return &state{cwd: cwd, vars: map[string]string{}, gitEnv: map[string]word{}}
+func newState(cwd, home string) *state {
+	return &state{cwd: cwd, vars: map[string]string{"HOME": home}, gitEnv: map[string]word{}}
 }
 
 func (s *state) copy() *state {
@@ -94,8 +104,8 @@ func analyzeShell(source, cwd, home string) (*analysis, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &analyzer{home: home, out: &analysis{}}
-	a.stmts(file.Stmts, newState(cwd))
+	a := &analyzer{home: home, out: &analysis{links: map[string]string{}}}
+	a.stmts(file.Stmts, newState(cwd, home))
 	return a.out, nil
 }
 
@@ -131,6 +141,12 @@ func (a *analyzer) stmt(s *syntax.Stmt, st *state, piped bool) {
 		switch redirect.Op {
 		case syntax.Hdoc, syntax.DashHdoc, syntax.WordHdoc, syntax.RdrIn:
 			stdin = redirect
+		case syntax.RdrOut, syntax.AppOut, syntax.RdrClob, syntax.RdrInOut, syntax.RdrAll, syntax.AppAll:
+			a.write(a.word(redirect.Word, st), st, false)
+		case syntax.DplOut:
+			if target := a.word(redirect.Word, st); !target.literal || !isFileDescriptor(target.text) {
+				a.write(target, st, false)
+			}
 		}
 	}
 	input := shellInput{redirect: stdin, piped: piped}
@@ -315,6 +331,9 @@ func (a *analyzer) simple(words []word, env map[string]word, st *state, input sh
 	base := path.Base(name.text)
 	args := words[1:]
 	a.out.invocations = append(a.out.invocations, invocation{name: base, args: args, env: env, state: st.copy()})
+	if writes, ok := writers[base]; ok {
+		writes(a, args, st)
+	}
 	if run, ok := runners[base]; ok {
 		run(a, runCall{name: base, args: args, env: env, state: st, input: input})
 		return
@@ -702,7 +721,7 @@ func (a *analyzer) literalStdin(input shellInput) (string, bool) {
 	}
 	switch redirect.Op {
 	case syntax.WordHdoc:
-		value := a.word(redirect.Word, newState(""))
+		value := a.word(redirect.Word, newState("", a.home))
 		return value.text, value.literal
 	case syntax.Hdoc, syntax.DashHdoc:
 		if redirect.Hdoc == nil {
@@ -817,8 +836,8 @@ func source(node syntax.Node) string {
 // word reads a shell word: literal when nothing in it is known only at run
 // time (expansions, substitutions, globs, brace expansion, ~user).
 func (a *analyzer) word(w *syntax.Word, st *state) word {
-	result := word{source: source(w), literal: true}
-	var text strings.Builder
+	result := word{source: source(w), literal: true, known: true}
+	var text, expanded strings.Builder
 	for index, part := range w.Parts {
 		switch p := part.(type) {
 		case *syntax.Lit:
@@ -826,45 +845,72 @@ func (a *analyzer) word(w *syntax.Word, st *state) word {
 			if index == 0 && strings.HasPrefix(value, "~") {
 				rest := value[1:]
 				if rest != "" && !strings.HasPrefix(rest, "/") {
-					result.literal = false
+					result.literal, result.known = false, false
 				}
 				value = a.home + rest
 			}
-			if unquotedSpecial(value) {
-				result.literal = false
+			if braceExpansion(value) {
+				result.literal, result.known = false, false
+			}
+			if strings.ContainsAny(stripEscaped(value), "*?[") {
+				result.literal, result.glob = false, true
 			}
 			text.WriteString(unescape(value, false))
+			expanded.WriteString(unescape(value, false))
 		case *syntax.SglQuoted:
 			if p.Dollar && strings.ContainsRune(p.Value, '\\') {
-				result.literal = false
+				result.literal, result.known = false, false
 			}
 			text.WriteString(p.Value)
+			expanded.WriteString(p.Value)
 		case *syntax.DblQuoted:
 			for _, inner := range p.Parts {
-				lit, ok := inner.(*syntax.Lit)
-				if !ok {
-					result.literal = false
+				if lit, ok := inner.(*syntax.Lit); ok {
+					text.WriteString(unescape(lit.Value, true))
+					expanded.WriteString(unescape(lit.Value, true))
 					continue
 				}
-				text.WriteString(unescape(lit.Value, true))
+				result.literal = false
+				value, ok := st.variable(inner)
+				if !ok {
+					result.known = false
+				}
+				expanded.WriteString(value)
 			}
 		default:
 			result.literal = false
+			value, ok := st.variable(part)
+			if !ok || strings.ContainsAny(value, " \t\n*?[") {
+				result.known = false
+			}
+			expanded.WriteString(value)
 		}
 	}
 	if result.literal {
 		result.text = text.String()
 	}
+	if result.known {
+		result.expanded = expanded.String()
+	}
 	return result
 }
 
-// unquotedSpecial is an unquoted literal the shell still expands: a glob or
-// a brace expansion.
-func unquotedSpecial(value string) bool {
-	clean := unescape(value, false)
-	if strings.ContainsAny(stripEscaped(value), "*?[") {
-		return true
+// simpleParameter is $NAME or ${NAME}, nothing more.
+var simpleParameter = regexp.MustCompile(`^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$`)
+
+// variable is the value of $NAME when the shell knows it.
+func (s *state) variable(part syntax.WordPart) (string, bool) {
+	param, ok := part.(*syntax.ParamExp)
+	if !ok || param.Param == nil || !simpleParameter.MatchString(source(param)) {
+		return "", false
 	}
+	value, ok := s.vars[param.Param.Value]
+	return value, ok
+}
+
+// braceExpansion is an unquoted literal the shell expands as {a,b} or {1..3}.
+func braceExpansion(value string) bool {
+	clean := unescape(value, false)
 	open := strings.IndexByte(clean, '{')
 	if open < 0 {
 		return false
