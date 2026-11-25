@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
@@ -24,28 +25,28 @@ func (s someGuardStatuses) GuardStatus(_ context.Context, shipID string) (guard.
 // someGuardReports are the guard statuses and refused activities reported, in order; the next calls of each kind fail as many times
 // as given, the fleet having taken none of them.
 type someGuardReports struct {
-	reported     []string
-	guardFails   int
-	refusedFails int
-	refusedKeys  []string
+	reported      []string
+	guardFails    int
+	refusedFails  int
+	refusedEvents []activity.Activity
 }
 
-func (r *someGuardReports) ReportGuard(shipID string, settingsVersion int, status guard.Status) error {
+func (r *someGuardReports) ReportGuard(shipID string, _ reconciler.Status, status guard.Status) error {
 	if r.guardFails > 0 {
 		r.guardFails--
 		return errors.New("the fleet does not answer")
 	}
-	r.reported = append(r.reported, fmt.Sprintf("guard %s %d %d sets %d refusals", shipID, settingsVersion, len(status.Sets), status.Refusals))
+	r.reported = append(r.reported, fmt.Sprintf("guard %s %d %d sets %d refusals", shipID, status.SettingsVersion, len(status.Sets), status.Refusals))
 	return nil
 }
 
-func (r *someGuardReports) ReportRefused(shipID string, key string, at time.Time, tool string) error {
+func (r *someGuardReports) ReportRefused(shipID string, _ int, refused activity.Activity) error {
 	if r.refusedFails > 0 {
 		r.refusedFails--
 		return errors.New("the fleet does not answer")
 	}
-	r.reported = append(r.reported, fmt.Sprintf("refused %s %s %s", shipID, at.UTC().Format(time.RFC3339), tool))
-	r.refusedKeys = append(r.refusedKeys, key)
+	r.reported = append(r.reported, fmt.Sprintf("refused %s %s %s", shipID, refused.At.UTC().Format(time.RFC3339), refused.Tool))
+	r.refusedEvents = append(r.refusedEvents, refused)
 	return nil
 }
 
@@ -143,21 +144,19 @@ func TestAGuardReportThatFailedPartlyIsTriedAgainOnlyForWhatTheFleetDidNotTake(t
 	}
 }
 
-func TestARefusalReportedButNotKeptAsReportedIsReportedAgainUnderTheSameKey(t *testing.T) {
+func TestARefusalReportedButNotKeptAsReportedIsReportedAgainWithTheSameActivity(t *testing.T) {
 	pass, statuses, reports := aReportingPass(t, aGuardStatus(0))
 	statuses[scout] = aGuardStatus(1)
 	saved := reconciler.State{Entries: maps.Clone(pass.store.state.Entries)}
 	pass.store.isUnwritable = true
-	if err := pass.pass.Run(context.Background()); err == nil {
-		t.Fatal("a pass whose state cannot be written succeeded")
-	}
+	pass.pass.reportGuards(context.Background(), pass.store.state)
 	// The state file holds what it held before the pass.
 	pass.store.isUnwritable, pass.store.state.Entries = false, saved.Entries
 
 	pass.run(t)
 
-	if len(reports.refusedKeys) != 2 || reports.refusedKeys[0] == "" || reports.refusedKeys[0] != reports.refusedKeys[1] {
-		t.Fatalf("refused keys %q, want the refusal reported again under its key, which the fleet keeps once", reports.refusedKeys)
+	if len(reports.refusedEvents) != 2 || reports.refusedEvents[0] != reports.refusedEvents[1] {
+		t.Fatalf("refused activities %v, want the same activity reported again", reports.refusedEvents)
 	}
 }
 

@@ -229,7 +229,7 @@ describe('a session in a container', () => {
     await expect.poll(crewStatus, { timeout: SAID_WITHIN_MS }).toMatchObject({
       status: 'running', guard: { sets: [appliedGuard], refusals: 0, recent: [] },
     });
-    const refused = recordRefusal();
+    const { at, ...refused } = recordRefusal();
 
     await expect.poll(crewStatus, { timeout: SAID_WITHIN_MS }).toMatchObject({
       status: 'running', guard: { sets: [appliedGuard], refusals: 1, recent: [refused] },
@@ -237,6 +237,8 @@ describe('a session in a container', () => {
     await expect.poll(() => fleet.activityOf(scout), { timeout: SAID_WITHIN_MS }).toEqual({
       kind: 'refused', tool: 'Bash', intervalSeconds: 30,
     });
+    const lease = await fleet.database.lease.findFirst({ where: { shipId: scout, endedAt: null }, select: { activityAt: true } });
+    expect(lease?.activityAt?.toISOString()).toBe(at);
   });
 
   it('reports normal container activity without a guard for a request started without a rule set', async () => {

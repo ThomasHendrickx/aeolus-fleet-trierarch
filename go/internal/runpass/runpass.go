@@ -346,7 +346,7 @@ type Pass struct {
 	Harnesses      map[string]Harness
 	// GuardRules are the guard rules kept for each ship, which a guarded session starts only with.
 	GuardRules GuardRules
-	// GuardStatuses read each guarded session's guard; GuardReports report it, none until the fleet's core takes it (aeolus-fleet#2070).
+	// GuardStatuses read each guarded session's guard; GuardReports report it.
 	GuardStatuses GuardStatuses
 	GuardReports  GuardReports
 	Workspace     Workspace
@@ -483,7 +483,6 @@ func (p Pass) Run(ctx context.Context) error {
 		return err
 	}
 	state = p.reportUsageLimits(state)
-	state = p.reportGuards(ctx, state)
 	snapshot := seen.Snapshot{Ships: map[string]seen.Ship{}}
 	next, actions, err := p.reconcile(ctx, state, &snapshot)
 	if err != nil {
@@ -520,7 +519,7 @@ func (p Pass) Run(ctx context.Context) error {
 	}
 	p.tidyRepositories()
 	p.emptyTrash()
-	p.writeActivities(next)
+	p.writeActivities(next, p.reportGuards(ctx, next))
 	if p.Seen != nil {
 		snapshot.PassAt = p.Now().UTC().Format(isoMillis)
 		if err := p.Seen.Save(snapshot); err != nil {
@@ -579,7 +578,7 @@ func (p Pass) emptyTrash() {
 const activityIntervalSeconds = 30
 
 // writeActivities writes the activity of every running session, each pass (monitoring W3b): a trierarch that is down then reads as unknown, not as stopped work. A failure is logged and never fails the pass.
-func (p Pass) writeActivities(state reconciler.State) {
+func (p Pass) writeActivities(state reconciler.State, refusals map[string]activity.Activity) {
 	running, err := p.Sessions.List()
 	if err != nil {
 		p.Log(fmt.Sprintf("The activity of the sessions was not written: %v; the next pass tries again", err))
@@ -596,7 +595,11 @@ func (p Pass) writeActivities(state reconciler.State) {
 		if at < 0 || running[at].Status != reconciler.SessionRunning {
 			continue
 		}
-		if shown, ok := harness.Activity(entry); ok {
+		shown, ok := harness.Activity(entry)
+		if refused, exists := refusals[shipID]; exists && (!ok || !refused.At.Before(shown.At)) {
+			shown, ok = refused, true
+		}
+		if ok {
 			activities = append(activities, fleet.ShipActivity{ShipID: shipID, Activity: shown})
 		}
 	}
@@ -821,7 +824,7 @@ func (p Pass) carryOut(ctx context.Context, state reconciler.State, action recon
 		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session ended and its worktree was removed", nameOf(*action.Entry), action.ShipID))
 		return p.remove(state, action.ShipID)
 	case reconciler.WriteStatus:
-		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, fleetTime(action.Status.StartedAt))
+		return p.writeCrewStatus(ctx, state, action)
 	case reconciler.Report:
 		// Keep the cleaned restart evidence even when reporting to the fleet fails or its identity is gone.
 		if strings.HasPrefix(action.Note, "blocked: session crashed") {
