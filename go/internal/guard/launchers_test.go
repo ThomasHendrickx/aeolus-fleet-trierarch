@@ -52,3 +52,8 @@ func TestPackageLaunchersRequireAResolvableTargetWithRules(t *testing.T) {
 		})
 	}
 }
+
+func TestAPackageManagerSubcommandMustBeLiteralWhileRulesApply(t *testing.T) {
+	checker, _ := aChecker(aSet("rules", "abcdef1", `{}`))
+	refusedAs(t, checker, aShellCall(`npm "$ACTION"`), `Refused by the guard: unresolvable: argument "$ACTION" of npm.`)
+}
