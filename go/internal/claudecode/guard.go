@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -196,10 +197,20 @@ func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (stri
 		return "", nil
 	}
 	read := func(file string) ([]byte, error) { return readSettings(ctx, file) }
+	// loaded is the settings text the session loads from a file, named as the host names it: in a container, at its path there.
+	loaded := read
+	user := h.sessionUserOf(entry)
+	seenUser := user
 	// A container loads the managed settings of its image, which holds none, never the host's.
 	managed := managedFiles(h.Managed)
 	if h.isInContainers() {
 		managed = nil
+		view, err := h.containerViewOf(entry)
+		if err != nil {
+			return "", err
+		}
+		loaded = func(file string) ([]byte, error) { return readInContainer(ctx, view, file) }
+		seenUser = UserSettings(container.SessionHome, "")
 	}
 	for _, file := range managed {
 		text, err := read(file)
@@ -222,11 +233,13 @@ func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (stri
 		}
 	}
 	for _, source := range sourcesOf(flags) {
-		file := h.sessionUserOf(entry)
+		// The folder is at its own path in a container too.
+		file, seen := user, seenUser
 		if source != "user" {
 			file = filepath.Join(entry.Folder, ".claude", map[string]string{"local": "settings.local.json", "project": "settings.json"}[source])
+			seen = file
 		}
-		text, err := read(file)
+		text, err := loaded(seen)
 		if err != nil {
 			return "", err
 		}
@@ -235,6 +248,36 @@ func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (stri
 		}
 	}
 	return "", nil
+}
+
+// containerViewOf are the folders of the host the entry's container mounts, through which its session finds its files.
+func (h Harness) containerViewOf(entry reconciler.Entry) (guardfile.ContainerLinks, error) {
+	mounted, ok := h.Runtime.(interface {
+		Mounts(shipID string, folder string, shipFolder string) []container.Mount
+	})
+	if !ok {
+		return guardfile.ContainerLinks{}, errors.New("claude-code cannot read the settings its container loads: the runtime names no folders it mounts")
+	}
+	var mounts []guardfile.Mount
+	for _, mount := range mounted.Mounts(entry.ShipID, entry.Folder, entry.ShipFolder) {
+		mounts = append(mounts, guardfile.Mount{Host: mount.Host, Container: mount.Container})
+	}
+	return guardfile.ContainerLinks{Mounts: mounts}, nil
+}
+
+// readInContainer is a settings file's text as the container reads it at its path, none when it cannot be read; an error when ctx ends
+// before it is read, or when it leads out of the folders the container mounts: the guard cannot see what the session would load there.
+func readInContainer(ctx context.Context, view guardfile.ContainerLinks, file string) ([]byte, error) {
+	text, err := view.ReadFile(ctx, file)
+	switch {
+	case ctx.Err() != nil:
+		return nil, ctx.Err()
+	case errors.Is(err, guardfile.ErrUnmounted):
+		return nil, fmt.Errorf("claude-code cannot read the settings its container loads: %w", err)
+	case err != nil:
+		return nil, nil
+	}
+	return text, nil
 }
 
 func guardDisabledBy(file string) string { return "guard disabled by settings: " + file }

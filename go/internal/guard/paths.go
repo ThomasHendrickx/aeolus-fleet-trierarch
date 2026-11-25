@@ -15,6 +15,16 @@ var errLinkLoop = errors.New("symbolic link loop")
 // resolve makes an absolute, cleaned path real: every symbolic link in it,
 // those the call itself makes first, followed.
 func (c Checker) resolve(ctx context.Context, absolute string, made map[string]string) (string, error) {
+	return resolveThrough(ctx, c.Links, absolute, made)
+}
+
+// Resolve makes an absolute, cleaned path real as links read the file system: every symbolic link in it followed.
+func Resolve(ctx context.Context, links Links, absolute string) (string, error) {
+	return resolveThrough(ctx, links, absolute, nil)
+}
+
+// resolveThrough is the path with every symbolic link in it followed, those made first, the others as links read them.
+func resolveThrough(ctx context.Context, links Links, absolute string, made map[string]string) (string, error) {
 	segments := splitPath(absolute)
 	resolved := "/"
 	hops := 0
@@ -26,7 +36,7 @@ func (c Checker) resolve(ctx context.Context, absolute string, made map[string]s
 		target, isLink := made[next]
 		if !isLink {
 			var err error
-			target, isLink, err = c.Links.Readlink(ctx, next)
+			target, isLink, err = links.Readlink(ctx, next)
 			if err != nil {
 				return "", err
 			}
