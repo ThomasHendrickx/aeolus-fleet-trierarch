@@ -3,15 +3,18 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
 	codexharness "github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
@@ -74,15 +77,80 @@ func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Ans
 	if now == nil {
 		now = time.Now
 	}
-	refusals := guardfile.Refusals{Guards: at.Guard, ShipID: shipID}
-	// A call of a known ship, one whose guard folder is kept, refused before it could be checked is kept too.
-	failed := func(cause string) guard.Answer {
-		if _, err := os.Stat(guardfile.Folder(at.Guard, shipID)); err == nil {
-			_ = refusals.Append(ctx, guard.FailedRefusal(now(), cause))
+	view := hostView{home: machine.HomeDirectory, harness: harness, codexHome: variable(machine.Environ, "CODEX_HOME")}
+	return checkCall(ctx, at, shipID, now, view, machine.Stdin)
+}
+
+// ContainerGuardCheck is guard check over the ship's socket for a session in a container (#631): the call checked on the host
+// against the rules kept for it, on its container's view of its files, through the mounts the runtime gives its container.
+func ContainerGuardCheck(at paths.Paths, runtime container.Runtime) func(ctx context.Context, shipID string, input io.ReadCloser) guard.Answer {
+	return func(ctx context.Context, shipID string, input io.ReadCloser) guard.Answer {
+		if !crew.IsShipID(shipID) {
+			return guard.Failed("no ship")
 		}
-		return guard.Failed(cause)
+		return checkCall(ctx, at, shipID, time.Now, containerView{runtime: runtime}, input)
 	}
-	crewed, err := (state.File{Path: at.State}).Load()
+}
+
+// failedCheck refuses a call that could not be checked, kept as a refusal of a known ship, one whose guard folder is kept.
+func failedCheck(ctx context.Context, at paths.Paths, shipID string, now func() time.Time, cause string) guard.Answer {
+	if ctx.Err() != nil {
+		// Past its deadline the check reads and keeps nothing more: whoever waited on it has answered already.
+		return guard.Failed("deadline")
+	}
+	if _, err := os.Stat(guardfile.Folder(at.Guard, shipID)); err == nil {
+		_ = (guardfile.Refusals{Guards: at.Guard, ShipID: shipID}).Append(ctx, guard.FailedRefusal(now(), cause))
+	}
+	return guard.Failed(cause)
+}
+
+// sessionView is the file system a guarded session's calls name: the host's, or its container's.
+type sessionView interface {
+	// checked are the session's home, the paths the guard compares the call's writes to as the session sees them, and its links.
+	checked(at paths.Paths, entry reconciler.Entry, workspaces []string) (home string, protected []string, links guard.Links, harness string)
+	// path is a folder of the host as the session sees it.
+	path(folder string) string
+}
+
+// hostView is a session on the host: its paths with their links resolved, as the guard names the paths it refuses.
+type hostView struct {
+	home, harness, codexHome string
+}
+
+func (v hostView) path(folder string) string { return resolvedPath(folder) }
+
+func (v hostView) checked(at paths.Paths, entry reconciler.Entry, workspaces []string) (string, []string, guard.Links, string) {
+	guardFolder, configuration := resolvedPath(guardfile.Folder(at.Guard, entry.ShipID)), resolvedPath(at.Config)
+	if v.harness == "codex" {
+		home := codexharness.HomeOf(v.home, v.codexHome)
+		protected := guard.CodexProtected(resolvedPath(home), guardFolder, configuration, workspaces...)
+		return v.home, append(protected, resolvedPath(at.Detected), resolvedPath(at.State)), guardfile.Links{}, v.harness
+	}
+	return v.home, guard.ClaudeCodeProtected(resolvedPath(v.home), guardFolder, configuration, workspaces...), guardfile.Links{}, v.harness
+}
+
+// containerView is a Claude Code session in a container: its workspace at its own path, its home the container's, and its links read
+// through the folders its container mounts. The guard's folder and the configuration are no folder it sees, protected all the same.
+type containerView struct {
+	runtime container.Runtime
+}
+
+func (v containerView) path(folder string) string { return folder }
+
+func (v containerView) checked(at paths.Paths, entry reconciler.Entry, workspaces []string) (string, []string, guard.Links, string) {
+	var mounts []guardfile.Mount
+	for _, mount := range v.runtime.Mounts(entry.ShipID, entry.Folder, entry.ShipFolder) {
+		mounts = append(mounts, guardfile.Mount{Host: mount.Host, Container: mount.Container})
+	}
+	protected := guard.ClaudeCodeProtected(container.SessionHome, guardfile.Folder(at.Guard, entry.ShipID), at.Config, workspaces...)
+	return container.SessionHome, protected, guardfile.ContainerLinks{Mounts: mounts}, "claude-code"
+}
+
+// checkCall checks the ship's call as its session sees its files.
+func checkCall(ctx context.Context, at paths.Paths, shipID string, now func() time.Time, view sessionView, input io.ReadCloser) guard.Answer {
+	refusals := guardfile.Refusals{Guards: at.Guard, ShipID: shipID}
+	failed := func(cause string) guard.Answer { return failedCheck(ctx, at, shipID, now, cause) }
+	crewed, err := within(ctx, (state.File{Path: at.State}).Load)
 	if err != nil {
 		return failed("state unreadable")
 	}
@@ -94,38 +162,54 @@ func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Ans
 	if shipFolder == "" {
 		shipFolder = entry.Folder
 	}
-	repositories, err := workspace.RepositoryFolders(entry.Folder)
+	repositories, err := within(ctx, func() ([]string, error) { return workspace.RepositoryFolders(entry.Folder) })
 	if err != nil {
 		return failed("ship's folder unreadable")
 	}
 	for index, repository := range repositories {
-		repositories[index] = resolvedPath(repository)
+		repositories[index] = view.path(repository)
 	}
 	if len(repositories) == 0 {
-		repositories = []string{resolvedPath(entry.Folder)}
+		repositories = []string{view.path(entry.Folder)}
 	}
-	if machine.Stdin == nil {
+	if input == nil {
 		return failed("input unreadable")
 	}
-	workspaces := append([]string{resolvedPath(shipFolder), resolvedPath(entry.Folder)}, repositories...)
-	guardFolder, configuration := resolvedPath(guardfile.Folder(at.Guard, shipID)), resolvedPath(at.Config)
-	protected := guard.ClaudeCodeProtected(resolvedPath(machine.HomeDirectory), guardFolder, configuration, workspaces...)
-	if harness == "codex" {
-		home := codexharness.HomeOf(machine.HomeDirectory, variable(machine.Environ, "CODEX_HOME"))
-		protected = guard.CodexProtected(resolvedPath(home), guardFolder, configuration, workspaces...)
-		protected = append(protected, resolvedPath(at.Detected), resolvedPath(at.State))
-	}
+	entry.ShipID = shipID
+	workspaces := append([]string{view.path(shipFolder), view.path(entry.Folder)}, repositories...)
+	home, protected, links, harness := view.checked(at, entry, workspaces)
 	checker := guard.Checker{
 		Harness:   harness,
 		Sets:      guardfile.Sets{Store: guardfile.Store{Guards: at.Guard}, ShipID: shipID},
-		Links:     guardfile.Links{},
+		Links:     links,
 		Refusals:  refusals,
 		Now:       now,
-		Home:      machine.HomeDirectory,
-		Boundary:  guard.Boundary{ShipFolder: resolvedPath(shipFolder), Repositories: repositories},
+		Home:      home,
+		Boundary:  guard.Boundary{ShipFolder: view.path(shipFolder), Repositories: repositories},
 		Protected: protected,
 	}
-	return checker.Check(ctx, machine.Stdin)
+	return checker.Check(ctx, input)
+}
+
+// within reads in a goroutine of its own and answers at ctx's end whatever the read waits on, as guardfile.Within does, so a check
+// past its deadline stops: the read itself cannot be stopped and is left to end on its own, its answer kept by no one.
+func within[T any](ctx context.Context, read func() (T, error)) (T, error) {
+	type result struct {
+		value T
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		value, err := read()
+		done <- result{value, err}
+	}()
+	select {
+	case got := <-done:
+		return got.value, got.err
+	case <-ctx.Done():
+		var none T
+		return none, ctx.Err()
+	}
 }
 
 // resolvedPath is the path with the links of its longest part that exists resolved, as the guard compares the paths a call writes.

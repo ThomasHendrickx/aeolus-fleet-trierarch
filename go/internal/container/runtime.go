@@ -243,6 +243,39 @@ func (r Runtime) Root(shipID string) int {
 	return pid
 }
 
+// Mount is a folder of the host the session's container sees, at its path in the container.
+type Mount struct {
+	Host      string
+	Container string
+}
+
+// Mounts are the folders of the host the ship's container sees: its workspace and its sockets at their own paths, its home as the
+// container's home and its ship's temp as /tmp. The guard reads a container session's files through them (#631).
+func (r Runtime) Mounts(shipID string, folder string, shipFolder string) []Mount {
+	sockets := paths.ShipSockets(r.Sockets, shipID, shipFolder)
+	mounts := []Mount{
+		{Host: folder, Container: folder},
+		{Host: paths.ShipHome(r.Homes, shipID, shipFolder), Container: SessionHome},
+		// The session calls the fleet over its ship's socket, at the path its identity names.
+		{Host: sockets, Container: sockets},
+	}
+	if temp := r.shipTemp(shipID, shipFolder); temp != "" {
+		mounts = append(mounts, Mount{Host: temp, Container: "/tmp"})
+	}
+	return mounts
+}
+
+// shipTemp is the ship's temp folder, its container's /tmp; none without a ship's folder.
+func (r Runtime) shipTemp(shipID string, shipFolder string) string {
+	if shipFolder == "" && r.ShipsRoot != "" {
+		shipFolder = filepath.Join(r.ShipsRoot, shipID)
+	}
+	if shipFolder == "" {
+		return ""
+	}
+	return filepath.Join(shipFolder, "tmp")
+}
+
 // heldAs is the runtime's run of the session, for its hold to run: its env file written, and the folders the runtime mounts made, since it mounts only a folder that exists.
 func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Start, error) {
 	env := map[string]string{}
@@ -266,13 +299,9 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 		}
 		content.WriteString(name + "=" + env[name] + "\n")
 	}
-	shipFolder := session.ShipFolder
-	if shipFolder == "" && r.ShipsRoot != "" {
-		shipFolder = filepath.Join(r.ShipsRoot, session.ShipID)
-	}
-	temp := ""
-	if shipFolder != "" {
-		temp = filepath.Join(shipFolder, "tmp")
+	temp := r.shipTemp(session.ShipID, session.ShipFolder)
+	if temp != "" {
+		shipFolder := filepath.Dir(temp)
 		if err := os.RemoveAll(temp); err != nil {
 			if removeErr := r.RemoveWithinUserNamespace(temp); removeErr != nil {
 				if discardErr := trash.DiscardInto(temp, filepath.Dir(shipFolder), time.Now(), r.MoveWithinUserNamespace); discardErr != nil {
@@ -311,13 +340,9 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 		"--device", "/dev/net/tun",
 		"--cap-add", "SYS_ADMIN",
 		"--security-opt", "unmask=ALL",
-		"--volume", folder + ":" + folder,
-		"--volume", home + ":" + SessionHome,
-		// The session calls the fleet over its ship's socket, at the path its identity names.
-		"--volume", sockets + ":" + sockets,
 	}
-	if temp != "" {
-		command = append(command, "--volume", temp+":/tmp")
+	for _, mount := range r.Mounts(session.ShipID, folder, session.ShipFolder) {
+		command = append(command, "--volume", mount.Host+":"+mount.Container)
 	}
 	// Its MCP configuration, read-only at its own path: the one file of the session's folder it sees, kept where it cannot plant a link the trierarch would write through.
 	if session.Mcp != nil {

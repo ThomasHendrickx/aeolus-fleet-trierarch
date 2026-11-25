@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
@@ -115,10 +117,42 @@ func (h Harness) writeGuardSettings(shipID string, configured map[string]any) (s
 // IsGuarded is whether its sessions start guarded: on the host. A session in a container cannot reach guard check on the host yet.
 func (h Harness) IsGuarded() bool { return h.Homes == "" }
 
+// NeedsGuardRules is whether a session waits for its rules before it starts: in a container, which starts only once its rules are
+// known to carry no set, as it cannot start guarded yet.
+func (h Harness) NeedsGuardRules() bool { return !h.IsGuarded() }
+
+// guardReadWait is how long a launch waits on the ship's kept rules: rules that stall start nothing.
+const guardReadWait = 5 * time.Second
+
+// notGuardedInAContainer is why a session in a container whose rules carry a set does not start: its request is given back with it.
+var notGuardedInAContainer = &guard.DisabledError{Reason: "Claude Code in a container is not guarded yet"}
+
+// containerGuardProblem is why the ship's session in a container cannot start, nil when its kept rules carry no set or none are
+// kept: the pass starts it only once they are. Rules it cannot read are an error too: it does not start on them.
+func (h Harness) containerGuardProblem(ctx context.Context, shipID string) error {
+	kept, err := (guardfile.Store{Guards: h.Guards}).Resolution(ctx, shipID)
+	switch {
+	case err != nil:
+		return fmt.Errorf("claude-code reads its guard rules: %w", err)
+	case kept != nil && kept.HasSets:
+		return notGuardedInAContainer
+	}
+	return nil
+}
+
 // GuardProblem is why the entry's session cannot start guarded, "" when it can: the first settings file it would load that disables
 // hooks, `disableAllHooks`, or in the managed settings `allowManagedHooksOnly`, which leaves the guard's hook out too. The request is
 // given back with it (design 4.6). Settings it cannot read within ctx are an error: the session does not start until they are read.
 func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (string, error) {
+	if !h.IsGuarded() {
+		var disabled *guard.DisabledError
+		if err := h.containerGuardProblem(ctx, entry.ShipID); errors.As(err, &disabled) {
+			return disabled.Error(), nil
+		} else if err != nil {
+			return "", err
+		}
+		return "", nil
+	}
 	flags, err := h.Settings().LaunchFlags(entry.Options)
 	if err != nil {
 		return "", nil

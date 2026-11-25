@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
@@ -216,6 +217,55 @@ func TestASessionInAContainerStartsWithoutTheGuardWhichDoesNotReachItYet(t *test
 
 	if command := running.started[0].Command; slices.Contains(command, "--settings") {
 		t.Fatalf("command %q, want no guard settings in a container", command)
+	}
+}
+
+// withKeptRules keeps the rules the fleet resolved for the ship, as the trierarch keeps them in its guard folder.
+func withKeptRules(t *testing.T, harness Harness, text string) {
+	t.Helper()
+	if err := (guardfile.Store{Guards: harness.Guards}).Write(context.Background(), scout, []byte(text)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// aRuleSet are kept rules with one set, which a session may start only guarded.
+const aRuleSet = `{"shipId":"` + scout + `","settingsVersion":0,"sets":[{"name":"no-publish"}]}`
+
+func TestAContainerLaunchWhoseRulesCarryASetStartsNothingAsItCannotStartGuarded(t *testing.T) {
+	for _, each := range []struct{ name, rules string }{
+		{"a rule set", aRuleSet},
+		{"rules it cannot read", `{"shipId":`},
+	} {
+		t.Run(each.name, func(t *testing.T) {
+			harness, running := aGuardedHarness(t)
+			harness.Homes = t.TempDir()
+			withKeptRules(t, harness, each.rules)
+
+			err := harness.Launch(anEntry(t), true, "launch-1")
+
+			if err == nil || len(running.started) != 0 {
+				t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
+			}
+		})
+	}
+}
+
+func TestAContainerSessionWhoseRulesCarryASetIsGivenBackOnceTheyArrive(t *testing.T) {
+	harness, _ := aGuardedHarness(t)
+	harness.Homes = t.TempDir()
+	if needs, ok := any(harness).(interface{ NeedsGuardRules() bool }); !ok || !needs.NeedsGuardRules() {
+		t.Fatal("a container session starts before its rules arrive, want it to wait for them")
+	}
+	entry := anEntry(t)
+	withKeptRules(t, harness, `{"shipId":"`+scout+`","settingsVersion":0,"sets":[]}`)
+	if got := problemOf(t, harness, entry); got != "" {
+		t.Fatalf("GuardProblem with no rule set = %q, want none", got)
+	}
+
+	withKeptRules(t, harness, aRuleSet)
+
+	if got, want := problemOf(t, harness, entry), "guard disabled: Claude Code in a container is not guarded yet"; got != want {
+		t.Fatalf("GuardProblem = %q, want %q", got, want)
 	}
 }
 

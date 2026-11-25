@@ -40,6 +40,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardrules"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
@@ -349,13 +350,18 @@ func runTrierarch(program string, isPluginStep bool, words ...string) (string, i
 var opened *shipsocket.Sockets
 var permissionCloser io.Closer
 
-// shipSockets are each ship's socket for its session's fleet calls, with its crew token from the state at each call (decision 0026). A caller is allowed only under the ship's own hold, or under the trierarch itself, as its aeolus-push.sh.
+// shipSockets are each ship's socket for its session's fleet calls, with its crew token from the state at each call (decision 0026). A caller is allowed only under the ship's own hold, or under the trierarch itself, as its aeolus-push.sh. In containers, the socket answers its session's guard check too, on the host (#631); a host session runs guard check itself.
 func shipSockets(at paths.Paths, fleetURL string, running runningSessions) *shipsocket.Sockets {
 	store := state.File{Path: at.State}
 	trierarch := os.Getpid()
+	var guardCheck func(ctx context.Context, shipID string, input io.ReadCloser) guard.Answer
+	if inContainers, ok := running.(container.Runtime); ok {
+		guardCheck = cli.ContainerGuardCheck(at, inContainers)
+	}
 	return shipsocket.New(shipsocket.Options{
-		Root:     at.Sockets,
-		FleetURL: fleetURL,
+		GuardCheck: guardCheck,
+		Root:       at.Sockets,
+		FleetURL:   fleetURL,
 		CrewTokenOf: func(shipID string) string {
 			saved, err := store.Load()
 			if err != nil {

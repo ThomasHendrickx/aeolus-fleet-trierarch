@@ -27,7 +27,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 )
@@ -51,7 +53,11 @@ type Options struct {
 	CrewTokenOf func(shipID string) string
 	// MayCall is whether the process at the other end of a connection may call the ship's socket.
 	MayCall func(shipID string, pid int) bool
-	Log     func(line string)
+	// GuardCheck checks one tool call of the ship's session on the host (guard check over the socket, #631); nil refuses every call.
+	GuardCheck func(ctx context.Context, shipID string, input io.ReadCloser) guard.Answer
+	// GuardDeadline bounds a guard check over the socket; zero is the guard's own deadline.
+	GuardDeadline time.Duration
+	Log           func(line string)
 }
 
 type open struct {
@@ -180,6 +186,10 @@ func (s *Sockets) handle(shipID string, w http.ResponseWriter, r *http.Request) 
 	if connection == nil || !s.options.MayCall(shipID, peer.PID(connection)) {
 		refuse(w, http.StatusForbidden, "This socket answers only its ship's own session")
 		said("403")
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == guardCheckPath {
+		s.checkGuard(shipID, w, r)
 		return
 	}
 	if !isForwarded(r.Method, r.URL.Path) {
