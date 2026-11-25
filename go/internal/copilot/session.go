@@ -119,11 +119,15 @@ func ErrorIn(events string) string {
 // LastSessionIn is the session the last turn in the events named, by its result, the only event naming it; empty when no turn named one.
 func LastSessionIn(events string) string {
 	sessionID := ""
-	eachEvent(events, func(said event) {
+	readSession := func(said event) {
 		if said.Type == "result" && said.SessionID != "" {
 			sessionID = said.SessionID
 		}
-	})
+	}
+	eachEvent(events, readSession)
+	if sessionID == "" {
+		eachEvent(events+".1", readSession)
+	}
 	return sessionID
 }
 
