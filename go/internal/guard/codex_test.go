@@ -139,3 +139,23 @@ func TestAnInterpreterNeedsALiteralProgramAndCannotStartInteractiveWithRules(t *
 		})
 	}
 }
+
+func TestCodexChecksIndentedPatchHeadersAndPreservesThePathCodexUses(t *testing.T) {
+	checker, _ := aChecker()
+	checker.Harness = "codex"
+	checker.Protected = CodexProtected(home+"/.codex", stateDir, configFile, shipFolder, repository)
+	checker.Links = memoryLinks{repository + "/ alias": repository + "/.codex/hooks.json"}
+	for _, header := range []string{"  *** Add File: .codex/hooks.json  ", "*** Add File:  alias"} {
+		patch := "*** Begin Patch\n*** Add File: harmless.txt\n+hello\n" + header + "\n+hello\n*** End Patch"
+		refusedAs(t, checker, aCall("apply_patch", map[string]any{"command": patch}), "Refused by the guard: protected: "+repository+"/.codex/hooks.json.")
+	}
+}
+
+func TestAStdinDeviceIsNotAnInterpreterScript(t *testing.T) {
+	checker, _ := aChecker(aSet("rules", "abcdef1", `{}`))
+	for _, command := range []string{"bash /dev/stdin", "python3 /dev/fd/0", "node -- /dev/stdin"} {
+		t.Run(command, func(t *testing.T) {
+			refusedAs(t, checker, aShellCall(command), "Refused by the guard: unresolvable: reads commands from stdin.")
+		})
+	}
+}
