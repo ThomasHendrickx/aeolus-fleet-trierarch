@@ -41,9 +41,10 @@ type invocation struct {
 // analysis is everything the shell input runs and what of it cannot be
 // resolved before it runs.
 type analysis struct {
-	invocations  []invocation
-	unresolvable []string
-	writes       []writeTarget
+	invocations     []invocation
+	launchesHarness bool
+	unresolvable    []string
+	writes          []writeTarget
 	// links are the symbolic links the input makes, by absolute path.
 	links map[string]string
 }
@@ -385,12 +386,19 @@ func init() {
 			"-u": 1, "-g": 1, "-h": 1, "-p": 1, "-C": 1, "-T": 1, "-r": 1, "-t": 1, "-U": 1, "-D": 1,
 			"-E": 0, "-H": 0, "-n": 0, "-S": 0, "-b": 0, "-k": 0, "-A": 0, "-P": 0,
 		}),
-		"doas":    wrapper(options{"-u": 1, "-n": 0}),
-		"timeout": (*analyzer).timeout,
-		"xargs":   (*analyzer).xargs,
-		"find":    (*analyzer).find,
-		"watch":   (*analyzer).watch,
-		"git":     (*analyzer).git,
+		"doas":     wrapper(options{"-u": 1, "-n": 0}),
+		"timeout":  (*analyzer).timeout,
+		"xargs":    (*analyzer).xargs,
+		"find":     (*analyzer).find,
+		"watch":    (*analyzer).watch,
+		"git":      (*analyzer).git,
+		"npx":      (*analyzer).packageLauncher,
+		"npm":      (*analyzer).packageLauncher,
+		"bunx":     (*analyzer).packageLauncher,
+		"bun":      (*analyzer).packageLauncher,
+		"pnpm":     (*analyzer).packageLauncher,
+		"yarn":     (*analyzer).packageLauncher,
+		"corepack": wrapper(options{}),
 	}
 }
 

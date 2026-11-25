@@ -36,6 +36,9 @@ func (c Checker) judge(ctx context.Context, read call, sets []Set) *verdict {
 			return mechanism("unknown tool: " + read.tool)
 		}
 		if shell != nil {
+			if shell.launchesHarness {
+				return mechanism("protected: harness")
+			}
 			for _, run := range shell.invocations {
 				if isHarness(run.name) {
 					return mechanism("protected: harness")
