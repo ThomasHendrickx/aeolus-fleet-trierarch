@@ -94,6 +94,10 @@ func ContainerGuardCheck(at paths.Paths, runtime container.Runtime) func(ctx con
 
 // failedCheck refuses a call that could not be checked, kept as a refusal of a known ship, one whose guard folder is kept.
 func failedCheck(ctx context.Context, at paths.Paths, shipID string, now func() time.Time, cause string) guard.Answer {
+	if ctx.Err() != nil {
+		// Past its deadline the check reads and keeps nothing more: whoever waited on it has answered already.
+		return guard.Failed("deadline")
+	}
 	if _, err := os.Stat(guardfile.Folder(at.Guard, shipID)); err == nil {
 		_ = (guardfile.Refusals{Guards: at.Guard, ShipID: shipID}).Append(ctx, guard.FailedRefusal(now(), cause))
 	}
@@ -146,7 +150,7 @@ func (v containerView) checked(at paths.Paths, entry reconciler.Entry, workspace
 func checkCall(ctx context.Context, at paths.Paths, shipID string, now func() time.Time, view sessionView, input io.ReadCloser) guard.Answer {
 	refusals := guardfile.Refusals{Guards: at.Guard, ShipID: shipID}
 	failed := func(cause string) guard.Answer { return failedCheck(ctx, at, shipID, now, cause) }
-	crewed, err := (state.File{Path: at.State}).Load()
+	crewed, err := within(ctx, (state.File{Path: at.State}).Load)
 	if err != nil {
 		return failed("state unreadable")
 	}
@@ -158,7 +162,7 @@ func checkCall(ctx context.Context, at paths.Paths, shipID string, now func() ti
 	if shipFolder == "" {
 		shipFolder = entry.Folder
 	}
-	repositories, err := workspace.RepositoryFolders(entry.Folder)
+	repositories, err := within(ctx, func() ([]string, error) { return workspace.RepositoryFolders(entry.Folder) })
 	if err != nil {
 		return failed("ship's folder unreadable")
 	}
@@ -185,6 +189,27 @@ func checkCall(ctx context.Context, at paths.Paths, shipID string, now func() ti
 		Protected: protected,
 	}
 	return checker.Check(ctx, input)
+}
+
+// within reads in a goroutine of its own and answers at ctx's end whatever the read waits on, as guardfile.Within does, so a check
+// past its deadline stops: the read itself cannot be stopped and is left to end on its own, its answer kept by no one.
+func within[T any](ctx context.Context, read func() (T, error)) (T, error) {
+	type result struct {
+		value T
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		value, err := read()
+		done <- result{value, err}
+	}()
+	select {
+	case got := <-done:
+		return got.value, got.err
+	case <-ctx.Done():
+		var none T
+		return none, ctx.Err()
+	}
 }
 
 // resolvedPath is the path with the links of its longest part that exists resolved, as the guard compares the paths a call writes.
