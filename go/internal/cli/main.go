@@ -178,7 +178,7 @@ const usage = `Usage: aeolus-trierarch <command>
   --json         answer as JSON
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
-var valueFlags = []string{"--fleet-url", "--ship-id", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into", "--service"}
+var valueFlags = []string{"--fleet-url", "--ship-id", "--plugin-ship-id", "--config", "--default", "--ship", "--harness", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into", "--service"}
 var switchFlags = []string{"--json", "--help", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow", "--no-repositories", "--no-folders", "--secret-stdin"}
 
 type parsed struct {

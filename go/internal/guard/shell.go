@@ -343,7 +343,11 @@ func (a *analyzer) simple(words []word, env map[string]word, st *state, input sh
 		return
 	}
 	if flags, ok := interpreters[interpreterName(base)]; ok {
+		before := len(a.out.unresolvable)
 		a.interpreter(base, flags, args)
+		if len(a.out.unresolvable) == before && !hasInterpreterProgram(interpreterName(base), flags, args) {
+			a.out.cannotResolve("reads commands from stdin")
+		}
 	}
 }
 
@@ -683,6 +687,10 @@ func (a *analyzer) shell(name string, args []word, st *state, input shellInput) 
 		if !strings.HasPrefix(arg.text, "-") && !strings.HasPrefix(arg.text, "+") {
 			break
 		}
+		if strings.HasPrefix(arg.text, "-") && strings.Contains(arg.text, "i") {
+			a.out.cannotResolve("reads commands from stdin")
+			return
+		}
 		if strings.HasPrefix(arg.text, "-") && strings.Contains(arg.text, "c") {
 			command = true
 		}
@@ -705,6 +713,10 @@ func (a *analyzer) shell(name string, args []word, st *state, input shellInput) 
 	default:
 		text, ok := a.literalStdin(input)
 		if !ok {
+			if input.redirect == nil && !input.piped {
+				a.out.cannotResolve("reads commands from stdin")
+				return
+			}
 			a.out.cannotResolve(name + " script from stdin")
 			return
 		}

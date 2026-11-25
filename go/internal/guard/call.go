@@ -46,6 +46,13 @@ var claudeCodeKinds = map[string]string{
 // claudeCodeKind is the kind of a Claude Code tool, "" for a tool the guard
 // does not know. Claude Code names an MCP tool mcp__<server>__<tool>.
 func claudeCodeKind(tool string) string {
+	if strings.HasPrefix(tool, "mcp__") {
+		return mcpKind(tool)
+	}
+	return claudeCodeKinds[tool]
+}
+
+func mcpKind(tool string) string {
 	if rest, ok := strings.CutPrefix(tool, "mcp__"); ok {
 		server, name, found := strings.Cut(rest, "__")
 		if !found || server == "" || name == "" {
@@ -53,7 +60,7 @@ func claudeCodeKind(tool string) string {
 		}
 		return "mcp:" + server + "/" + name
 	}
-	return claudeCodeKinds[tool]
+	return ""
 }
 
 // call is one tool call as the guard reads it.
@@ -63,17 +70,20 @@ type call struct {
 	input json.RawMessage
 	cwd   string
 	// command is the shell input of a shell call.
-	command string
+	command      string
+	patchTargets []string
+	isInternal   bool
+	isAllMCP     bool
 }
 
-// hookInput is Claude Code's PreToolUse hook input, as far as the guard reads it.
+// hookInput is a harness's PreToolUse hook input, as far as the guard reads it.
 type hookInput struct {
 	ToolName  string          `json:"tool_name"`
 	ToolInput json.RawMessage `json:"tool_input"`
 	Cwd       string          `json:"cwd"`
 }
 
-func readCall(input io.Reader) (call, error) {
+func readCall(input io.Reader, harness string) (call, error) {
 	var hook hookInput
 	if err := json.NewDecoder(input).Decode(&hook); err != nil {
 		return call{}, fmt.Errorf("decode hook input: %w", err)
@@ -81,7 +91,14 @@ func readCall(input io.Reader) (call, error) {
 	if hook.ToolName == "" {
 		return call{}, errors.New("hook input names no tool")
 	}
-	read := call{tool: hook.ToolName, kind: claudeCodeKind(hook.ToolName), input: hook.ToolInput, cwd: hook.Cwd}
+	read := call{tool: hook.ToolName, input: hook.ToolInput, cwd: hook.Cwd}
+	if harness == "codex" {
+		if err := read.readCodex(); err != nil {
+			return call{}, err
+		}
+	} else {
+		read.kind = claudeCodeKind(hook.ToolName)
+	}
 	if read.kind == kindShell {
 		var shell struct {
 			Command string `json:"command"`
@@ -108,6 +125,13 @@ func (c call) fileWrites() []writeTarget {
 	if c.kind != kindFileWrite {
 		return nil
 	}
+	if len(c.patchTargets) > 0 {
+		writes := make([]writeTarget, 0, len(c.patchTargets))
+		for _, target := range c.patchTargets {
+			writes = append(writes, c.fileWrite(target))
+		}
+		return writes
+	}
 	var input struct {
 		FilePath     string `json:"file_path"`
 		NotebookPath string `json:"notebook_path"`
@@ -122,11 +146,15 @@ func (c call) fileWrites() []writeTarget {
 	if target == "" {
 		return []writeTarget{{unresolvable: "write target of " + c.tool}}
 	}
+	return []writeTarget{c.fileWrite(target)}
+}
+
+func (c call) fileWrite(target string) writeTarget {
 	if !path.IsAbs(target) {
 		if c.cwd == "" {
-			return []writeTarget{{unresolvable: "write target " + target + " in an unknown working folder"}}
+			return writeTarget{unresolvable: "write target " + target + " in an unknown working folder"}
 		}
 		target = path.Join(c.cwd, target)
 	}
-	return []writeTarget{{path: path.Clean(target)}}
+	return writeTarget{path: path.Clean(target)}
 }
