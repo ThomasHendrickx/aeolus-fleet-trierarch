@@ -193,3 +193,71 @@ func TestAnAnswerReadyAsTheDeadlineIsReachedRefusesTheCall(t *testing.T) {
 		}
 	}
 }
+
+// aCallOf is a tool call whose body is exactly size bytes.
+func aCallOf(size int) string {
+	return `{"tool_name":"Bash","tool_input":{"command":"` + strings.Repeat("x", size-len(`{"tool_name":"Bash","tool_input":{"command":""}}`)) + `"}}`
+}
+
+func TestAToolCallOfTheMostBytesASocketTakesIsChecked(t *testing.T) {
+	fleet := aFleetAnswering(t, 200, "application/json", `{}`)
+	checked := 0
+	socket := opened(t, guardedSockets(t, fleet, false, func(_ context.Context, _ string, input io.ReadCloser) guard.Answer {
+		text, _ := io.ReadAll(input)
+		checked = len(text)
+		return guard.Answer{}
+	}))
+
+	response, body := post(t, socket, "/guard/check", aCallOf(MaxBytes))
+
+	if response.StatusCode != 200 || checked != MaxBytes {
+		t.Fatalf("answer = %d %q, checked %d bytes, want 200 and all %d checked", response.StatusCode, body, checked, MaxBytes)
+	}
+}
+
+func TestAToolCallOneByteOverTheMostASocketTakesIsRefusedUnchecked(t *testing.T) {
+	fleet := aFleetAnswering(t, 200, "application/json", `{}`)
+	isChecked := false
+	socket := opened(t, guardedSockets(t, fleet, false, func(context.Context, string, io.ReadCloser) guard.Answer {
+		isChecked = true
+		return guard.Answer{}
+	}))
+
+	response, body := post(t, socket, "/guard/check", aCallOf(MaxBytes+1))
+
+	if want := "Refused by the guard: guard failed: input too large.\n"; response.StatusCode != http.StatusForbidden || body != want || isChecked {
+		t.Fatalf("answer = %d %q, checked %t, want 403 %q and no check", response.StatusCode, body, isChecked, want)
+	}
+}
+
+func TestAToolCallWhoseBodyEndsBeforeItsLengthIsRefusedUnchecked(t *testing.T) {
+	fleet := aFleetAnswering(t, 200, "application/json", `{}`)
+	isChecked := false
+	socket := opened(t, guardedSockets(t, fleet, false, func(context.Context, string, io.ReadCloser) guard.Answer {
+		isChecked = true
+		return guard.Answer{}
+	}))
+	connection, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if _, err := io.WriteString(connection, "POST /guard/check HTTP/1.1\r\nHost: ship\r\nContent-Length: 100\r\n\r\n{"); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.(*net.UnixConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.SetReadDeadline(time.Now().Add(time.Second))
+
+	response, err := http.ReadResponse(bufio.NewReader(connection), nil)
+	if err != nil {
+		t.Fatalf("no answer within a second: %v", err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+
+	if want := "Refused by the guard: guard failed: input unreadable.\n"; response.StatusCode != http.StatusForbidden || string(body) != want || isChecked {
+		t.Fatalf("answer = %d %q, checked %t, want 403 %q and no check", response.StatusCode, body, isChecked, want)
+	}
+}
