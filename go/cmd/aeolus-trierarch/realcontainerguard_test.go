@@ -31,11 +31,14 @@ import (
 
 const realContainerShip = "shp_01m8a2a0kfj4m3c7sx1q9wd5vb"
 
+// realNoRm are kept rules with one set that denies rm alone, so a touch is checked and let run.
+const realNoRm = `[{"name":"no-rm","repository":"fleet/rules","commit":"8d41e07aa1","file":"no-rm.yaml","floor":false,"rules":{"commands":{"deny":[{"command":"rm"}]}}}]`
+
 // realNoTouch are kept rules with one set that denies touch.
 const realNoTouch = `[{"name":"no-touch","repository":"fleet/rules","commit":"8d41e07aa1","file":"no-touch.yaml","floor":false,"rules":{"commands":{"deny":[{"command":"touch"}]}}}]`
 
 func TestARealClaudeCodeSessionInAContainerRunsACallItsShipsSocketLets(t *testing.T) {
-	session := aRealContainerSession(t, "[]")
+	session := aRealContainerSession(t, realNoRm)
 
 	result := session.run(t)
 
@@ -64,8 +67,18 @@ func TestARealClaudeCodeSessionInAContainerDoesNotRunACallTheRulesDenyAndShowsIt
 	}
 }
 
-func TestARealClaudeCodeSessionInAContainerDoesNotRunACallWhenItsShipsSocketIsGone(t *testing.T) {
+func TestARealClaudeCodeSessionInAContainerOfARequestWithoutARuleSetRunsItsCallUnchecked(t *testing.T) {
 	session := aRealContainerSession(t, "[]")
+
+	result := session.run(t)
+
+	if !result.ran || strings.Contains(result.log, "guard check") {
+		t.Fatalf("ran %v, the trierarch logged %q, want the call run without the guard, as before", result.ran, result.log)
+	}
+}
+
+func TestARealClaudeCodeSessionInAContainerDoesNotRunACallWhenItsShipsSocketIsGone(t *testing.T) {
+	session := aRealContainerSession(t, realNoRm)
 	session.isSocketClosed = true
 
 	result := session.run(t)
@@ -191,13 +204,10 @@ func (s *realContainerSession) run(t *testing.T) realContainerResult {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guarding, ok := wired["claude-code"].(interface {
-		WithContainerGuard(sockets string) claudecode.Harness
-	})
+	harness, ok := wired["claude-code"].(claudecode.Harness)
 	if !ok {
-		t.Fatal("Claude Code cannot start a session in a container guarded, want its calls checked on the host through its ship's socket")
+		t.Fatalf("claude-code is wired as %T, want claudecode.Harness", wired["claude-code"])
 	}
-	harness := guarding.WithContainerGuard(s.at.Sockets)
 	t.Cleanup(func() { _ = running.Stop(realContainerShip) })
 
 	if err := harness.Launch(s.entry, true, "launch-1"); err != nil {

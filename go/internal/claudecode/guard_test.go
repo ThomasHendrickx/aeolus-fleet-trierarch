@@ -358,7 +358,8 @@ type containerGuarding interface {
 	WithContainerGuard(sockets string) Harness
 }
 
-// aContainerGuardedHarness is a harness in containers whose sessions start guarded, its ships' sockets under the folder it answers.
+// aContainerGuardedHarness is a harness in containers whose sessions start guarded, its ships' sockets under the folder it answers, and
+// a rule set kept for the ship: in a container, only a request that carries one starts guarded.
 func aContainerGuardedHarness(t *testing.T) (Harness, *aRuntime, string) {
 	t.Helper()
 	harness, running, _, _ := inContainers(t)
@@ -368,7 +369,9 @@ func aContainerGuardedHarness(t *testing.T) (Harness, *aRuntime, string) {
 		t.Fatal("Claude Code cannot start a session in a container guarded, want it to check its calls on the host through its ship's socket")
 	}
 	sockets := filepath.Join(t.TempDir(), "o'brien sockets")
-	return guarding.WithContainerGuard(sockets), running, sockets
+	harness = guarding.WithContainerGuard(sockets)
+	withKeptRules(t, harness, aRuleSet)
+	return harness, running, sockets
 }
 
 // inlineSettingsOf are the settings the command line gives with --settings as JSON, and how often it names --settings.
@@ -499,5 +502,41 @@ func TestInAContainerTheHostsUserSettingsDoNotDisableTheGuard(t *testing.T) {
 
 	if got := problemOf(t, harness, anEntry(t)); got != "" {
 		t.Fatalf("GuardProblem = %q, want none: the container loads its ship home's settings, not the host user's", got)
+	}
+}
+
+// noRuleSet are kept rules that carry no set.
+const noRuleSet = `{"shipId":"` + scout + `","settingsVersion":0,"sets":[]}`
+
+func TestInAContainerARequestWithoutARuleSetStartsWithoutTheGuardAsBefore(t *testing.T) {
+	harness, running, _ := aContainerGuardedHarness(t)
+	withKeptRules(t, harness, noRuleSet)
+
+	if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if command := running.started[0].Command; slices.Contains(command, "--settings") {
+		t.Fatalf("command %q, want no guard settings for a request without a rule set", command)
+	}
+}
+
+func TestInAContainerSettingsThatDisableHooksDoNotHoldBackARequestWithoutARuleSet(t *testing.T) {
+	harness, _, _ := aContainerGuardedHarness(t)
+	withKeptRules(t, harness, noRuleSet)
+	entry := anEntry(t)
+	withSettings(t, filepath.Join(entry.Folder, ".claude", "settings.json"), `{"disableAllHooks":true}`)
+
+	if got := problemOf(t, harness, entry); got != "" {
+		t.Fatalf("GuardProblem = %q, want none: a request without a rule set starts without the guard", got)
+	}
+}
+
+func TestInAContainerAGuardedLaunchWhoseRulesCannotBeReadStartsNothing(t *testing.T) {
+	harness, running, _ := aContainerGuardedHarness(t)
+	withKeptRules(t, harness, `{"shipId":`)
+
+	if err := harness.Launch(anEntry(t), true, "launch-1"); err == nil || len(running.started) != 0 {
+		t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
 	}
 }
