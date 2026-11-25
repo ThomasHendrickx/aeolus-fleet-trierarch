@@ -11,6 +11,11 @@ import (
 // anAppServer is a stand-in for `codex app-server`: it notes each line it is sent and answers each request by its id, hooks/list with the hooks given.
 func anAppServer(t *testing.T, hooks string) (string, string) {
 	t.Helper()
+	return anAppServerListing(t, `[{"hooks":`+hooks+`}]`)
+}
+
+func anAppServerListing(t *testing.T, data string) (string, string) {
+	t.Helper()
 	folder := t.TempDir()
 	said := filepath.Join(folder, "said.jsonl")
 	script := `#!/bin/sh
@@ -20,7 +25,7 @@ while read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/^{"jsonrpc":"2.0","id":\([0-9]*\),.*/\1/p')
   [ -z "$id" ] && continue
   case "$line" in
-    *'"method":"hooks/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"data":[{"hooks":%s}]}}\n' "$id" '` + hooks + `' ;;
+    *'"method":"hooks/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"data":%s}}\n' "$id" '` + data + `' ;;
     *) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
   esac
 done`
@@ -68,6 +73,43 @@ func TestTheAeolusPluginsNewOrChangedHooksAreTrustedByTheirCurrentHashAndNoOther
 	}
 	if want := `{"jsonrpc":"2.0","id":3,"method":"config/batchWrite","params":{"edits":[{"keyPath":"hooks.state","value":{"a":{"trusted_hash":"h-a"},"b":{"trusted_hash":"h-b"}},"mergeStrategy":"upsert"}],"reloadUserConfig":true}}`; len(got) != 4 || got[3] != want {
 		t.Fatalf("the app server was sent %q, want the two hooks trusted: %s", got, want)
+	}
+}
+
+func TestCrewTrustsPluginHooksAcrossAnyNumberOfListings(t *testing.T) {
+	for _, example := range []struct {
+		name string
+		data string
+		keys []string
+	}{
+		{name: "no listings", data: `[]`},
+		{
+			name: "several listings",
+			data: `[{"hooks":[{"key":"a","pluginId":"aeolus-fleet@aeolus-fleet","currentHash":"h-a","trustStatus":"untrusted"}]},
+				{"hooks":[{"key":"b","pluginId":"aeolus-fleet@aeolus-fleet","currentHash":"h-b","trustStatus":"modified"}]}]`,
+			keys: []string{"a", "b"},
+		},
+	} {
+		t.Run(example.name, func(t *testing.T) {
+			program, said := anAppServerListing(t, strings.ReplaceAll(example.data, "\n", ""))
+			server := AppServer{Program: program, Version: "1.2.3"}
+
+			trusted, err := server.TrustAeolusHooks(t.TempDir())
+			if err != nil || !slices.Equal(trusted, example.keys) {
+				t.Fatalf("TrustAeolusHooks = %q, %v, want %q", trusted, err, example.keys)
+			}
+			if len(example.keys) == 0 && len(linesOf(said)) != 3 {
+				t.Fatalf("app-server requests = %q, want no trust write", linesOf(said))
+			}
+		})
+	}
+}
+
+func TestGuardTrustRequiresAListedGuard(t *testing.T) {
+	program, _ := anAppServerListing(t, `[]`)
+	server := AppServer{Program: program, Version: "1.2.3", Folder: t.TempDir()}
+	if err := server.TrustGuard(t.Context(), nil, "guard"); err == nil {
+		t.Fatal("TrustGuard accepted an empty listing")
 	}
 }
 
