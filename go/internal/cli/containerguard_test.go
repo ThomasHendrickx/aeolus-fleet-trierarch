@@ -6,9 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 )
 
@@ -90,5 +93,38 @@ func TestAContainerSessionsGuardRefusesEveryCallOfAShipNotCrewedHere(t *testing.
 
 	if want := "Refused by the guard: guard failed: ship not crewed here."; answer.ExitCode != 2 || strings.TrimSpace(answer.Stderr) != want {
 		t.Fatalf("guard check = %q, %d, want %q", answer.Stderr, answer.ExitCode, want)
+	}
+}
+
+func TestAContainerSessionsGuardCheckStopsReadingWhenItsDeadlineEnds(t *testing.T) {
+	_, at, folder := aGuardedShip(t, noPublishRules)
+	// The state is a pipe no one writes: its read waits as a stalled file system's would, until the pipe is closed at the test's end.
+	if err := os.Remove(at.State); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(at.State, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if writer, err := os.OpenFile(at.State, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
+			_ = writer.Close()
+		}
+	})
+	check := ContainerGuardCheck(at, container.Runtime{Homes: at.Homes, Sockets: at.Sockets, ShipsRoot: at.Ships})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	answered := make(chan guard.Answer, 1)
+
+	go func() {
+		answered <- check(ctx, guardedShip, io.NopCloser(strings.NewReader(aHookCall(t, folder, "Bash", map[string]any{"command": "ls"}))))
+	}()
+
+	select {
+	case answer := <-answered:
+		if answer.ExitCode != 2 {
+			t.Fatalf("guard check = %q, %d, want a refusal", answer.Stderr, answer.ExitCode)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the guard check still read 3 seconds after its deadline ended")
 	}
 }
