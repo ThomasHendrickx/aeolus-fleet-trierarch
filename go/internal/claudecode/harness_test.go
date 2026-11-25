@@ -492,6 +492,8 @@ func inContainers(t *testing.T) (Harness, *aRuntime, *anOnboarding, string) {
 	harness, running, onboarding := aHarness(t)
 	homes := t.TempDir()
 	harness.Homes = homes
+	// The rules of its request's settings version, which carry no set: a session in a container starts on them alone.
+	withKeptRules(t, harness, noRuleSet)
 	return harness, running, onboarding, filepath.Join(homes, scout)
 }
 

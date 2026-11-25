@@ -209,6 +209,7 @@ func TestSettingsThatKeepHooksOrThatTheSessionDoesNotLoadLetItStart(t *testing.T
 func TestASessionInAContainerStartsWithoutTheGuardWhichDoesNotReachItYet(t *testing.T) {
 	harness, running := aGuardedHarness(t)
 	harness.Homes = t.TempDir()
+	withKeptRules(t, harness, noRuleSet)
 	entry := anEntry(t)
 
 	if err := harness.Launch(entry, true, "launch-1"); err != nil {
@@ -538,5 +539,43 @@ func TestInAContainerAGuardedLaunchWhoseRulesCannotBeReadStartsNothing(t *testin
 
 	if err := harness.Launch(anEntry(t), true, "launch-1"); err == nil || len(running.started) != 0 {
 		t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
+	}
+}
+
+func TestInAContainerALaunchStartsNothingWithoutTheRulesOfItsRequestsOwnSettingsVersion(t *testing.T) {
+	for _, each := range []struct{ name, rules string }{
+		{"a newer resolution without a set", `{"shipId":"` + scout + `","settingsVersion":4,"sets":[]}`},
+		{"an older resolution without a set", `{"shipId":"` + scout + `","settingsVersion":2,"sets":[]}`},
+		{"no rules kept", ""},
+	} {
+		t.Run(each.name, func(t *testing.T) {
+			harness, running, _ := aContainerGuardedHarness(t)
+			if err := (guardfile.Store{Guards: harness.Guards}).Forget(context.Background(), scout); err != nil {
+				t.Fatal(err)
+			}
+			if each.rules != "" {
+				withKeptRules(t, harness, each.rules)
+			}
+			entry := anEntry(t)
+			entry.SettingsVersion = 3
+
+			err := harness.Launch(entry, true, "launch-1")
+
+			if err == nil || len(running.started) != 0 {
+				t.Fatalf("Launch of settings version 3 = %v, started %d, want an error and nothing started", err, len(running.started))
+			}
+		})
+	}
+}
+
+func TestInAContainerTheRulesOfAnotherSettingsVersionDoNotSayARequestStartsUnguarded(t *testing.T) {
+	harness, _, _ := aContainerGuardedHarness(t)
+	withKeptRules(t, harness, `{"shipId":"`+scout+`","settingsVersion":4,"sets":[]}`)
+	entry := anEntry(t)
+	entry.SettingsVersion = 3
+	withSettings(t, filepath.Join(entry.Folder, ".claude", "settings.json"), `{"disableAllHooks":true}`)
+
+	if problem, err := harness.GuardProblem(context.Background(), entry); err == nil {
+		t.Fatalf("GuardProblem of settings version 3 = %q, nil, want an error: the rules kept are of version 4", problem)
 	}
 }
