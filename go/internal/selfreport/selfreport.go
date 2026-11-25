@@ -58,6 +58,8 @@ type Input struct {
 	Detected      detection.Detected
 	// Harnesses are the harnesses this trierarch offers, in order.
 	Harnesses []string
+	// GuardedHarnesses are the harnesses with a working guard on this computer.
+	GuardedHarnesses []string
 	// Trusted is what each harness trusts, read afresh for this report (#381).
 	Trusted map[string]trust.Places
 	// McpServers are, by harness, the names of the MCP servers it offers; a harness missing offers none.
@@ -212,6 +214,11 @@ func detailsOf(in Input) map[string]any {
 		// A fact for the console, never a label: placement does not read it (decision 0039).
 		"runtime": runtimeOf(in.Configuration),
 		"version": in.Version,
+	}
+	guarded := slices.Clone(named.Harnesses)
+	guarded = slices.DeleteFunc(guarded, func(name string) bool { return !slices.Contains(in.GuardedHarnesses, name) })
+	if len(guarded) > 0 {
+		details["guardedHarnesses"] = guarded
 	}
 	if notOffered := notOfferedDetailsOf(in, stopped); len(notOffered) > 0 {
 		details["notOffered"] = notOffered

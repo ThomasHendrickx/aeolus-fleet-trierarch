@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	codexharness "github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
@@ -15,7 +16,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
-// guardCheckCommand runs guard check (aeolus-fleet docs/design/guard, section 4.6): the PreToolUse hook of every Claude Code session
+// guardCheckCommand runs guard check (aeolus-fleet docs/design/guard, section 4.6): the PreToolUse hook of each guarded session
 // the trierarch starts. It prints the hook's answer, writes the refusal to stderr and exits with its code; whatever goes wrong before
 // the check can run refuses the call too, so it fails closed.
 func guardCheckCommand(words []string, machine Machine) (string, int) {
@@ -33,12 +34,34 @@ func guardCheckCommand(words []string, machine Machine) (string, int) {
 	if answer.Stderr != "" && machine.Stderr != nil {
 		fmt.Fprint(machine.Stderr, answer.Stderr)
 	}
+	if isCodexGuard(words) {
+		return "", answer.ExitCode
+	}
 	return answer.Stdout, answer.ExitCode
+}
+
+// IsCodexGuardCheck is whether the guard hook answers Codex by exit status alone.
+func IsCodexGuardCheck(args []string) bool {
+	return IsGuardCheck(args) && isCodexGuard(args[2:])
+}
+
+func isCodexGuard(words []string) bool {
+	command, _ := parse(words)
+	return command.values["--harness"] == "codex"
 }
 
 func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Answer {
 	command, ok := parse(words)
 	shipID := command.values["--ship"]
+	harness := command.values["--harness"]
+	switch harness {
+	case "codex":
+		shipID = variable(machine.Environ, "AEOLUS_SHIP")
+	case "":
+		harness = "claude-code"
+	default:
+		return guard.Failed("unknown harness")
+	}
 	if !ok || len(command.words) != 0 || !crew.IsShipID(shipID) {
 		return guard.Failed("no ship")
 	}
@@ -84,14 +107,23 @@ func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Ans
 	if machine.Stdin == nil {
 		return failed("input unreadable")
 	}
+	workspaces := append([]string{resolvedPath(shipFolder), resolvedPath(entry.Folder)}, repositories...)
+	guardFolder, configuration := resolvedPath(guardfile.Folder(at.Guard, shipID)), resolvedPath(at.Config)
+	protected := guard.ClaudeCodeProtected(resolvedPath(machine.HomeDirectory), guardFolder, configuration, workspaces...)
+	if harness == "codex" {
+		home := codexharness.HomeOf(machine.HomeDirectory, variable(machine.Environ, "CODEX_HOME"))
+		protected = guard.CodexProtected(resolvedPath(home), guardFolder, configuration, workspaces...)
+		protected = append(protected, resolvedPath(at.Detected), resolvedPath(at.State))
+	}
 	checker := guard.Checker{
+		Harness:   harness,
 		Sets:      guardfile.Sets{Store: guardfile.Store{Guards: at.Guard}, ShipID: shipID},
 		Links:     guardfile.Links{},
 		Refusals:  refusals,
 		Now:       now,
 		Home:      machine.HomeDirectory,
 		Boundary:  guard.Boundary{ShipFolder: resolvedPath(shipFolder), Repositories: repositories},
-		Protected: guard.ClaudeCodeProtected(resolvedPath(machine.HomeDirectory), resolvedPath(guardfile.Folder(at.Guard, shipID)), resolvedPath(at.Config), append([]string{resolvedPath(shipFolder), resolvedPath(entry.Folder)}, repositories...)...),
+		Protected: protected,
 	}
 	return checker.Check(ctx, machine.Stdin)
 }
@@ -107,4 +139,16 @@ func resolvedPath(path string) string {
 		return path
 	}
 	return filepath.Join(resolvedPath(parent), filepath.Base(path))
+}
+
+func prepareCodexTurn(program, folder string, environment, command []string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), guard.Deadline)
+	defer cancel()
+	home := variable(environment, "HOME")
+	config := variable(environment, "AEOLUS_TRIERARCH_CONFIG")
+	turn := codexharness.GuardTurn{
+		Program: program, Folder: folder, Environment: environment, Version: Version,
+		Paths: paths.Of(home, config), ShipID: variable(environment, "AEOLUS_SHIP"),
+	}
+	return turn.Prepare(ctx, command)
 }

@@ -42,6 +42,9 @@ func (e *hookExit) exit(stdout string, stderr string, code int) {
 func guardCheckMain(args []string) {
 	var ended hookExit
 	deadline := guard.Failed("deadline")
+	if cli.IsCodexGuardCheck(args) {
+		deadline.Stdout = ""
+	}
 	time.AfterFunc(guard.Deadline-guardExitMargin, func() { ended.exit(deadline.Stdout, deadline.Stderr, deadline.ExitCode) })
 	// A home that is not known leaves guard check no state to read: it refuses the call.
 	home, _ := os.UserHomeDir()

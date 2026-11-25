@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -635,5 +636,16 @@ func TestMissingPastaRuleDoesNotPreventStoppedMachineReport(t *testing.T) {
 	}
 	if got := asJSON(t, report)["details"].(map[string]any)["harnesses"]; !reflect.DeepEqual(got, []any{}) {
 		t.Fatalf("harnesses = %v, want none", got)
+	}
+}
+
+func TestTheReportNamesOnlyOfferedHarnessesWithGuardProof(t *testing.T) {
+	input := anInput()
+	input.Harnesses = []string{"claude-code", "codex", "copilot"}
+	input.GuardedHarnesses = []string{"claude-code", "codex"}
+	input.State.MissingPlugins = []string{"codex"}
+	guarded := Of(input).Details["guardedHarnesses"]
+	if got, ok := guarded.([]string); !ok || !slices.Equal(got, []string{"claude-code"}) {
+		t.Fatalf("guardedHarnesses = %v, want only the offered guarded harness", guarded)
 	}
 }

@@ -44,6 +44,8 @@ type Boundary struct {
 
 // Checker checks one tool call.
 type Checker struct {
+	// Harness selects the hook protocol. The zero value reads Claude Code calls.
+	Harness  string
 	Sets     SetSource
 	Links    Links
 	Refusals RefusalLog
@@ -109,7 +111,7 @@ func (c Checker) Check(ctx context.Context, input io.ReadCloser) Answer {
 	bounded, cancel := context.WithTimeout(ctx, c.deadline())
 	defer cancel()
 	context.AfterFunc(bounded, func() { _ = input.Close() })
-	read, cause := readWithin(bounded, input)
+	read, cause := readWithin(bounded, input, c.Harness)
 	var result outcome
 	if cause == "" {
 		result, cause = guarded(bounded, func() outcome { return c.evaluate(bounded, read) })
@@ -135,13 +137,13 @@ func (c Checker) Check(ctx context.Context, input io.ReadCloser) Answer {
 
 // readWithin reads the call from input in the caller, which closes input at
 // ctx's deadline. The cause is why it read no call, "" when it did.
-func readWithin(ctx context.Context, input io.Reader) (read call, cause string) {
+func readWithin(ctx context.Context, input io.Reader, harness string) (read call, cause string) {
 	defer func() {
 		if recover() != nil {
 			read, cause = call{}, "panic"
 		}
 	}()
-	read, err := readCall(input)
+	read, err := readCall(input, harness)
 	switch {
 	case ctx.Err() != nil:
 		return call{}, "deadline"
@@ -232,3 +234,10 @@ func cut(text string, n int) string {
 	}
 	return string([]rune(text)[:n])
 }
+
+// DisabledError means a turn could not start with its required guard.
+type DisabledError struct {
+	Reason string
+}
+
+func (e *DisabledError) Error() string { return "guard disabled: " + e.Reason }

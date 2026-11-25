@@ -273,3 +273,26 @@ func TestAConfigurationThatStillNamesCheckoutsIsRefusedNamingTheLineAndWhereSubR
 		t.Fatalf("a configuration naming none: %v", err)
 	}
 }
+
+func TestConfigCheckRefusesTheCodexHookTrustBypassInHarnessAndOptionFlags(t *testing.T) {
+	for _, codexFlags := range []string{
+		`"flags":["--dangerously-bypass-hook-trust"],"options":{}`,
+		`"flags":[],"options":{"effort":{"values":{"low":[],"high":["--dangerously-bypass-hook-trust"]}}}`,
+	} {
+		t.Run(codexFlags, func(t *testing.T) {
+			machine, _, _ := aMain(t)
+			at := paths.Of(machine.HomeDirectory, "")
+			configuration := `{"caps":{"ships":4,"running":2},"repositories":{},"folders":{},"harnesses":{"codex":{` + codexFlags + `}}}`
+			if err := os.MkdirAll(filepath.Dir(at.Config), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(at.Config, []byte(configuration), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			output, code := Main([]string{"config", "check"}, machine)
+			if code == 0 || !strings.Contains(output, "guard disabled: --dangerously-bypass-hook-trust") {
+				t.Fatalf("config check = %q, %d, want the flag refused", output, code)
+			}
+		})
+	}
+}

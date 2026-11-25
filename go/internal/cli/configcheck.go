@@ -95,6 +95,17 @@ func configCheck(at paths.Paths, machine Machine) (answer, error) {
 	if ignored := detection.ModelOptionsIgnored(loaded); len(ignored) > 0 {
 		return answer{}, refused(nil, "The configuration at %s sets a model option for %s: model ids come from detection only (#382), so remove it; aeolus-trierarch detect lists them", at.Config, strings.Join(ignored, ", "))
 	}
+	codex := loaded.Harnesses["codex"]
+	if err := codexharness.ValidateGuardFlags(codex.Flags); err != nil {
+		return answer{}, err
+	}
+	for _, option := range codex.Options {
+		for _, flags := range option.Values {
+			if err := codexharness.ValidateGuardFlags(flags); err != nil {
+				return answer{}, err
+			}
+		}
+	}
 	if err := checkRuntime(at, loaded, machine); err != nil {
 		return answer{}, err
 	}

@@ -41,9 +41,10 @@ type invocation struct {
 // analysis is everything the shell input runs and what of it cannot be
 // resolved before it runs.
 type analysis struct {
-	invocations  []invocation
-	unresolvable []string
-	writes       []writeTarget
+	invocations     []invocation
+	launchesHarness bool
+	unresolvable    []string
+	writes          []writeTarget
 	// links are the symbolic links the input makes, by absolute path.
 	links map[string]string
 }
@@ -343,7 +344,11 @@ func (a *analyzer) simple(words []word, env map[string]word, st *state, input sh
 		return
 	}
 	if flags, ok := interpreters[interpreterName(base)]; ok {
+		before := len(a.out.unresolvable)
 		a.interpreter(base, flags, args)
+		if len(a.out.unresolvable) == before && !hasInterpreterProgram(interpreterName(base), flags, args) {
+			a.out.cannotResolve("reads commands from stdin")
+		}
 	}
 }
 
@@ -381,12 +386,24 @@ func init() {
 			"-u": 1, "-g": 1, "-h": 1, "-p": 1, "-C": 1, "-T": 1, "-r": 1, "-t": 1, "-U": 1, "-D": 1,
 			"-E": 0, "-H": 0, "-n": 0, "-S": 0, "-b": 0, "-k": 0, "-A": 0, "-P": 0,
 		}),
-		"doas":    wrapper(options{"-u": 1, "-n": 0}),
-		"timeout": (*analyzer).timeout,
-		"xargs":   (*analyzer).xargs,
-		"find":    (*analyzer).find,
-		"watch":   (*analyzer).watch,
-		"git":     (*analyzer).git,
+		"doas":        wrapper(options{"-u": 1, "-n": 0}),
+		"timeout":     (*analyzer).timeout,
+		"xargs":       (*analyzer).xargs,
+		"find":        (*analyzer).find,
+		"watch":       (*analyzer).watch,
+		"git":         (*analyzer).git,
+		"npx":         (*analyzer).packageLauncher,
+		"npm":         (*analyzer).packageLauncher,
+		"bunx":        (*analyzer).packageLauncher,
+		"bun":         (*analyzer).packageLauncher,
+		"pnpm":        (*analyzer).packageLauncher,
+		"yarn":        (*analyzer).packageLauncher,
+		"corepack":    wrapper(options{}),
+		"busybox":     (*analyzer).busybox,
+		"script":      (*analyzer).terminal,
+		"tmux":        (*analyzer).terminal,
+		"screen":      (*analyzer).terminal,
+		"apply_patch": (*analyzer).patch,
 	}
 }
 
@@ -654,14 +671,37 @@ func (a *analyzer) watch(c runCall) {
 	a.script(strings.Join(texts, " "), "watch", c.state.copy())
 }
 
-var shells = map[string]bool{"sh": true, "bash": true, "dash": true, "zsh": true, "ksh": true, "mksh": true, "ash": true, "rbash": true}
+var shells = map[string]bool{
+	"sh": true, "bash": true, "dash": true, "zsh": true, "ksh": true, "mksh": true,
+	"ash": true, "rbash": true, "fish": true, "csh": true, "tcsh": true, "hush": true,
+}
 
 func isShell(name string) bool { return shells[name] }
+
+func (a *analyzer) busybox(c runCall) {
+	if len(c.args) == 0 {
+		return
+	}
+	applet := c.args[0]
+	if !applet.literal {
+		a.out.cannotResolve("busybox applet " + applet.source)
+		return
+	}
+	if name := path.Base(applet.text); isShell(name) {
+		a.shell(name, c.args[1:], c.state, c.input)
+	}
+}
+
+func (a *analyzer) terminal(runCall) {
+	// These programs can start or attach to a terminal with its own input.
+	a.out.cannotResolve("reads commands from stdin")
+}
 
 // shell reads a shell run as a command: its -c string, or its script from
 // stdin; a script file runs as a program.
 func (a *analyzer) shell(name string, args []word, st *state, input shellInput) {
 	command, fromStdin := false, false
+	var fishHasCommand bool
 	for len(args) > 0 {
 		arg := args[0]
 		if !arg.literal {
@@ -676,12 +716,37 @@ func (a *analyzer) shell(name string, args []word, st *state, input shellInput) 
 			args = args[min(2, len(args)):]
 			continue
 		}
+		if arg.text == "--interactive" {
+			a.out.cannotResolve("reads commands from stdin")
+			return
+		}
+		if name == "fish" {
+			option, text, inline := strings.Cut(arg.text, "=")
+			switch option {
+			case "-c", "--command", "-C", "--init-command":
+				args = args[1:]
+				if !inline {
+					if len(args) == 0 || !args[0].literal {
+						a.out.cannotResolve("fish command of " + sources(args[:min(1, len(args))]))
+						return
+					}
+					text, args = args[0].text, args[1:]
+				}
+				a.script(text, "fish "+option, st.copy())
+				fishHasCommand = fishHasCommand || option == "-c" || option == "--command"
+				continue
+			}
+		}
 		if strings.HasPrefix(arg.text, "--") {
 			args = args[1:]
 			continue
 		}
 		if !strings.HasPrefix(arg.text, "-") && !strings.HasPrefix(arg.text, "+") {
 			break
+		}
+		if strings.HasPrefix(arg.text, "-") && strings.Contains(arg.text, "i") {
+			a.out.cannotResolve("reads commands from stdin")
+			return
 		}
 		if strings.HasPrefix(arg.text, "-") && strings.Contains(arg.text, "c") {
 			command = true
@@ -698,13 +763,22 @@ func (a *analyzer) shell(name string, args []word, st *state, input shellInput) 
 			return
 		}
 		a.script(args[0].text, name+" -c", st.copy())
+	case fishHasCommand:
+		return
 	case len(args) > 0 && !fromStdin:
+		if args[0].literal && stdinScript(args[0].text) {
+			a.out.cannotResolve("reads commands from stdin")
+		}
 		if !args[0].literal {
 			a.out.cannotResolve(name + " script " + args[0].source)
 		}
 	default:
 		text, ok := a.literalStdin(input)
 		if !ok {
+			if input.redirect == nil && !input.piped {
+				a.out.cannotResolve("reads commands from stdin")
+				return
+			}
 			a.out.cannotResolve(name + " script from stdin")
 			return
 		}

@@ -37,6 +37,10 @@ type Detector struct {
 	NeutralFolder func() (string, error)
 	// Program is the program to run, `codex` when empty.
 	Program string
+	// GuardProof verifies the guard with the installed Codex, when configured.
+	GuardProof GuardProof
+	// Warn reports failures of the guard diagnostic without including tool output.
+	Warn func(string)
 }
 
 func (d Detector) program() string {
@@ -108,6 +112,11 @@ func configuredModelOf(text string) string {
 	return ""
 }
 
+// NeedsDetection is whether a detection saved before the current guard needs to confirm it.
+func (d Detector) NeedsDetection(previous detection.Harness) bool {
+	return d.GuardProof.Program != "" && previous.GuardProof != d.GuardProof.Version
+}
+
 // Detect reads the catalog and probes each of its models.
 func (d Detector) Detect(ctx context.Context, version string, previous *detection.Harness, now time.Time) (detection.Harness, bool) {
 	catalog, ok := catalogOf(d.Run(ctx, detection.Command{Program: d.program(), Args: []string{"debug", "models"}, Timeout: quickTimeout}))
@@ -167,5 +176,19 @@ func (d Detector) Detect(ctx context.Context, version string, previous *detectio
 		model.Default = models[at].Slug
 	}
 	found.Options[detection.ModelOption] = model
+	if d.GuardProof.Program != "" {
+		switch {
+		case before != nil && guardProven(*before, version, d.GuardProof.Version):
+			found.GuardProof = before.GuardProof
+		case d.GuardProof.Run(ctx, d.program(), model.Default) == nil:
+			if installed, ok := d.Version(ctx); ok && installed == version {
+				found.GuardProof = d.GuardProof.Version
+			}
+		default:
+			if d.Warn != nil {
+				d.Warn("Codex " + version + " did not prove its guard")
+			}
+		}
+	}
 	return found, true
 }

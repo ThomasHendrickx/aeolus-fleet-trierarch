@@ -16,6 +16,8 @@ type Command struct {
 	Args    []string
 	Dir     string
 	Timeout time.Duration
+	// Environment is the subprocess environment, nil to inherit the trierarch's.
+	Environment []string
 }
 
 // Ran is what a command answered: its exit status, -1 when it could not run or was ended, and what it wrote.
@@ -34,6 +36,7 @@ func Run(ctx context.Context, command Command) Ran {
 	defer cancel()
 	run := exec.CommandContext(ctx, command.Program, command.Args...)
 	run.Dir = command.Dir
+	run.Env = command.Environment
 	// Its output is read until the program ends, never until a child it left behind does.
 	run.WaitDelay = time.Second
 	var stdout, stderr bytes.Buffer

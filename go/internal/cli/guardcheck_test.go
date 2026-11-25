@@ -272,3 +272,36 @@ func TestGuardCheckKeepsWritesInsideTheShipsFolder(t *testing.T) {
 		t.Fatalf("a write in the main repository exited %d, want 0", code)
 	}
 }
+
+func TestCodexGuardUsesTheHoldShipAndAnswersByExitStatus(t *testing.T) {
+	machine, at, folder := aGuardedShip(t, noPublishRules)
+	machine.Environ = append(machine.Environ, "AEOLUS_SHIP="+guardedShip)
+	crewed, err := (state.File{Path: at.State}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := crewed.Entries[guardedShip]
+	entry.Harness = "codex"
+	crewed.Entries[guardedShip] = entry
+	if err := (state.File{Path: at.State}).Save(crewed); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		command, stderr string
+		code            int
+	}{
+		{"npm test", "", 0},
+		{"npm publish", "Refused by the guard: commands.deny npm publish, in no-publish @ 8d41e07.\n", 2},
+	} {
+		t.Run(tt.command, func(t *testing.T) {
+			var stderr bytes.Buffer
+			machine.Stderr = &stderr
+			machine.Stdin = io.NopCloser(strings.NewReader(aHookCall(t, folder, "Bash", map[string]any{"command": tt.command})))
+			output, code := Main([]string{"guard", "check", "--harness", "codex"}, machine)
+			if output != "" || code != tt.code || stderr.String() != tt.stderr {
+				t.Fatalf("Codex guard check = %q, %q, %d, want no stdout, %q, exit %d", output, stderr.String(), code, tt.stderr, tt.code)
+			}
+		})
+	}
+}

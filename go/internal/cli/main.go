@@ -178,7 +178,7 @@ const usage = `Usage: aeolus-trierarch <command>
   --json         answer as JSON
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
-var valueFlags = []string{"--fleet-url", "--ship-id", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into", "--service"}
+var valueFlags = []string{"--fleet-url", "--ship-id", "--plugin-ship-id", "--config", "--default", "--ship", "--harness", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into", "--service"}
 var switchFlags = []string{"--json", "--help", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow", "--no-repositories", "--no-folders", "--secret-stdin"}
 
 type parsed struct {
@@ -242,7 +242,7 @@ func IsGuardCheck(args []string) bool {
 func Main(args []string, machine Machine) (string, int) {
 	// The hold takes its own words: the trierarch starts it, never a person.
 	if len(args) > 0 && args[0] == "hold" {
-		return "", hold.Main(args[1:], Version, machine.Environ)
+		return "", hold.MainWithCodexGuard(args[1:], Version, machine.Environ, prepareCodexTurn)
 	}
 	if len(args) > 0 && args[0] == "proxy" {
 		return "", modelproxy.Main(args[1:], Version)

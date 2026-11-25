@@ -9,6 +9,9 @@ import (
 
 // judge applies the mechanism's checks, then each set on its own (design 4.6).
 func (c Checker) judge(ctx context.Context, read call, sets []Set) *verdict {
+	if read.isInternal {
+		return nil
+	}
 	var shell *analysis
 	if read.kind == kindShell {
 		analyzed, err := analyzeShell(read.command, read.cwd, c.Home)
@@ -29,11 +32,21 @@ func (c Checker) judge(ctx context.Context, read call, sets []Set) *verdict {
 		return refusal
 	}
 	if len(sets) > 0 {
-		if read.kind == "" {
+		if read.kind == "" && !read.isAllMCP {
 			return mechanism("unknown tool: " + read.tool)
 		}
-		if shell != nil && len(shell.unresolvable) > 0 {
-			return mechanism("unresolvable: " + shell.unresolvable[0])
+		if shell != nil {
+			if shell.launchesHarness {
+				return mechanism("protected: harness")
+			}
+			for _, run := range shell.invocations {
+				if isHarness(run.name) {
+					return mechanism("protected: harness")
+				}
+			}
+			if len(shell.unresolvable) > 0 {
+				return mechanism("unresolvable: " + shell.unresolvable[0])
+			}
 		}
 		for _, w := range writes {
 			if w.unresolvable != "" {
@@ -135,6 +148,17 @@ func (c Checker) repositoryOf(p string) string {
 // judgeSet is one set's verdict on the call: the first refusing rule.
 func (c Checker) judgeSet(set *Set, read call, shell *analysis, writes []resolvedWrite) *verdict {
 	tools := set.Rules.Tools
+	if read.isAllMCP {
+		for _, pattern := range tools.Deny {
+			if restrictsMCP(pattern) {
+				return &verdict{rule: "tools.deny " + pattern, set: set}
+			}
+		}
+		if len(tools.Allow) > 0 {
+			return &verdict{rule: "tools.allow restricts MCP resource listings", set: set}
+		}
+		return nil
+	}
 	for _, pattern := range tools.Deny {
 		if wildcard(pattern, read.kind) {
 			return &verdict{rule: "tools.deny " + pattern, set: set}
