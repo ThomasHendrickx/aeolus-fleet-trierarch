@@ -68,6 +68,34 @@ func TestARealClaudeCodeSessionInAContainerDoesNotRunACallTheRulesDenyAndShowsIt
 	}
 }
 
+func TestARealClaudeCodeSessionInAContainerChecksASymlinkInTheContainersView(t *testing.T) {
+	for _, scenario := range []struct {
+		name string
+		sets string
+		runs bool
+	}{
+		{name: "unguarded call reaches the mounted home", sets: "[]", runs: true},
+		{name: "guarded call is refused at the resolved path", sets: realNoRm},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			session := aRealContainerSession(t, scenario.sets)
+			link := filepath.Join(session.entry.Folder, "ship-home")
+			if err := os.Symlink("/home/ubuntu", link); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(session.entry.ShipFolder, "home", "ran")
+			result := session.runTouch(t, filepath.Join(link, "ran"), marker)
+
+			if result.ran != scenario.runs {
+				t.Fatalf("call ran = %v, want %v: %s", result.ran, scenario.runs, result.events)
+			}
+			if !scenario.runs && !strings.Contains(result.events, "Refused by the guard: outside the boundary: /home/ubuntu/ran.") {
+				t.Fatalf("want a refusal naming the resolved path in the container: %s", result.events)
+			}
+		})
+	}
+}
+
 func TestARealClaudeCodeSessionInAContainerOfARequestWithoutARuleSetRunsItsCallUnchecked(t *testing.T) {
 	session := aRealContainerSession(t, "[]")
 
@@ -190,7 +218,12 @@ type realContainerResult struct {
 func (s *realContainerSession) run(t *testing.T) realContainerResult {
 	t.Helper()
 	marker := filepath.Join(s.entry.Folder, "ran")
-	model := fakemodel.BashModel(t, "touch "+marker)
+	return s.runTouch(t, marker, marker)
+}
+
+func (s *realContainerSession) runTouch(t *testing.T, target, marker string) realContainerResult {
+	t.Helper()
+	model := fakemodel.BashModel(t, "touch "+target)
 	if err := os.MkdirAll(s.at.Proxy, 0o700); err != nil {
 		t.Fatal(err)
 	}
