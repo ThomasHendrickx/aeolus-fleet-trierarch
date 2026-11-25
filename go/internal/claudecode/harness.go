@@ -77,8 +77,8 @@ type Harness struct {
 	Guards string
 	// Config is the trierarch's configuration file as it runs, which guard check protects; empty for the default one.
 	Config string
-	// guardSockets holds the sockets of the ships crewed before the ship folders when its sessions in a container start guarded, their
-	// calls checked on the host through their ship's socket; empty when they start unguarded (see WithContainerGuard).
+	// guardSockets holds the sockets of the ships crewed before the ship folders, through which a session in a container has its calls
+	// checked on the host; empty when no session in a container can start guarded (see WithContainerGuard).
 	guardSockets string
 	// MoveWithinUserNamespace moves a ship's home whose own top the host user cannot give its write to the trash within the runtime's user
 	// namespace; nil on the host.
@@ -259,12 +259,12 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	}
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
 	// --mcp-config takes every word up to the next flag, so it comes last.
-	isGuarded := h.IsGuarded()
-	if !isGuarded {
-		// The pass gives such a request back before it launches; a launch that still carries a set starts nothing.
+	isGuarded := !h.isInContainers()
+	if h.isInContainers() {
+		// The pass gives a request it cannot start guarded back before it launches; a launch that still finds one starts nothing.
 		ctx, cancel := context.WithTimeout(context.Background(), guardReadWait)
 		defer cancel()
-		if err := h.containerGuardProblem(ctx, entry.ShipID); err != nil {
+		if isGuarded, err = h.containerIsGuarded(ctx, entry.ShipID); err != nil {
 			return err
 		}
 	}

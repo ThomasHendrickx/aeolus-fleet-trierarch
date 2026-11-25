@@ -132,11 +132,11 @@ func (h Harness) WithContainerGuard(sockets string) Harness {
 // isInContainers is whether its sessions run in containers.
 func (h Harness) isInContainers() bool { return h.Homes != "" }
 
-// IsGuarded is whether its sessions start guarded: on the host, and in a container where its guard is on.
+// IsGuarded is whether its sessions can start guarded: on the host, and in a container where it reaches its ships' sockets; in a
+// container, only a request with a rule set does (containerIsGuarded).
 func (h Harness) IsGuarded() bool { return !h.isInContainers() || h.guardSockets != "" }
 
-// NeedsGuardRules is whether a session waits for its rules before it starts: in a container, which starts unguarded only once its
-// rules are known to carry no set.
+// NeedsGuardRules is whether a session waits for its rules before it starts: in a container, where they say whether it starts guarded.
 func (h Harness) NeedsGuardRules() bool { return h.isInContainers() }
 
 // containerGuardSettings are the guard's settings for the entry's session in a container, as JSON for its command line: the guard
@@ -153,34 +153,38 @@ func (h Harness) containerGuardSettings(entry reconciler.Entry, configured map[s
 // guardReadWait is how long a launch waits on the ship's kept rules: rules that stall start nothing.
 const guardReadWait = 5 * time.Second
 
-// notGuardedInAContainer is why a session in a container whose rules carry a set does not start: its request is given back with it.
+// notGuardedInAContainer is why a session in a container whose rules carry a set does not start without its guard: its request is
+// given back with it.
 var notGuardedInAContainer = &guard.DisabledError{Reason: "Claude Code in a container is not guarded yet"}
 
-// containerGuardProblem is why the ship's session in a container cannot start, nil when its kept rules carry no set or none are
-// kept: the pass starts it only once they are. Rules it cannot read are an error too: it does not start on them.
-func (h Harness) containerGuardProblem(ctx context.Context, shipID string) error {
+// containerIsGuarded is whether the ship's session in a container starts guarded: when its kept rules carry a set. A request without
+// one starts as before, without the guard. Rules it cannot read are an error, and with a set and no guard it is notGuardedInAContainer:
+// it does not start on them.
+func (h Harness) containerIsGuarded(ctx context.Context, shipID string) (bool, error) {
 	kept, err := (guardfile.Store{Guards: h.Guards}).Resolution(ctx, shipID)
 	switch {
 	case err != nil:
-		return fmt.Errorf("claude-code reads its guard rules: %w", err)
-	case kept != nil && kept.HasSets:
-		return notGuardedInAContainer
+		return false, fmt.Errorf("claude-code reads its guard rules: %w", err)
+	case kept == nil || !kept.HasSets:
+		return false, nil
+	case h.guardSockets == "":
+		return false, notGuardedInAContainer
 	}
-	return nil
+	return true, nil
 }
 
 // GuardProblem is why the entry's session cannot start guarded, "" when it can: the first settings file it would load that disables
-// hooks, in a container its ship's home's user settings and its folder's,, `disableAllHooks`, or in the managed settings `allowManagedHooksOnly`, which leaves the guard's hook out too. The request is
+// hooks (in a container, only for a request with a rule set, its ship's home's user settings and its folder's),, `disableAllHooks`, or in the managed settings `allowManagedHooksOnly`, which leaves the guard's hook out too. The request is
 // given back with it (design 4.6). Settings it cannot read within ctx are an error: the session does not start until they are read.
 func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (string, error) {
-	if !h.IsGuarded() {
+	if h.isInContainers() {
+		isGuarded, err := h.containerIsGuarded(ctx, entry.ShipID)
 		var disabled *guard.DisabledError
-		if err := h.containerGuardProblem(ctx, entry.ShipID); errors.As(err, &disabled) {
+		if errors.As(err, &disabled) {
 			return disabled.Error(), nil
-		} else if err != nil {
+		} else if err != nil || !isGuarded {
 			return "", err
 		}
-		return "", nil
 	}
 	flags, err := h.Settings().LaunchFlags(entry.Options)
 	if err != nil {
