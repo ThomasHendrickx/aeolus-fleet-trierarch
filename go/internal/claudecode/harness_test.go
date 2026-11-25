@@ -887,3 +887,23 @@ func TestOnTheHostAFormerShipHomeSessionRestartsWithItsIdentity(t *testing.T) {
 		t.Fatalf("started %+v, want the ship home and plugin", start)
 	}
 }
+
+func TestClaudeCodeErrorReaderAcrossRotation(t *testing.T) {
+	for _, test := range []struct{ name, active, want string }{
+		{"retains the failure", `{"type":"system"}`, "launch failed"},
+		{"clears the failure after success", `{"type":"result","is_error":false}`, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "events.jsonl")
+			if err := os.WriteFile(path+".1", []byte(`{"type":"result","is_error":true,"result":"launch failed"}`+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(test.active+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := errorIn(path); got != test.want {
+				t.Fatalf("errorIn = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

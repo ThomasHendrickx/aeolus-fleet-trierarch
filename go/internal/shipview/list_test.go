@@ -144,3 +144,17 @@ func TestListTailKeepsTheActivityReadersNonemptyLineWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestStatusListActivityReaderAcrossRotation(t *testing.T) {
+	at, now := aView(t)
+	path := filepath.Join(at.Sessions, "shp_one", "events.jsonl")
+	writeFact(t, path+".1", `{"type":"item.started","item":{"type":"command_execution"}}`+"\n")
+	writeFact(t, path, strings.Repeat("diagnostic\n", 199))
+	list, err := (Reader{}).List(context.Background(), at, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := list.Ships[0].Session.Activity; got == nil || got.Kind != "tool" || got.Tool != "command_execution" {
+		t.Fatalf("List activity = %+v, want command execution", got)
+	}
+}

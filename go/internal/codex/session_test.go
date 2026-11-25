@@ -55,3 +55,23 @@ func TestATurnThatAnsweredSaysNoError(t *testing.T) {
 		t.Fatalf("ErrorIn = %q, want none", got)
 	}
 }
+
+func TestCodexErrorReaderAcrossRotation(t *testing.T) {
+	for _, test := range []struct{ name, active, want string }{
+		{"retains the failure", `{"type":"thread.started"}`, "launch failed"},
+		{"clears the failure after success", `{"type":"turn.completed"}`, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "events.jsonl")
+			if err := os.WriteFile(path+".1", []byte(`{"type":"error","message":"launch failed"}`+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(test.active+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := ErrorIn(path); got != test.want {
+				t.Fatalf("ErrorIn = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

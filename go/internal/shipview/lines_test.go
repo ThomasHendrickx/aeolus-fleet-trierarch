@@ -108,3 +108,37 @@ func TestCancelledMaskingRecordsTheReasonOnce(t *testing.T) {
 		t.Fatalf("Ship(cancelled, %q) = %+v, want hidden content and one context canceled masking reason", at.Home, view)
 	}
 }
+
+func TestTUILastLinesReaderAcrossRotation(t *testing.T) {
+	at, now := aView(t)
+	path := filepath.Join(at.Sessions, "shp_one", "events.jsonl")
+	writeFact(t, path+".1", strings.Repeat("old\n", 200)+"rotated\n")
+	writeFact(t, path, "active\n")
+
+	view, err := Ship(at, "one", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := make([]Line, 200)
+	for i := range want {
+		want[i] = Line{Line: "old"}
+	}
+	want[198], want[199] = Line{Line: "rotated"}, Line{Line: "active"}
+	if !reflect.DeepEqual(view.Lines, want) {
+		t.Fatalf("Ship lines = %v, want a 200-line tail with rotated then active", view.Lines)
+	}
+}
+
+func TestShipStatusActivityReaderAcrossRotation(t *testing.T) {
+	at, now := aView(t)
+	path := filepath.Join(at.Sessions, "shp_one", "events.jsonl")
+	writeFact(t, path+".1", `{"type":"item.started","item":{"type":"command_execution"}}`+"\n")
+	writeFact(t, path, "diagnostic\n")
+	view, err := Ship(at, "one", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := view.Session.Activity; got == nil || got.Kind != "tool" || got.Tool != "command_execution" {
+		t.Fatalf("Ship activity = %+v, want command execution", got)
+	}
+}
