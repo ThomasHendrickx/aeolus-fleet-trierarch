@@ -111,3 +111,50 @@ done`
 		t.Fatalf("Trust = %v, want the refusal named", err)
 	}
 }
+
+func TestGuardTrustDoesNotAcceptAnUnrelatedOrDisabledHook(t *testing.T) {
+	for _, hooks := range []string{
+		`[]`,
+		`[{"key":"guard","source":"project","eventName":"preToolUse","matcher":"*","handlerType":"command","command":"guard","timeoutSec":10,"currentHash":"hash","trustStatus":"trusted","enabled":true}]`,
+		`[{"key":"guard","source":"sessionFlags","eventName":"preToolUse","matcher":"*","handlerType":"command","command":"guard","timeoutSec":10,"currentHash":"hash","trustStatus":"trusted","enabled":false}]`,
+		`[{"key":"guard","source":"sessionFlags","eventName":"preToolUse","matcher":"*","handlerType":"command","command":"guard","timeoutSec":10,"currentHash":"hash","trustStatus":"modified","enabled":true}]`,
+	} {
+		t.Run(hooks, func(t *testing.T) {
+			program, _ := anAppServer(t, hooks)
+			server := AppServer{Program: program, Version: "1.2.3", Folder: t.TempDir()}
+			if err := server.TrustGuard(t.Context(), []string{"--enable", "hooks"}, "guard"); err == nil {
+				t.Fatal("TrustGuard accepted an absent, disabled, or still modified guard")
+			}
+		})
+	}
+}
+
+func TestGuardAndPluginHooksAreTrustedByHashInTheSameAppServer(t *testing.T) {
+	folder := t.TempDir()
+	guard := `{"key":"guard","source":"sessionFlags","eventName":"preToolUse","matcher":"*","handlerType":"command","command":"guard","timeoutSec":10,"currentHash":"guard-hash","enabled":true,`
+	plugin := `{"key":"plugin","pluginId":"aeolus-fleet@aeolus-fleet","currentHash":"plugin-hash","trustStatus":"untrusted"}`
+	program, said := anAppServer(t, "["+guard+`"trustStatus":"modified"},`+plugin+"]")
+	// After the write, Codex reports the session hook as trusted.
+	text, err := os.ReadFile(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := "[" + guard + `"trustStatus":"modified"},` + plugin + "]"
+	later := "[" + guard + `"trustStatus":"trusted"}]`
+	script := strings.Replace(string(text), "'"+first+"'", `"$hooks"`, 1)
+	script = strings.Replace(script, "while read", "hooks='"+first+"'\nwhile read", 1)
+	script = strings.Replace(script, "    *) printf", "    *config/batchWrite*) hooks='"+later+"'; printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}\\n' \"$id\" ;;\n    *) printf", 1)
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := AppServer{Program: program, Version: "1.2.3", Folder: folder}
+	if err := server.TrustGuard(t.Context(), []string{"--enable", "hooks"}, "guard"); err != nil {
+		t.Fatal(err)
+	}
+	lines := linesOf(said)
+	if len(lines) != 5 || !strings.Contains(lines[3], `"guard":{"trusted_hash":"guard-hash"}`) ||
+		!strings.Contains(lines[3], `"plugin":{"trusted_hash":"plugin-hash"}`) ||
+		!strings.Contains(lines[4], `"method":"hooks/list"`) {
+		t.Fatalf("app-server requests = %q, want one hash write then a second listing", lines)
+	}
+}
