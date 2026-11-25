@@ -1,13 +1,12 @@
 package copilot
 
 import (
-	"bufio"
 	"encoding/json"
-	"os"
 	"regexp"
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/commandline"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/eventlog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 )
 
@@ -83,18 +82,19 @@ type event struct {
 	} `json:"data"`
 }
 
-// eachEvent calls the function with each event in the events file, in order.
+// eachEvent calls the function with each retained event, in order.
 func eachEvent(events string, each func(said event)) {
-	file, err := os.Open(events)
+	files, err := eventlog.OpenDisk(events)
 	if err != nil {
 		return
 	}
-	defer file.Close()
-	lines := bufio.NewScanner(file)
-	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
-	for lines.Scan() {
+	defer files.Close()
+	for line, err := range files.Lines() {
+		if err != nil {
+			break
+		}
 		var said event
-		if json.Unmarshal(lines.Bytes(), &said) == nil {
+		if json.Unmarshal(line, &said) == nil {
 			each(said)
 		}
 	}
@@ -119,15 +119,11 @@ func ErrorIn(events string) string {
 // LastSessionIn is the session the last turn in the events named, by its result, the only event naming it; empty when no turn named one.
 func LastSessionIn(events string) string {
 	sessionID := ""
-	readSession := func(said event) {
+	eachEvent(events, func(said event) {
 		if said.Type == "result" && said.SessionID != "" {
 			sessionID = said.SessionID
 		}
-	}
-	eachEvent(events, readSession)
-	if sessionID == "" {
-		eachEvent(events+".1", readSession)
-	}
+	})
 	return sessionID
 }
 

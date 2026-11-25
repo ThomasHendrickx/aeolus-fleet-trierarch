@@ -1,12 +1,11 @@
 package codex
 
 import (
-	"bufio"
 	"encoding/json"
-	"os"
 	"slices"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/commandline"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/eventlog"
 )
 
 // A session of Codex (docs/architecture.md, "First adapters"), headless
@@ -62,15 +61,16 @@ func CommandLine(flags []string, prompt string, isFirstStart bool) []string {
 
 // ErrorIn is why Codex's start failed, from its last error event, a failed turn or an error the turn met (headless H13): an API error Codex passes on as JSON in its message by the API's own message; empty without one. Codex has no hook for a failed turn (#490).
 func ErrorIn(events string) string {
-	file, err := os.Open(events)
+	files, err := eventlog.OpenDisk(events)
 	if err != nil {
 		return ""
 	}
-	defer file.Close()
+	defer files.Close()
 	cause := ""
-	lines := bufio.NewScanner(file)
-	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
-	for lines.Scan() {
+	for line, err := range files.Lines() {
+		if err != nil {
+			break
+		}
 		var event struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
@@ -78,7 +78,7 @@ func ErrorIn(events string) string {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if json.Unmarshal(lines.Bytes(), &event) != nil {
+		if json.Unmarshal(line, &event) != nil {
 			continue
 		}
 		switch event.Type {

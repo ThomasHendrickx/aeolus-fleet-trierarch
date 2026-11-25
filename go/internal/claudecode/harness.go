@@ -1,7 +1,6 @@
 package claudecode
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/eventlog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -319,22 +319,23 @@ func (h Harness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
 
 // errorIn is why Claude Code's last error event says it failed: the last result that is an error; empty without one.
 func errorIn(events string) string {
-	file, err := os.Open(events)
+	files, err := eventlog.OpenDisk(events)
 	if err != nil {
 		return ""
 	}
-	defer file.Close()
+	defer files.Close()
 	cause := ""
-	lines := bufio.NewScanner(file)
-	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
-	for lines.Scan() {
+	for line, err := range files.Lines() {
+		if err != nil {
+			break
+		}
 		var event struct {
 			Type    string `json:"type"`
 			IsError bool   `json:"is_error"`
 			Result  any    `json:"result"`
 			Subtype string `json:"subtype"`
 		}
-		if json.Unmarshal([]byte(lines.Text()), &event) != nil || event.Type != "result" {
+		if json.Unmarshal(line, &event) != nil || event.Type != "result" {
 			continue
 		}
 		if !event.IsError {

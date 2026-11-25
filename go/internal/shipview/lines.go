@@ -1,13 +1,13 @@
 package shipview
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/ended"
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/ended"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/eventlog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mask"
 )
 
@@ -22,21 +22,23 @@ func (v *View) readEvents(ctx context.Context, files Files, path string, read fu
 		v.record("activity", path, err)
 		return
 	}
-	file, err := files.Open(path)
+	events, err := eventlog.Open(path, files.Open)
 	v.record("activity", path, err)
 	if err != nil {
 		return
 	}
-	defer file.Close()
-	info, err := file.Stat()
+	defer events.Close()
+	info, err := events[len(events)-1].Stat()
 	v.record("activity", path, err)
 	if err != nil {
 		return
 	}
 	var tail []string
-	lines := bufio.NewScanner(file)
-	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
-	for lines.Scan() {
+	for line, err := range events.Lines() {
+		if err != nil {
+			v.record("activity", path, err)
+			return
+		}
 		if err := ctx.Err(); err != nil {
 			v.record("activity", path, err)
 			return
@@ -44,11 +46,7 @@ func (v *View) readEvents(ctx context.Context, files Files, path string, read fu
 		if len(tail) == lastLines {
 			tail = tail[1:]
 		}
-		tail = append(tail, lines.Text())
-	}
-	v.record("activity", path, lines.Err())
-	if lines.Err() != nil {
-		return
+		tail = append(tail, string(line))
 	}
 	canShow := true
 	for _, failure := range v.Unreadable {

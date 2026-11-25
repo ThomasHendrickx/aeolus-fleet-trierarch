@@ -6,10 +6,9 @@
 package activity
 
 import (
-	"bufio"
-	"io/fs"
-	"os"
 	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/eventlog"
 )
 
 // eventLines is how many of the last event lines are read.
@@ -40,36 +39,34 @@ func Latest(events []string, read func(event string) (Reading, bool)) (Reading, 
 
 // Of is the activity the last event lines of the events file show, at when the file was last written; none while the file is missing or shows none.
 func Of(events string, read func(event string) (Reading, bool)) (Activity, bool) {
-	file, err := os.Open(events)
+	files, err := eventlog.OpenDisk(events)
 	if err != nil {
 		return Activity{}, false
 	}
-	defer file.Close()
-	latest, ok, err := OfFile(file, read)
+	defer files.Close()
+	latest, ok, err := OfFiles(files, read)
 	return latest, ok && err == nil
 }
 
-// OfFile reads the latest activity from an open events file and reports read failures.
-// The caller owns the file and closes it.
-func OfFile(file fs.File, read func(event string) (Reading, bool)) (Activity, bool, error) {
-	info, err := file.Stat()
+// OfFiles reads the latest activity from open events files and reports read failures.
+// The caller owns the files and closes them.
+func OfFiles(files eventlog.Files, read func(event string) (Reading, bool)) (Activity, bool, error) {
+	info, err := files[len(files)-1].Stat()
 	if err != nil {
 		return Activity{}, false, err
 	}
 	var last []string
-	lines := bufio.NewScanner(file)
-	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
-	for lines.Scan() {
-		if lines.Text() == "" {
+	for line, err := range files.Lines() {
+		if err != nil {
+			return Activity{}, false, err
+		}
+		if len(line) == 0 {
 			continue
 		}
 		if len(last) == eventLines {
 			last = last[1:]
 		}
-		last = append(last, lines.Text())
-	}
-	if err := lines.Err(); err != nil {
-		return Activity{}, false, err
+		last = append(last, string(line))
 	}
 	reading, ok := Latest(last, read)
 	if !ok {
