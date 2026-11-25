@@ -685,6 +685,7 @@ func TestInContainersASessionNamingMCPServersReachesThemAtTheProxyWithItsConfigu
 	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
 	harness.Sessions = t.TempDir()
 	harness.Homes = t.TempDir()
+	withKeptRules(t, harness, noRuleSet)
 	entry := anEntry(t)
 	entry.McpServers = []string{"company-graph"}
 
@@ -732,6 +733,7 @@ func TestInContainersALinkASessionPlantedInItsShipsHomeIsNeverWrittenThroughAcro
 		_ = os.RemoveAll(folder)
 	})
 	harness.Runtime, harness.Sessions, harness.Homes = held, held.Sessions, t.TempDir()
+	withKeptRules(t, harness, noRuleSet)
 	entry := anEntry(t)
 	entry.McpServers = []string{"company-graph"}
 	outside := filepath.Join(t.TempDir(), "the-hosts-own-file")

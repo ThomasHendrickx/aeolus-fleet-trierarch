@@ -264,7 +264,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		// The pass gives a request it cannot start guarded back before it launches; a launch that still finds one starts nothing.
 		ctx, cancel := context.WithTimeout(context.Background(), guardReadWait)
 		defer cancel()
-		if isGuarded, err = h.containerIsGuarded(ctx, entry.ShipID); err != nil {
+		if isGuarded, err = h.containerIsGuarded(ctx, entry); err != nil {
 			return err
 		}
 	}

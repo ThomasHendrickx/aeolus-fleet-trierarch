@@ -157,15 +157,20 @@ const guardReadWait = 5 * time.Second
 // given back with it.
 var notGuardedInAContainer = &guard.DisabledError{Reason: "Claude Code in a container is not guarded yet"}
 
-// containerIsGuarded is whether the ship's session in a container starts guarded: when its kept rules carry a set. A request without
-// one starts as before, without the guard. Rules it cannot read are an error, and with a set and no guard it is notGuardedInAContainer:
-// it does not start on them.
-func (h Harness) containerIsGuarded(ctx context.Context, shipID string) (bool, error) {
-	kept, err := (guardfile.Store{Guards: h.Guards}).Resolution(ctx, shipID)
+// containerIsGuarded is whether the entry's session in a container starts guarded: when the rules kept for its request's own settings
+// version carry a set (design 4.5). A request without one starts as before, without the guard. Rules it cannot read, or none kept for
+// that version, an older or a newer one too, are an error: it does not start on them. With a set and no guard it is
+// notGuardedInAContainer.
+func (h Harness) containerIsGuarded(ctx context.Context, entry reconciler.Entry) (bool, error) {
+	kept, err := (guardfile.Store{Guards: h.Guards}).Resolution(ctx, entry.ShipID)
 	switch {
 	case err != nil:
 		return false, fmt.Errorf("claude-code reads its guard rules: %w", err)
-	case kept == nil || !kept.HasSets:
+	case kept == nil:
+		return false, fmt.Errorf("claude-code has no guard rules kept for settings version %d", entry.SettingsVersion)
+	case kept.SettingsVersion != entry.SettingsVersion:
+		return false, fmt.Errorf("claude-code keeps the guard rules of settings version %d, not of its request's %d", kept.SettingsVersion, entry.SettingsVersion)
+	case !kept.HasSets:
 		return false, nil
 	case h.guardSockets == "":
 		return false, notGuardedInAContainer
@@ -178,7 +183,7 @@ func (h Harness) containerIsGuarded(ctx context.Context, shipID string) (bool, e
 // given back with it (design 4.6). Settings it cannot read within ctx are an error: the session does not start until they are read.
 func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (string, error) {
 	if h.isInContainers() {
-		isGuarded, err := h.containerIsGuarded(ctx, entry.ShipID)
+		isGuarded, err := h.containerIsGuarded(ctx, entry)
 		var disabled *guard.DisabledError
 		if errors.As(err, &disabled) {
 			return disabled.Error(), nil
