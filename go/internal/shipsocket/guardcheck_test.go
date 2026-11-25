@@ -1,8 +1,10 @@
 package shipsocket
 
 import (
+	"bufio"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -121,5 +123,73 @@ func TestAGuardCheckIsOnlyAPost(t *testing.T) {
 	}
 	if got := fleet.called(); len(got) != 0 {
 		t.Fatalf("the fleet was called with %+v, want no call", got)
+	}
+}
+
+// sent writes the request to the socket as it is, then answers the status line and the body the socket answers within a second.
+func sent(t *testing.T, socket string, request string) (int, string) {
+	t.Helper()
+	connection, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if _, err := io.WriteString(connection, request); err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.SetReadDeadline(time.Now().Add(time.Second))
+	response, err := http.ReadResponse(bufio.NewReader(connection), nil)
+	if err != nil {
+		t.Fatalf("no answer within a second: %v", err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	return response.StatusCode, string(body)
+}
+
+func TestAToolCallWhoseBodyDoesNotArriveByTheDeadlineIsRefused(t *testing.T) {
+	fleet := aFleetAnswering(t, 200, "application/json", `{}`)
+	sockets := guardedSockets(t, fleet, false, func(context.Context, string, io.ReadCloser) guard.Answer { return guard.Answer{} })
+	sockets.options.GuardDeadline = 200 * time.Millisecond
+	socket := opened(t, sockets)
+
+	status, body := sent(t, socket, "POST /guard/check HTTP/1.1\r\nHost: ship\r\nContent-Length: 100\r\n\r\n{")
+
+	if want := "Refused by the guard: guard failed: deadline.\n"; status != http.StatusForbidden || body != want {
+		t.Fatalf("answer = %d %q, want 403 %q", status, body, want)
+	}
+}
+
+// aDeadlineReachedAsTheAnswerIs is a context whose deadline has passed, its end seen only once the guard has answered, so the
+// answer and the end are both ready when the check waits on them.
+type aDeadlineReachedAsTheAnswerIs struct {
+	context.Context
+	answered chan struct{}
+}
+
+func (c aDeadlineReachedAsTheAnswerIs) Done() <-chan struct{} {
+	<-c.answered
+	time.Sleep(time.Millisecond)
+	ended := make(chan struct{})
+	close(ended)
+	return ended
+}
+
+func (c aDeadlineReachedAsTheAnswerIs) Err() error { return context.DeadlineExceeded }
+
+func TestAnAnswerReadyAsTheDeadlineIsReachedRefusesTheCall(t *testing.T) {
+	for range 100 {
+		answered := make(chan struct{})
+		sockets := guardedSockets(t, aFleetAnswering(t, 200, "application/json", `{}`), false, func(context.Context, string, io.ReadCloser) guard.Answer {
+			close(answered)
+			return guard.Answer{}
+		})
+		ctx := aDeadlineReachedAsTheAnswerIs{Context: context.Background(), answered: answered}
+
+		answer := sockets.guardAnswer(ctx, scout, []byte(aToolCall))
+
+		if want := guard.Failed("deadline"); answer != want {
+			t.Fatalf("answer = %+v, want %+v", answer, want)
+		}
 	}
 }
