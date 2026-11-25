@@ -181,8 +181,8 @@ func TestGuardAndPluginHooksAreTrustedByHashInTheSameAppServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := "[" + guard + `"trustStatus":"modified"},` + plugin + "]"
-	later := "[" + guard + `"trustStatus":"trusted"}]`
+	first := `[{"hooks":[` + guard + `"trustStatus":"modified"},` + plugin + "]}]"
+	later := `[{"hooks":[` + guard + `"trustStatus":"trusted"}]}]`
 	script := strings.Replace(string(text), "'"+first+"'", `"$hooks"`, 1)
 	script = strings.Replace(script, "while read", "hooks='"+first+"'\nwhile read", 1)
 	script = strings.Replace(script, "    *) printf", "    *config/batchWrite*) hooks='"+later+"'; printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{}}\\n' \"$id\" ;;\n    *) printf", 1)

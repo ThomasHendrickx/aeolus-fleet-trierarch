@@ -98,7 +98,7 @@ func (t GuardTurn) Prepare(ctx context.Context, command []string) ([]string, err
 	version := (Detector{Program: execProgram, Run: detection.Run}).GuardVersion(ctx, t.Paths.Detected, t.Version)
 	if version == "" {
 		if proof.HasSets {
-			return nil, errors.New("Codex version has no proof")
+			return nil, errors.New("codex version has no proof")
 		}
 		return command, nil
 	}
@@ -108,7 +108,7 @@ func (t GuardTurn) Prepare(ctx context.Context, command []string) ([]string, err
 func (t GuardTurn) withHook(ctx context.Context, program string, command []string) ([]string, error) {
 	end := slices.Index(command, "--")
 	if end < 2 || len(command) != end+2 {
-		return nil, errors.New("Codex turn has no prompt separator")
+		return nil, errors.New("codex turn has no prompt separator")
 	}
 	flags := command[2:end]
 	if len(flags) >= 2 && flags[0] == "resume" {

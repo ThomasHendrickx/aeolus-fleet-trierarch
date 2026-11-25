@@ -59,7 +59,7 @@ func verifyGuardFaults(transcript string) error {
 				strings.Contains(output, "Refused by the guard: guard failed") &&
 				strings.Contains(output, "AEOLUS_GUARD_FAULT_"+cause)
 		}) {
-			return fmt.Errorf("Codex guard diagnostic has no hook rejection for guard failure %s", cause)
+			return fmt.Errorf("codex guard diagnostic has no hook rejection for guard failure %s", cause)
 		}
 	}
 	return nil

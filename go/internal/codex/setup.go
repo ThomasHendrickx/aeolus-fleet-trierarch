@@ -199,23 +199,33 @@ type listedHook struct {
 	Enabled     bool   `json:"enabled"`
 }
 
-func (c *conversation) listHooks(folder string) ([]listedHook, error) {
+type listedFolderHooks struct {
+	Hooks []listedHook `json:"hooks"`
+}
+
+func (c *conversation) listHooks(folder string) ([]listedFolderHooks, error) {
 	listed, err := c.ask("hooks/list", map[string][]string{"cwds": {folder}})
 	if err != nil {
 		return nil, err
 	}
 	var hooks struct {
-		Data []struct {
-			Hooks []listedHook `json:"hooks"`
-		} `json:"data"`
+		Data []listedFolderHooks `json:"data"`
 	}
 	if err := json.Unmarshal(listed, &hooks); err != nil {
 		return nil, fmt.Errorf("hooks/list: %w", err)
 	}
-	if len(hooks.Data) != 1 {
+	return hooks.Data, nil
+}
+
+func (c *conversation) listGuardHooks(folder string) ([]listedHook, error) {
+	listings, err := c.listHooks(folder)
+	if err != nil {
+		return nil, err
+	}
+	if len(listings) != 1 {
 		return nil, errors.New("expected hooks for one folder")
 	}
-	return hooks.Data[0].Hooks, nil
+	return listings[0].Hooks, nil
 }
 
 func (h listedHook) needsTrust() bool {
@@ -232,7 +242,7 @@ func (c *conversation) trustHooks(hooks []listedHook, command string) ([]string,
 	state := map[string]map[string]string{}
 	for _, hook := range hooks {
 		if hook.needsTrust() && (strings.HasPrefix(hook.PluginID, aeolusPluginPrefix) || command != "" && hook.isGuard(command)) {
-			if hook.Key == "" || hook.CurrentHash == "" {
+			if command != "" && (hook.Key == "" || hook.CurrentHash == "") {
 				return nil, errors.New("hook is missing its trust key or hash")
 			}
 			state[hook.Key] = map[string]string{"trusted_hash": hook.CurrentHash}
@@ -250,27 +260,34 @@ func (c *conversation) trustHooks(hooks []listedHook, command string) ([]string,
 func (a AppServer) TrustAeolusHooks(folder string) ([]string, error) {
 	var trusted []string
 	err := a.talk(func(c *conversation) error {
-		hooks, err := c.listHooks(folder)
+		listings, err := c.listHooks(folder)
 		if err != nil {
 			return err
+		}
+		var hooks []listedHook
+		for _, listing := range listings {
+			hooks = append(hooks, listing.Hooks...)
 		}
 		trusted, err = c.trustHooks(hooks, "")
 		return err
 	})
-	return trusted, err
+	if err != nil {
+		return nil, err
+	}
+	return trusted, nil
 }
 
 // TrustGuard trusts the guard and the plugin's hooks in the launch's configuration, then checks that the guard will run.
 func (a AppServer) TrustGuard(ctx context.Context, overrides []string, command string) error {
 	return a.talkContext(ctx, overrides, func(c *conversation) error {
-		hooks, err := c.listHooks(a.Folder)
+		hooks, err := c.listGuardHooks(a.Folder)
 		if err != nil {
 			return err
 		}
 		if _, err := c.trustHooks(hooks, command); err != nil {
 			return err
 		}
-		hooks, err = c.listHooks(a.Folder)
+		hooks, err = c.listGuardHooks(a.Folder)
 		if err != nil {
 			return err
 		}

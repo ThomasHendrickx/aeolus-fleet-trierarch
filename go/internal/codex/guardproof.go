@@ -83,7 +83,7 @@ func (p GuardProof) Run(ctx context.Context, program, model string) error {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(folder, probeFile)); !errors.Is(err, os.ErrNotExist) {
-		return errors.New("Codex guard diagnostic wrote its refused patch")
+		return errors.New("codex guard diagnostic wrote its refused patch")
 	}
 	refusals, err := (guardfile.Refusals{Guards: at.Guard, ShipID: probeShipID}).Read(ctx)
 	if err != nil {
@@ -124,7 +124,7 @@ func runGuardProbeTurn(ctx context.Context, server AppServer, model, wrapper, pr
 	result := detection.Run(ctx, detection.Command{Program: server.Program, Args: args, Dir: server.Folder,
 		Timeout: 2 * ProbeTimeout, Environment: server.Environment})
 	if result.Status != 0 {
-		return "", fmt.Errorf("Codex guard diagnostic exited with status %d", result.Status)
+		return "", fmt.Errorf("codex guard diagnostic exited with status %d", result.Status)
 	}
 	return result.Stdout, nil
 }
@@ -133,7 +133,7 @@ func runGuardProbeTurn(ctx context.Context, server AppServer, model, wrapper, pr
 func copyProbeLogin(from, to string) error {
 	login, err := os.ReadFile(filepath.Join(from, "auth.json"))
 	if err != nil {
-		return errors.New("Codex has no readable file login for the guard diagnostic")
+		return errors.New("codex has no readable file login for the guard diagnostic")
 	}
 	return os.WriteFile(filepath.Join(to, "auth.json"), login, 0o600)
 }
@@ -175,7 +175,7 @@ func guardProbeTranscript(home, events string) (string, error) {
 		}
 	}
 	if threadID == "" {
-		return "", errors.New("Codex guard diagnostic did not name its thread")
+		return "", errors.New("codex guard diagnostic did not name its thread")
 	}
 	var found string
 	err := filepath.WalkDir(filepath.Join(home, "sessions"), func(path string, entry os.DirEntry, err error) error {
@@ -184,7 +184,7 @@ func guardProbeTranscript(home, events string) (string, error) {
 		}
 		if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), "-"+threadID+".jsonl") {
 			if found != "" {
-				return errors.New("Codex guard diagnostic found more than one transcript for its thread")
+				return errors.New("codex guard diagnostic found more than one transcript for its thread")
 			}
 			found = path
 		}
@@ -194,7 +194,7 @@ func guardProbeTranscript(home, events string) (string, error) {
 		return "", err
 	}
 	if found == "" {
-		return "", errors.New("Codex guard diagnostic did not find its thread transcript")
+		return "", errors.New("codex guard diagnostic did not find its thread transcript")
 	}
 	text, err := os.ReadFile(found)
 	return string(text), err
@@ -249,25 +249,25 @@ func verifyGuardProof(events, transcript string, refusals []guard.Refusal) error
 					allowed = true
 				}
 				if strings.Contains(item.Command, probeDenied) || strings.Contains(item.Command, probeShell) || strings.Contains(item.Command, probeNested) {
-					return errors.New("Codex guard diagnostic ran a refused command")
+					return errors.New("codex guard diagnostic ran a refused command")
 				}
 			}
 		}
 	}
 	if !completed || !allowed {
-		return errors.New("Codex guard diagnostic did not complete its allowed control")
+		return errors.New("codex guard diagnostic did not complete its allowed control")
 	}
 	toolOutputs := proofToolOutputs(transcript)
 	for _, want := range expectedProofRefusals {
 		if !slices.ContainsFunc(refusals, func(refused guard.Refusal) bool {
 			return refused.Tool == want.Tool && refused.Rule == want.Rule && (want.Summary == "" || refused.Summary == want.Summary)
 		}) {
-			return fmt.Errorf("Codex guard diagnostic has no guard refusal for %s", want.Rule)
+			return fmt.Errorf("codex guard diagnostic has no guard refusal for %s", want.Rule)
 		}
 		if !slices.ContainsFunc(toolOutputs, func(message string) bool {
 			return strings.Contains(message, "blocked by PreToolUse hook") && strings.Contains(message, "Refused by the guard: "+want.Rule)
 		}) {
-			return fmt.Errorf("Codex guard diagnostic has no hook rejection for %s", want.Rule)
+			return fmt.Errorf("codex guard diagnostic has no hook rejection for %s", want.Rule)
 		}
 	}
 	return nil
