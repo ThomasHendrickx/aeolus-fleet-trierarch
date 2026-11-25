@@ -1,9 +1,10 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
+import { unwrap } from '@aeolus-fleet/core/testing';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { z } from 'zod';
 
@@ -173,7 +174,7 @@ describe('a session in a container', () => {
   const run = (): string[] => machine.containerRunOf(container()) ?? [];
 
   /** Configures the container runtime, and crews scout in it. */
-  async function aRunningScout(at: { login?: 'api-key' } = {}): Promise<void> {
+  async function aRunningScout(at: { login?: 'api-key'; guard?: typeof appliedGuard } = {}): Promise<void> {
     configure((configuration) => ({ ...configuration, runtime: RUNTIME }));
     writeModelToken();
     if (at.login === 'api-key') {
@@ -187,15 +188,72 @@ describe('a session in a container', () => {
     const restart = await machine.trierarch(['restart']);
     expect(restart.status, restart.stdout + restart.stderr).toBe(0);
     scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
-    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
+    if (at.guard === undefined) {
+      await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
+    } else {
+      const { settingsVersion } = unwrap(await fleet.useCases.requestCrew(fleet.argo, {
+        shipId: scout,
+        settings: { harness: 'claude-code', workspace: { kind: 'repositories', main: { repository: REPOSITORY }, subRepositories: [] }, options: {} },
+      }));
+      await fleet.sendToTrierarchAs(fleet.pluginShip, {
+        contentType: 'application/vnd.aeolus.trierarch.guard-rules+json',
+        payload: JSON.stringify({
+          fleetId: fleet.argo.fleetId, pluginShipId: fleet.pluginShip, shipId: scout, settingsVersion,
+          sets: [{ ...at.guard, file: 'no-touch.yaml', rules: { commands: { deny: [{ command: 'touch' }] } } }],
+        }),
+      });
+      unwrap(await fleet.useCases.assignCrew(fleet.argo, { shipId: scout, trierarchShipId: fleet.trierarchShip.shipId }));
+    }
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
     await expect.poll(() => sessionOf(machine, 'scout').turns().length, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(0);
+  }
+
+  const appliedGuard = { name: 'no-touch', repository: 'fleet/rules', commit: '8d41e07aa168e971cf9e82c9327de9b8c8799a37', floor: true };
+  const crewStatus = () => fleet.database.crewRequest.findFirst({ where: { shipId: scout } });
+
+  /** Records the same host-side refusal as the container's guard socket, after the harness's turn ended. */
+  function recordRefusal() {
+    const refused = { at: new Date().toISOString(), tool: 'Bash', rule: 'commands.deny touch', set: appliedGuard.name, commit: appliedGuard.commit };
+    appendFileSync(join(machine.trierarchHome, 'guard', scout, 'refusals.jsonl'), `${JSON.stringify({ ...refused, summary: 'touch example' })}\n`, { mode: 0o600 });
+    return refused;
   }
 
   beforeEach(async () => {
     fleet = await aFleet();
     machine = await aMachine();
     await aCrewingMachine({ fleet, machine });
+  });
+
+  it('reports a container guard and its refusal to the fleet', async () => {
+    await aRunningScout({ guard: appliedGuard });
+    await expect.poll(crewStatus, { timeout: SAID_WITHIN_MS }).toMatchObject({
+      status: 'running', guard: { sets: [appliedGuard], refusals: 0, recent: [] },
+    });
+    const { at, ...refused } = recordRefusal();
+
+    await expect.poll(crewStatus, { timeout: SAID_WITHIN_MS }).toMatchObject({
+      status: 'running', guard: { sets: [appliedGuard], refusals: 1, recent: [refused] },
+    });
+    await expect.poll(() => fleet.activityOf(scout), { timeout: SAID_WITHIN_MS }).toEqual({
+      kind: 'refused', tool: 'Bash', intervalSeconds: 30,
+    });
+    const lease = await fleet.database.lease.findFirst({ where: { shipId: scout, endedAt: null }, select: { activityAt: true } });
+    expect(lease?.activityAt?.toISOString()).toBe(at);
+  });
+
+  it('reports normal container activity without a guard for a request started without a rule set', async () => {
+    await aRunningScout();
+    await expect.poll(() => fleet.activityOf(scout), { timeout: SAID_WITHIN_MS }).toEqual({
+      kind: 'result', tool: null, intervalSeconds: 30,
+    });
+    const refused = recordRefusal();
+    await expect.poll(async () => {
+      const lease = await fleet.database.lease.findFirst({ where: { shipId: scout, endedAt: null }, select: { activityReportedAt: true } });
+      return lease?.activityReportedAt?.toISOString() ?? '';
+    }, { timeout: SAID_WITHIN_MS }).toSatisfy((at: string) => at > refused.at);
+
+    expect(await crewStatus()).toMatchObject({ status: 'running', guard: null });
+    expect(await fleet.activityOf(scout)).toEqual({ kind: 'result', tool: null, intervalSeconds: 30 });
   });
 
   it("runs in a container of the session image of the trierarch's version, run by its hold, capped, seeing only its folder, its own home, and its socket", async () => {

@@ -741,6 +741,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	if err != nil {
 		return nil, err
 	}
+	guardStore := guardfile.Store{Guards: at.Guard}
 	pass := runpass.Pass{
 		Paths:             at,
 		Seen:              seen.File{Path: filepath.Join(at.Home, "seen.json")},
@@ -748,7 +749,9 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Fleet:             client,
 		Sessions:          running,
 		Harnesses:         harnesses,
-		GuardRules:        keptGuardRules{store: guardfile.Store{Guards: at.Guard}},
+		GuardRules:        keptGuardRules{store: guardStore},
+		GuardStatuses:     guardStore,
+		GuardReports:      client,
 		Workspace:         places,
 		FolderProcesses:   folderProcessesOf(configuration.Runtime),
 		Store:             saved,

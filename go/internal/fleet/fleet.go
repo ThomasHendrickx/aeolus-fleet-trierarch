@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -27,7 +28,7 @@ import (
 )
 
 // MinimumCoreVersion is the oldest core the trierarch runs against (decision 0049, docs/compatibility.md).
-const MinimumCoreVersion = "0.46.0"
+const MinimumCoreVersion = "0.47.0"
 
 // Harness is what the trierarch registers its own ship with.
 const Harness = "aeolus-trierarch"
@@ -234,11 +235,23 @@ func (c Client) ConfirmRelease(shipID string) error {
 
 // WriteStatus writes a crew status with its restart attempt and when the session running now started, empty while none runs.
 func (c Client) WriteStatus(shipID string, status string, attempt int, startedAt string) error {
+	return c.writeStatus(shipID, reconciler.Status{Status: status, Attempt: attempt, StartedAt: startedAt}, nil)
+}
+
+// ReportGuard reports the guard the crew applied alongside its current crew status.
+func (c Client) ReportGuard(shipID string, crew reconciler.Status, applied guard.Status) error {
+	return c.writeStatus(shipID, crew, &applied)
+}
+
+func (c Client) writeStatus(shipID string, crew reconciler.Status, applied *guard.Status) error {
 	var started any
-	if startedAt != "" {
-		started = startedAt
+	if crew.StartedAt != "" {
+		started = crew.StartedAt
 	}
-	body := map[string]any{"shipId": shipID, "status": status, "attempt": attempt, "startedAt": started}
+	body := map[string]any{"shipId": shipID, "status": crew.Status, "attempt": crew.Attempt, "startedAt": started}
+	if applied != nil {
+		body["guard"] = applied
+	}
 	return call(c.URL, request{path: "/fleet/reportCrewStatus", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
@@ -370,8 +383,14 @@ type ShipActivity struct {
 	Activity activity.Activity
 }
 
+// ReportRefused reports a guard refusal as the latest activity on the crew's lease.
+func (c Client) ReportRefused(shipID string, intervalSeconds int, refused activity.Activity) error {
+	return c.ReportActivity(intervalSeconds, []ShipActivity{{ShipID: shipID, Activity: refused}})
+}
+
 // ReportActivity writes the activities of the sessions the trierarch runs, in calls of at most 100, each with the interval the trierarch states: the fleet reads a write older than twice it as unknown (monitoring W3b).
 func (c Client) ReportActivity(intervalSeconds int, activities []ShipActivity) error {
+	var refusedErr error
 	for from := 0; from < len(activities); from += activitiesPerCall {
 		chunk := []map[string]string{}
 		for _, each := range activities[from:min(from+activitiesPerCall, len(activities))] {
@@ -382,11 +401,22 @@ func (c Client) ReportActivity(intervalSeconds int, activities []ShipActivity) e
 			chunk = append(chunk, written)
 		}
 		body := map[string]any{"intervalSeconds": intervalSeconds, "activities": chunk}
-		if err := call(c.URL, request{path: "/fleet/reportActivity", crewToken: c.CrewToken, body: body}, &map[string]any{}); err != nil {
+		var answer struct {
+			Refused []struct {
+				ShipID  string
+				Code    string
+				Message string
+			}
+		}
+		if err := call(c.URL, request{path: "/fleet/reportActivity", crewToken: c.CrewToken, body: body}, &answer); err != nil {
 			return err
 		}
+		if refusedErr == nil && len(answer.Refused) > 0 {
+			refused := answer.Refused[0]
+			refusedErr = fmt.Errorf("report activity for %s: %s: %s", refused.ShipID, refused.Code, refused.Message)
+		}
 	}
-	return nil
+	return refusedErr
 }
 
 // usageContentType is the usage message's content type, its schema common's trierarchUsageMessageSchema.

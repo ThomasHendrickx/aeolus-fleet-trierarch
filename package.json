@@ -20,8 +20,8 @@
     "set-version": "node scripts/set-version.ts"
   },
   "devDependencies": {
-    "@aeolus-fleet/common": "^0.46.0",
-    "@aeolus-fleet/core": "^0.46.0",
+    "@aeolus-fleet/common": "^0.47.0",
+    "@aeolus-fleet/core": "^0.47.0",
     "@eslint/js": "^10.0.1",
     "@testcontainers/postgresql": "^12.2.0",
     "@types/node": "^26.6.6",
