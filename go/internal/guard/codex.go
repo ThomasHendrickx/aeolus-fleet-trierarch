@@ -64,6 +64,28 @@ func (c *call) readCodex() error {
 	return nil
 }
 
+// patch reads the same write paths when apply_patch runs through a shell.
+func (a *analyzer) patch(c runCall) {
+	var input string
+	switch {
+	case len(c.args) == 0:
+		if text, ok := a.literalStdin(c.input); ok {
+			input = text
+		}
+	case len(c.args) == 1 && c.args[0].literal:
+		input = c.args[0].text
+	}
+	targets := patchTargets(input)
+	if len(targets) == 0 {
+		a.out.cannotResolve("apply_patch input")
+		return
+	}
+	patch := call{cwd: c.state.cwd}
+	for _, target := range targets {
+		a.out.writes = append(a.out.writes, patch.fileWrite(target))
+	}
+}
+
 func patchTargets(command string) []string {
 	lines := strings.Split(strings.TrimSpace(command), "\n")
 	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "*** Begin Patch" || strings.TrimSpace(lines[len(lines)-1]) != "*** End Patch" {
