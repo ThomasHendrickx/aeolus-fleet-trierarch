@@ -193,6 +193,9 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if err != nil {
 		return fmt.Errorf("codex gives %w", err)
 	}
+	if err := ValidateGuardFlags(launchFlags); err != nil {
+		return err
+	}
 	route, token, err := h.routeOf(entry.Login)
 	if err != nil {
 		return err

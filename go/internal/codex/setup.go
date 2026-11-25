@@ -2,6 +2,7 @@ package codex
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,9 @@ type AppServer struct {
 	Program string
 	// Version is the trierarch's own, which it introduces itself with.
 	Version string
+	// Folder and Environment are the launch context to inspect, when given.
+	Folder      string
+	Environment []string
 }
 
 // answerTimeout is how long the app server may take to answer before the setup gives up.
@@ -100,7 +104,13 @@ func (a AppServer) talk(talk func(c *conversation) error) error { return a.talkW
 
 // talkWith is talk with the configuration flags given over Codex's configuration.
 func (a AppServer) talkWith(overrides []string, talk func(c *conversation) error) error {
-	server := exec.Command(a.Program, append([]string{"app-server"}, overrides...)...)
+	return a.talkContext(context.Background(), overrides, talk)
+}
+
+func (a AppServer) talkContext(ctx context.Context, overrides []string, talk func(c *conversation) error) error {
+	server := exec.CommandContext(ctx, a.Program, append([]string{"app-server"}, overrides...)...)
+	server.Dir = a.Folder
+	server.Env = a.Environment
 	input, err := server.StdinPipe()
 	if err != nil {
 		return err
@@ -175,46 +185,102 @@ func (a AppServer) Trust(folders []string) error {
 	})
 }
 
-// TrustAeolusHooks trusts the aeolus-fleet plugin's hooks that are new or changed, as Codex sees them from the folder, by the hash Codex gives each, and answers their keys.
-func (a AppServer) TrustAeolusHooks(folder string) ([]string, error) {
-	var trusted []string
-	err := a.talk(func(c *conversation) error {
-		listed, err := c.ask("hooks/list", map[string][]string{"cwds": {folder}})
-		if err != nil {
-			return err
-		}
-		var hooks struct {
-			Data []struct {
-				Hooks []struct {
-					Key         string `json:"key"`
-					PluginID    string `json:"pluginId"`
-					CurrentHash string `json:"currentHash"`
-					TrustStatus string `json:"trustStatus"`
-				} `json:"hooks"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(listed, &hooks); err != nil {
-			return fmt.Errorf("hooks/list: %w", err)
-		}
-		state := map[string]map[string]string{}
-		for _, entry := range hooks.Data {
-			for _, hook := range entry.Hooks {
-				if strings.HasPrefix(hook.PluginID, aeolusPluginPrefix) && (hook.TrustStatus == "untrusted" || hook.TrustStatus == "modified") {
-					state[hook.Key] = map[string]string{"trusted_hash": hook.CurrentHash}
-					trusted = append(trusted, hook.Key)
-				}
-			}
-		}
-		if len(state) == 0 {
-			return nil
-		}
-		_, err = c.ask("config/batchWrite", upsert("hooks.state", state))
-		return err
-	})
+type listedHook struct {
+	Key         string `json:"key"`
+	PluginID    string `json:"pluginId"`
+	CurrentHash string `json:"currentHash"`
+	TrustStatus string `json:"trustStatus"`
+	Source      string `json:"source"`
+	EventName   string `json:"eventName"`
+	Matcher     string `json:"matcher"`
+	HandlerType string `json:"handlerType"`
+	Command     string `json:"command"`
+	Timeout     int    `json:"timeoutSec"`
+	Enabled     bool   `json:"enabled"`
+}
+
+func (c *conversation) listHooks(folder string) ([]listedHook, error) {
+	listed, err := c.ask("hooks/list", map[string][]string{"cwds": {folder}})
 	if err != nil {
 		return nil, err
 	}
-	return trusted, nil
+	var hooks struct {
+		Data []struct {
+			Hooks []listedHook `json:"hooks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listed, &hooks); err != nil {
+		return nil, fmt.Errorf("hooks/list: %w", err)
+	}
+	if len(hooks.Data) != 1 {
+		return nil, errors.New("expected hooks for one folder")
+	}
+	return hooks.Data[0].Hooks, nil
+}
+
+func (h listedHook) needsTrust() bool {
+	return h.TrustStatus == "untrusted" || h.TrustStatus == "modified"
+}
+
+func (h listedHook) isGuard(command string) bool {
+	return h.Source == "sessionFlags" && h.EventName == "preToolUse" && h.HandlerType == "command" &&
+		h.Matcher == "*" && h.Command == command && h.Timeout == guardHookTimeout
+}
+
+func (c *conversation) trustHooks(hooks []listedHook, command string) ([]string, error) {
+	var keys []string
+	state := map[string]map[string]string{}
+	for _, hook := range hooks {
+		if hook.needsTrust() && (strings.HasPrefix(hook.PluginID, aeolusPluginPrefix) || command != "" && hook.isGuard(command)) {
+			if hook.Key == "" || hook.CurrentHash == "" {
+				return nil, errors.New("hook is missing its trust key or hash")
+			}
+			state[hook.Key] = map[string]string{"trusted_hash": hook.CurrentHash}
+			keys = append(keys, hook.Key)
+		}
+	}
+	if len(state) == 0 {
+		return nil, nil
+	}
+	_, err := c.ask("config/batchWrite", upsert("hooks.state", state))
+	return keys, err
+}
+
+// TrustAeolusHooks trusts the plugin's new or changed hooks by the hashes Codex gives them.
+func (a AppServer) TrustAeolusHooks(folder string) ([]string, error) {
+	var trusted []string
+	err := a.talk(func(c *conversation) error {
+		hooks, err := c.listHooks(folder)
+		if err != nil {
+			return err
+		}
+		trusted, err = c.trustHooks(hooks, "")
+		return err
+	})
+	return trusted, err
+}
+
+// TrustGuard trusts the guard and the plugin's hooks in the launch's configuration, then checks that the guard will run.
+func (a AppServer) TrustGuard(ctx context.Context, overrides []string, command string) error {
+	return a.talkContext(ctx, overrides, func(c *conversation) error {
+		hooks, err := c.listHooks(a.Folder)
+		if err != nil {
+			return err
+		}
+		if _, err := c.trustHooks(hooks, command); err != nil {
+			return err
+		}
+		hooks, err = c.listHooks(a.Folder)
+		if err != nil {
+			return err
+		}
+		for _, hook := range hooks {
+			if hook.isGuard(command) && hook.Enabled && hook.TrustStatus == "trusted" && hook.CurrentHash != "" {
+				return nil
+			}
+		}
+		return errors.New("the session guard hook is missing, disabled or untrusted")
+	})
 }
 
 // IsInstalled says whether `codex` runs on this machine.
