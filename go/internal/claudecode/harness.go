@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -256,6 +257,14 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
 	// --mcp-config takes every word up to the next flag, so it comes last.
 	isGuarded := h.IsGuarded()
+	if !isGuarded {
+		// The pass gives such a request back before it launches; a launch that still carries a set starts nothing.
+		ctx, cancel := context.WithTimeout(context.Background(), guardReadWait)
+		defer cancel()
+		if err := h.containerGuardProblem(ctx, entry.ShipID); err != nil {
+			return err
+		}
+	}
 	commandFlags := flags
 	if isGuarded {
 		commandFlags = withoutSettingsFlag(flags)
