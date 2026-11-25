@@ -2,6 +2,7 @@ package hold
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 )
@@ -28,12 +29,12 @@ func openEventLog(path string) (*eventLog, error) {
 func (l *eventLog) open() error {
 	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
-		return err
+		return fmt.Errorf("open events: %w", err)
 	}
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return err
+		return fmt.Errorf("stat events: %w", err)
 	}
 	l.file = file
 	l.size = info.Size()
@@ -45,7 +46,7 @@ func (l *eventLog) appendLine(line string) error {
 	defer l.mutex.Unlock()
 
 	if l.isClosed {
-		return os.ErrClosed
+		return fmt.Errorf("append to %s: %w", l.path, os.ErrClosed)
 	}
 
 	var rotationErr error
@@ -54,6 +55,8 @@ func (l *eventLog) appendLine(line string) error {
 		if rotationErr == nil {
 			_ = l.file.Close()
 			l.file = nil
+		} else {
+			rotationErr = fmt.Errorf("rotate events: %w", rotationErr)
 		}
 	}
 	if l.file == nil {
@@ -63,6 +66,9 @@ func (l *eventLog) appendLine(line string) error {
 	}
 	n, err := l.file.WriteString(line + "\n")
 	l.size += int64(n)
+	if err != nil {
+		err = fmt.Errorf("write events: %w", err)
+	}
 	return errors.Join(rotationErr, err)
 }
 

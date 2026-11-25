@@ -358,7 +358,14 @@ func (h *held) read(output io.Reader, onLine func(line string), reading *sync.Wa
 
 // onLine keeps the line in the events, then acts on it, so whoever a result or a control response answers finds it there.
 func (h *held) onLine(line string) {
-	_ = h.events.appendLine(line)
+	if err := h.events.appendLine(line); err != nil {
+		// The detached hold has no stderr log. Keep the latest failure beside the events.
+		h.mutex.Lock()
+		if recordErr := os.WriteFile(h.events.path+".error", []byte(err.Error()+"\n"), 0o600); recordErr != nil {
+			fmt.Fprintf(os.Stderr, "event log: %v; could not record the failure: %v\n", err, recordErr)
+		}
+		h.mutex.Unlock()
+	}
 	var said struct {
 		Type      string `json:"type"`
 		SessionID string `json:"session_id"`
