@@ -15,8 +15,11 @@ type Files []fs.File
 // Open opens a snapshot of the retained files, allowing either file to be absent.
 func Open(path string, open func(string) (fs.File, error)) (Files, error) {
 	active, err := open(path)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("open events: %w", err)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("open events: %w", err)
+		}
+		active = nil
 	}
 	rotated, err := open(path + ".1")
 	if os.IsNotExist(err) {
