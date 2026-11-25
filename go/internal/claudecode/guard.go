@@ -12,6 +12,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 )
@@ -114,12 +115,40 @@ func (h Harness) writeGuardSettings(shipID string, configured map[string]any) (s
 	return file, nil
 }
 
-// IsGuarded is whether its sessions start guarded: on the host. A session in a container cannot reach guard check on the host yet.
-func (h Harness) IsGuarded() bool { return h.Homes == "" }
+// ContainerGuardCommand is the hook's command in a container (#631): curl asks the ship's socket on the host, at its path in the
+// container, which mounts its sockets folder at the same path, and the call runs only on its 200. The refusal the socket answers goes
+// to stderr, where Claude Code shows it; every failure (a refusal, no socket, no answer within curl's 10 seconds, no curl) exits 2.
+func ContainerGuardCommand(socket string) string {
+	return "curl --silent --show-error --fail-with-body --max-time 10 --unix-socket " + shellQuoted(socket) + " --data-binary @- http://localhost/guard/check >&2 || exit 2"
+}
 
-// NeedsGuardRules is whether a session waits for its rules before it starts: in a container, which starts only once its rules are
-// known to carry no set, as it cannot start guarded yet.
-func (h Harness) NeedsGuardRules() bool { return !h.IsGuarded() }
+// WithContainerGuard is the harness with its sessions in a container started guarded, each call checked on the host through its
+// ship's socket, the sockets of the ships crewed before the ship folders under sockets (#631's limited rollout).
+func (h Harness) WithContainerGuard(sockets string) Harness {
+	h.guardSockets = sockets
+	return h
+}
+
+// isInContainers is whether its sessions run in containers.
+func (h Harness) isInContainers() bool { return h.Homes != "" }
+
+// IsGuarded is whether its sessions start guarded: on the host, and in a container where its guard is on.
+func (h Harness) IsGuarded() bool { return !h.isInContainers() || h.guardSockets != "" }
+
+// NeedsGuardRules is whether a session waits for its rules before it starts: in a container, which starts unguarded only once its
+// rules are known to carry no set.
+func (h Harness) NeedsGuardRules() bool { return h.isInContainers() }
+
+// containerGuardSettings are the guard's settings for the entry's session in a container, as JSON for its command line: the guard
+// folder stays out of the container's reach.
+func (h Harness) containerGuardSettings(entry reconciler.Entry, configured map[string]any) (string, error) {
+	socket := filepath.Join(paths.ShipSockets(h.guardSockets, entry.ShipID, entry.ShipFolder), paths.SocketFile)
+	text, err := GuardSettings(ContainerGuardCommand(socket), configured)
+	if err != nil {
+		return "", fmt.Errorf("make the guard settings: %w", err)
+	}
+	return string(text), nil
+}
 
 // guardReadWait is how long a launch waits on the ship's kept rules: rules that stall start nothing.
 const guardReadWait = 5 * time.Second
@@ -141,7 +170,7 @@ func (h Harness) containerGuardProblem(ctx context.Context, shipID string) error
 }
 
 // GuardProblem is why the entry's session cannot start guarded, "" when it can: the first settings file it would load that disables
-// hooks, `disableAllHooks`, or in the managed settings `allowManagedHooksOnly`, which leaves the guard's hook out too. The request is
+// hooks, in a container its ship's home's user settings and its folder's,, `disableAllHooks`, or in the managed settings `allowManagedHooksOnly`, which leaves the guard's hook out too. The request is
 // given back with it (design 4.6). Settings it cannot read within ctx are an error: the session does not start until they are read.
 func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (string, error) {
 	if !h.IsGuarded() {
@@ -158,7 +187,12 @@ func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (stri
 		return "", nil
 	}
 	read := func(file string) ([]byte, error) { return readSettings(ctx, file) }
-	for _, file := range managedFiles(h.Managed) {
+	// A container loads the managed settings of its image, which holds none, never the host's.
+	managed := managedFiles(h.Managed)
+	if h.isInContainers() {
+		managed = nil
+	}
+	for _, file := range managed {
 		text, err := read(file)
 		if err != nil {
 			return "", err

@@ -77,6 +77,9 @@ type Harness struct {
 	Guards string
 	// Config is the trierarch's configuration file as it runs, which guard check protects; empty for the default one.
 	Config string
+	// guardSockets holds the sockets of the ships crewed before the ship folders when its sessions in a container start guarded, their
+	// calls checked on the host through their ship's socket; empty when they start unguarded (see WithContainerGuard).
+	guardSockets string
 	// MoveWithinUserNamespace moves a ship's home whose own top the host user cannot give its write to the trash within the runtime's user
 	// namespace; nil on the host.
 	MoveWithinUserNamespace func(from string, to string) error
@@ -275,7 +278,12 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		if err != nil {
 			return err
 		}
-		guardSettings, err := h.writeGuardSettings(entry.ShipID, configured)
+		guardSettings := ""
+		if h.isInContainers() {
+			guardSettings, err = h.containerGuardSettings(entry, configured)
+		} else {
+			guardSettings, err = h.writeGuardSettings(entry.ShipID, configured)
+		}
 		if err != nil {
 			return err
 		}
