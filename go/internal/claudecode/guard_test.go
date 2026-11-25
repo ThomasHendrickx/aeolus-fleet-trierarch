@@ -371,7 +371,8 @@ func aContainerGuardedHarness(t *testing.T) (Harness, *aRuntime, string) {
 	if !ok {
 		t.Fatal("Claude Code cannot start a session in a container guarded, want it to check its calls on the host through its ship's socket")
 	}
-	sockets := filepath.Join(t.TempDir(), "o'brien sockets")
+	// The ships' sockets as the trierarch names them, a quote in their path, which the hook's shell must keep.
+	sockets := "/run/aeolus/o'brien sockets"
 	harness = guarding.WithContainerGuard(sockets)
 	harness.Runtime = aContainerRuntime{aRuntime: running, homes: harness.Homes, temp: t.TempDir()}
 	withKeptRules(t, harness, aRuleSet)
@@ -412,14 +413,8 @@ func inlineSettingsOf(t *testing.T, command []string) (string, int) {
 	return mustJSON(t, settings), named
 }
 
-// containerHook is the guard's hook in a container for a ship whose sockets folder is the one given: curl asks the ship's socket on
-// the host, and the call runs only on its 200; its refusal goes to stderr, where Claude Code shows it.
-func containerHook(sockets string) string {
-	return `curl --silent --show-error --fail-with-body --max-time 10 --unix-socket '` + strings.ReplaceAll(sockets, "'", `'\''`) + `/fleet.sock' --data-binary @- http://localhost/guard/check >&2 || exit 2`
-}
-
 func TestInAContainerAGuardedSessionStartsWithTheHookThatAsksItsShipsSocketOnTheHost(t *testing.T) {
-	harness, running, sockets := aContainerGuardedHarness(t)
+	harness, running, _ := aContainerGuardedHarness(t)
 	withKeptRules(t, harness, aRuleSet)
 
 	if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
@@ -429,7 +424,11 @@ func TestInAContainerAGuardedSessionStartsWithTheHookThatAsksItsShipsSocketOnThe
 	settings, named := inlineSettingsOf(t, running.started[0].Command)
 	want := mustJSON(t, map[string]any{"hooks": map[string]any{"PreToolUse": []any{map[string]any{
 		"matcher": "*",
-		"hooks":   []any{map[string]any{"type": "command", "command": containerHook(filepath.Join(sockets, scout)), "timeout": 30}},
+		"hooks": []any{map[string]any{
+			"type":    "command",
+			"command": `curl --silent --show-error --fail-with-body --max-time 10 --unix-socket '/run/aeolus/o'\''brien sockets/` + scout + `/fleet.sock' --data-binary @- http://localhost/guard/check >&2 || exit 2`,
+			"timeout": 30,
+		}},
 	}}}})
 	if named != 1 || settings != want {
 		t.Fatalf("--settings named %d times, settings %s, want once and %s", named, settings, want)
@@ -446,7 +445,8 @@ func TestInAContainerAGuardedSessionOfAShipFolderAsksTheSocketInIt(t *testing.T)
 	}
 
 	settings, _ := inlineSettingsOf(t, running.started[0].Command)
-	if want := mustJSON(t, containerHook(filepath.Join(entry.ShipFolder, "sockets"))); !strings.Contains(settings, want) {
+	hook := `curl --silent --show-error --fail-with-body --max-time 10 --unix-socket '` + entry.ShipFolder + `/sockets/fleet.sock' --data-binary @- http://localhost/guard/check >&2 || exit 2`
+	if want := mustJSON(t, hook); !strings.Contains(settings, want) {
 		t.Fatalf("settings %s, want the hook %s", settings, want)
 	}
 }
