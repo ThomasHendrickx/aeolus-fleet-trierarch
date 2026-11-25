@@ -1,6 +1,7 @@
 package hold
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,4 +70,88 @@ func assertEventFile(t *testing.T, path, want string) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("%s mode = %o, want 600", filepath.Base(path), info.Mode().Perm())
 	}
+}
+
+func TestAppendLineReportsThatTheEventsLogIsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	log, err := openEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.close()
+	if err := log.appendLine("new event"); !errors.Is(err, os.ErrClosed) || !strings.Contains(err.Error(), path) {
+		t.Fatalf("appendLine after close = %v, want a closed error naming the events file", err)
+	}
+}
+
+func TestAppendLineKeepsWritingAndReportsFailedRotation(t *testing.T) {
+	log := eventsWithBlockedRotation(t)
+	if err := log.appendLine("new event"); err == nil || !strings.Contains(err.Error(), "rotate events") {
+		t.Fatalf("appendLine = %v, want an event rotation error", err)
+	}
+	data, err := os.ReadFile(log.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(data), "new event\n") {
+		t.Fatal("active events did not retain the line after a failed rotation")
+	}
+}
+
+func TestAppendLineReportsBothRotationAndWriteFailures(t *testing.T) {
+	log := eventsWithBlockedRotation(t)
+	if err := log.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err := log.appendLine("new event")
+	var rotation *os.LinkError
+	if !errors.As(err, &rotation) || !errors.Is(err, os.ErrClosed) || !strings.Contains(err.Error(), "write events") {
+		t.Fatalf("appendLine = %v, want both rotation and event write errors", err)
+	}
+}
+
+func TestAppendLineReportsFailureToReopenEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// After rotation the old descriptor is gone and the active path must be opened.
+	log := &eventLog{path: path}
+	if err := log.appendLine("new event"); err == nil || !strings.Contains(err.Error(), "open events") {
+		t.Fatalf("appendLine = %v, want an event open error", err)
+	}
+}
+
+func TestHoldRecordsEventAppendFailure(t *testing.T) {
+	log := eventsWithBlockedRotation(t)
+	h := &held{events: log}
+	h.onLine("harness output")
+
+	diagnostic, err := os.ReadFile(log.path + ".error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(diagnostic), "rotate events") || strings.Contains(string(diagnostic), "harness output") {
+		t.Fatalf("event log diagnostic = %q, want the rotation error without harness output", diagnostic)
+	}
+}
+
+func eventsWithBlockedRotation(t *testing.T) *eventLog {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, eventLogLimit); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path+".1", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	log, err := openEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(log.close)
+	return log
 }
