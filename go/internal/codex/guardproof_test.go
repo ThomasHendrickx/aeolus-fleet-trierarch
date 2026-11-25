@@ -2,6 +2,8 @@ package codex
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,30 +21,30 @@ func TestCodexProofRequiresEveryRefusalAndAWorkingAllowedCall(t *testing.T) {
 		{Tool: "Bash", Rule: "unresolvable: reads commands from stdin", Summary: "bash --norc -i"},
 		{Tool: "Bash", Rule: "protected: harness", Summary: "codex --version"},
 	}
-	var events []string
+	var transcripts []string
 	for _, refusal := range refusals {
 		output, _ := json.Marshal("Command blocked by PreToolUse hook: Refused by the guard: " + refusal.Rule + ".")
-		events = append(events, `{"type":"item.completed","item":{"type":"error","message":`+string(output)+`}}`)
+		transcripts = append(transcripts, `{"type":"response_item","payload":{"type":"custom_tool_call_output","output":`+string(output)+`}}`)
 	}
-	events = append(events, `{"type":"item.completed","item":{"type":"command_execution","command":"printf AEOLUS_GUARD_ALLOWED","exit_code":0,"aggregated_output":"AEOLUS_GUARD_ALLOWED","status":"completed"}}`, `{"type":"turn.completed"}`)
-	if err := verifyGuardProof(strings.Join(events, "\n"), refusals); err != nil {
+	events := []string{`{"type":"item.completed","item":{"type":"command_execution","command":"printf AEOLUS_GUARD_ALLOWED","exit_code":0,"aggregated_output":"AEOLUS_GUARD_ALLOWED","status":"completed"}}`, `{"type":"turn.completed"}`}
+	if err := verifyGuardProof(strings.Join(events, "\n"), strings.Join(transcripts, "\n"), refusals); err != nil {
 		t.Fatalf("every refusal and the allowed control should prove Codex: %v", err)
 	}
 	for index := range refusals {
 		short := append(append([]guard.Refusal{}, refusals[:index]...), refusals[index+1:]...)
-		if err := verifyGuardProof(strings.Join(events, "\n"), short); err == nil {
+		if err := verifyGuardProof(strings.Join(events, "\n"), strings.Join(transcripts, "\n"), short); err == nil {
 			t.Errorf("proof passed without the real guard seeing %s", refusals[index].Rule)
 		}
-		shortEvents := append(append([]string{}, events[:index]...), events[index+1:]...)
-		if err := verifyGuardProof(strings.Join(shortEvents, "\n"), refusals); err == nil {
+		shortTranscript := append(append([]string{}, transcripts[:index]...), transcripts[index+1:]...)
+		if err := verifyGuardProof(strings.Join(events, "\n"), strings.Join(shortTranscript, "\n"), refusals); err == nil {
 			t.Errorf("proof passed without Codex confirming refusal of %s", refusals[index].Rule)
 		}
 	}
-	if err := verifyGuardProof(strings.Join(events[:len(events)-2], "\n"), refusals); err == nil {
+	if err := verifyGuardProof(events[1], strings.Join(transcripts, "\n"), refusals); err == nil {
 		t.Fatal("proof passed without an allowed control")
 	}
-	withAssistantText := append([]string{`{"type":"item.completed","item":{"type":"agent_message","text":"Command blocked by PreToolUse hook: Refused by the guard: tools.deny file-write."}}`}, events[2:]...)
-	if err := verifyGuardProof(strings.Join(withAssistantText, "\n"), refusals); err == nil {
+	withAssistantText := append([]string{`{"type":"response_item","payload":{"type":"message","role":"assistant","content":"Command blocked by PreToolUse hook: Refused by the guard: tools.deny file-write."}}`}, transcripts[2:]...)
+	if err := verifyGuardProof(strings.Join(events, "\n"), strings.Join(withAssistantText, "\n"), refusals); err == nil {
 		t.Fatal("proof accepted an assistant claim in place of tool evidence")
 	}
 }
@@ -61,5 +63,23 @@ func TestCodexGuardProofIsUsableOnlyAtTheCurrentCodexAndTrierarchVersions(t *tes
 		if got := guardProven(found, tt.codex, tt.trierarch); got != tt.want {
 			t.Errorf("guardProven at %q / %q = %t, want %t", tt.codex, tt.trierarch, got, tt.want)
 		}
+	}
+}
+
+func TestCodexProofSelectsTheTranscriptOfItsOwnTurn(t *testing.T) {
+	home := t.TempDir()
+	folder := filepath.Join(home, "sessions", "2026", "11", "25")
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"rollout-2026-11-25-probe-thread.jsonl": "probe", "rollout-2026-11-25-other-thread.jsonl": "other"} {
+		if err := os.WriteFile(filepath.Join(folder, name), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events := `{"type":"thread.started","thread_id":"probe-thread"}`
+	text, err := guardProbeTranscript(home, events)
+	if err != nil || text != "probe" {
+		t.Fatalf("selected transcript = %q, %v, want the probe thread's transcript", text, err)
 	}
 }
