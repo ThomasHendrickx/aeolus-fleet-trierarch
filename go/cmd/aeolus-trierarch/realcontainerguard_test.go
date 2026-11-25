@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,6 +28,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/runpass"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
@@ -372,7 +374,7 @@ func TestAContainerRequestWithHooksDisabledIsGivenBackBeforeItsSessionStarts(t *
 	t.Cleanup(server.Close)
 	running, wired, sockets, _ := session.wire(t)
 	pass := runpass.Pass{
-		Paths: session.at, Fleet: fleet.Client{URL: server.URL}, Sessions: running, Harnesses: wired, Sockets: sockets,
+		Paths: session.at, Fleet: fleet.Client{URL: server.URL}, Sessions: onlyContainerSession{Runtime: running, shipID: entry.ShipID}, Harnesses: wired, Sockets: sockets,
 		GuardRules: keptGuardRules{store: guardfile.Store{Guards: session.at.Guard}},
 		Workspace:  workspace.Places{Root: session.at.Ships}, Store: saved,
 		Log: func(line string) { t.Log(line) }, Now: time.Now, Offered: []string{entry.Harness}, RunningCap: 1,
@@ -402,6 +404,20 @@ func TestAContainerRequestWithHooksDisabledIsGivenBackBeforeItsSessionStarts(t *
 	if _, err := os.Stat(hold.FilesOf(session.at.Sessions, entry.ShipID).Events); !os.IsNotExist(err) {
 		t.Fatalf("session events stat = %v, want no launch", err)
 	}
+}
+
+// onlyContainerSession keeps reconciliation scoped to the test's ship on a shared Podman runtime.
+type onlyContainerSession struct {
+	container.Runtime
+	shipID string
+}
+
+func (s onlyContainerSession) List() ([]sessions.Observed, error) {
+	listed, err := s.Runtime.List()
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(listed, func(each sessions.Observed) bool { return each.ShipID != s.shipID }), nil
 }
 
 // builtProgram is the trierarch built from this tree: its holds run it as `hold`, its harness's guard names it.
