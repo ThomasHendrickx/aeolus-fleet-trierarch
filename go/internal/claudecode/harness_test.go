@@ -492,6 +492,8 @@ func inContainers(t *testing.T) (Harness, *aRuntime, *anOnboarding, string) {
 	harness, running, onboarding := aHarness(t)
 	homes := t.TempDir()
 	harness.Homes = homes
+	// The rules of its request's settings version, which carry no set: a session in a container starts on them alone.
+	withKeptRules(t, harness, noRuleSet)
 	return harness, running, onboarding, filepath.Join(homes, scout)
 }
 
@@ -683,6 +685,7 @@ func TestInContainersASessionNamingMCPServersReachesThemAtTheProxyWithItsConfigu
 	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
 	harness.Sessions = t.TempDir()
 	harness.Homes = t.TempDir()
+	withKeptRules(t, harness, noRuleSet)
 	entry := anEntry(t)
 	entry.McpServers = []string{"company-graph"}
 
@@ -730,6 +733,7 @@ func TestInContainersALinkASessionPlantedInItsShipsHomeIsNeverWrittenThroughAcro
 		_ = os.RemoveAll(folder)
 	})
 	harness.Runtime, harness.Sessions, harness.Homes = held, held.Sessions, t.TempDir()
+	withKeptRules(t, harness, noRuleSet)
 	entry := anEntry(t)
 	entry.McpServers = []string{"company-graph"}
 	outside := filepath.Join(t.TempDir(), "the-hosts-own-file")

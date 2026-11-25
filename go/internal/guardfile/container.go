@@ -2,9 +2,14 @@ package guardfile
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 )
 
 // Mount is a folder of the host a session's container sees, at its path in the container.
@@ -41,4 +46,21 @@ func (c ContainerLinks) host(containerPath string) (string, bool) {
 		found, longest = filepath.Join(mount.Host, filepath.FromSlash(rest)), len(at)
 	}
 	return found, longest >= 0
+}
+
+// ErrUnmounted is a container's path that resolves under no folder it mounts: the image's, which the host cannot read.
+var ErrUnmounted = errors.New("under no folder the container mounts")
+
+// ReadFile is the text of the file at the container's path as its container reads it: every link in the path followed as the container
+// sees it, the file read at its place on the host. A path that resolves under no mount is ErrUnmounted.
+func (c ContainerLinks) ReadFile(ctx context.Context, containerPath string) ([]byte, error) {
+	resolved, err := guard.Resolve(ctx, c, path.Clean(containerPath))
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s in the container: %w", containerPath, err)
+	}
+	host, ok := c.host(resolved)
+	if !ok {
+		return nil, fmt.Errorf("%s resolves to %s, %w", containerPath, resolved, ErrUnmounted)
+	}
+	return Within(ctx, func() ([]byte, error) { return os.ReadFile(host) })
 }
