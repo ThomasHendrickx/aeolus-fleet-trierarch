@@ -155,6 +155,25 @@ func TestAStartAgainResumesTheSessionItsLastTurnNamedWithTheWake(t *testing.T) {
 	}
 }
 
+func TestCopilotRestartResumesItsSessionAcrossRotation(t *testing.T) {
+	harness, running := aHarness(t)
+	if err := os.WriteFile(harness.Events(scout)+".1", []byte(`{"type":"result","sessionId":"copilot-1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(harness.Events(scout), []byte(`{"type":"assistant.message"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := harness.Launch(anEntry(t), false, "launch-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := CommandLine([]string{"--model", "gpt-5"}, prompt.Wake(WakePrompt), "copilot-1"); !slices.Equal(running.started[0].Command, want) {
+		t.Fatalf("started %q, want %q", running.started[0].Command, want)
+	}
+}
+
 func TestASessionGetsTheTrierarchsCopilotHomeSoItUsesTheLoginAndPluginFoundThere(t *testing.T) {
 	harness, running := aHarness(t)
 	harness.CopilotHome = "/home/me/copilot"
