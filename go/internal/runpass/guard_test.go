@@ -287,3 +287,39 @@ func TestAStalledGuardRulesReadHoldsThePassNoLongerThanItsContext(t *testing.T) 
 		t.Fatalf("calls %q, launches %d, want nothing started without its rules read", pass.fleet.calls, len(pass.harness.launches))
 	}
 }
+
+type proofPendingHarness struct {
+	*aHarness
+	hasSets bool
+}
+
+func (proofPendingHarness) IsGuarded() bool       { return false }
+func (proofPendingHarness) NeedsGuardRules() bool { return true }
+func (h proofPendingHarness) GuardProblem(context.Context, reconciler.Entry) (string, error) {
+	if h.hasSets {
+		return "guard disabled: Codex version has no proof", nil
+	}
+	return "", nil
+}
+
+func TestUnprovenCodexStartsOnlyAfterItKnowsTheAssignmentHasNoRuleSets(t *testing.T) {
+	for _, hasSets := range []bool{false, true} {
+		pass := aRunPass(t)
+		pass.pass.Harnesses = map[string]Harness{"claude-code": proofPendingHarness{aHarness: pass.harness, hasSets: hasSets}}
+		rules := someGuardRules{}
+		pass.pass.GuardRules = rules
+		pass.fleet.requests = []reconciler.Request{aRequest("")}
+		pass.run(t)
+		if registered(pass.fleet.calls) {
+			t.Fatalf("calls before rules arrive = %q, want no register", pass.fleet.calls)
+		}
+		rules[scout] = 1
+		pass.run(t)
+		if hasSets && !givenBack(pass.fleet.calls, "guard disabled: Codex version has no proof") {
+			t.Fatalf("calls = %q, want rule-bearing assignment given back", pass.fleet.calls)
+		}
+		if got := registered(pass.fleet.calls); got == hasSets {
+			t.Fatalf("registered = %t with rule sets present %t", got, hasSets)
+		}
+	}
+}
