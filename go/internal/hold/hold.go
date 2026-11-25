@@ -167,7 +167,7 @@ func (h *held) isTurnPerProcess() bool {
 
 type held struct {
 	options Options
-	events  *os.File
+	events  *eventLog
 	guard   io.Writer
 
 	mutex        sync.Mutex
@@ -194,11 +194,11 @@ func Run(options Options) int {
 	if err := os.WriteFile(files.PID, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		return 1
 	}
-	events, err := os.OpenFile(files.Events, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	events, err := openEventLog(files.Events)
 	if err != nil {
 		return 1
 	}
-	defer events.Close()
+	defer events.close()
 	h := &held{options: options, events: events, watchers: map[chan event]struct{}{}, ended: make(chan int, 1)}
 	if len(options.Guard) > 0 {
 		guard, err := startGuard(options.Guard)
@@ -358,7 +358,7 @@ func (h *held) read(output io.Reader, onLine func(line string), reading *sync.Wa
 
 // onLine keeps the line in the events, then acts on it, so whoever a result or a control response answers finds it there.
 func (h *held) onLine(line string) {
-	_, _ = h.events.WriteString(line + "\n")
+	_ = h.events.appendLine(line)
 	var said struct {
 		Type      string `json:"type"`
 		SessionID string `json:"session_id"`

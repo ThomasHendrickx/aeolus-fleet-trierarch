@@ -43,6 +43,7 @@ A default that configuration may change names its setting.
 | 30 checks a second apart | Waiting for the launchd agent to be gone on stop or install | [`service`](../go/internal/service) `STOP_CHECKS`, `STOP_CHECK_MS` | none recorded |
 | 5 s | systemd restarting the trierarch service (`RestartSec`) | [`service`](../go/internal/service) (unit template) | none recorded |
 | at least 60 s | A Codex plugin version folder is removed only when every running session started this long after the next version arrived | [`cli`](../go/internal/cli) `START_MARGIN_MS` | [trierarch.md](trierarch.md#a-machine-joins), ThomasHendrickx/aeolus-fleet#653 |
+| 10 MB, one rotated file | A session hold's event log | [`hold`](../go/internal/hold/events.go) `eventLogLimit` | The headless design (H14), ThomasHendrickx/aeolus-fleet#1467 |
 | 1 MiB, one rotated file | The macOS log (the journal caps it on Linux) | [`logfile`](../go/internal/logfile) `LOG_MAX_BYTES` | [trierarch.md](trierarch.md#a-machine-joins) |
 | 60 s | A rotation lock older than this is stale | [`logfile`](../go/internal/logfile) `STALE_LOCK_MS` | none recorded |
 | 50 lines; followed every 500 ms on macOS | `logs` | [`cli`](../go/internal/cli) `DEFAULT_LINES`, `FOLLOW_INTERVAL_MS` | none recorded |
@@ -73,6 +74,7 @@ Each setting below is an environment variable the script reads, with the default
 | 8000 bytes | That first part of a longer payload | [aeolus-lib.sh](../plugins/aeolus-fleet/scripts/aeolus-lib.sh) `AEOLUS_FIRST_PART_BYTES` | ThomasHendrickx/aeolus-fleet#756 (D2) |
 | 1, 2, 4, 8 s, each drawn between half and all of it | REST calls, including the watcher inbox, pushReceive and handed, retrying while the fleet answers busy, a copy of `FLEET_BUSY_WAITS_MS` | [aeolus-fleet.sh](../plugins/aeolus-fleet/scripts/aeolus-fleet.sh), [aeolus-wait.sh](../plugins/aeolus-fleet/scripts/aeolus-wait.sh) `AEOLUS_BUSY_WAITS`, `AEOLUS_BUSY_DRAW` | [aeolus-fleet's architecture.md](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/architecture.md), ThomasHendrickx/aeolus-fleet#734 |
 | 15 s | The inbox script's call (`curl --max-time`) | [aeolus-inbox.sh](../plugins/aeolus-fleet/scripts/aeolus-inbox.sh) (inline) | none recorded |
+| 10 MB, one rotated file | A session hold's event log | [`hold`](../go/internal/hold/events.go) `eventLogLimit` | The headless design (H14), ThomasHendrickx/aeolus-fleet#1467 |
 | 1 MiB, one rotated file | The plugin's log | [aeolus-lib.sh](../plugins/aeolus-fleet/scripts/aeolus-lib.sh) `AEOLUS_LOG_MAX_BYTES` | [plugin README](../plugins/aeolus-fleet/README.md), [trierarch.md](trierarch.md#a-machine-joins) |
 | 1 minute | A log rotation lock older than this is stale | [aeolus-lib.sh](../plugins/aeolus-fleet/scripts/aeolus-lib.sh) (inline `-mmin +1`) | none recorded |
 | 6000 characters | A prefilled issue link's encoded body (GitHub refuses past about 8 KB) | [aeolus-issue.sh](../plugins/aeolus-fleet/scripts/aeolus-issue.sh) `LINK_BODY_MAX` | none recorded |
