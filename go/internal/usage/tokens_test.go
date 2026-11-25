@@ -89,6 +89,29 @@ func TestAModelThePricesDoNotNameHasNoEstimatedCost(t *testing.T) {
 	}
 }
 
+func TestCurrentModelsEstimateEachKindOfTokenAtItsListPrice(t *testing.T) {
+	cases := []struct {
+		model string
+		want  [4]float64
+	}{
+		{"claude-fable-5-2", [4]float64{8, 40, 0.2, 16}},
+		{"gpt-6.1-terra", [4]float64{1, 5, 0.05, 1.25}},
+		{"gpt-6.2-astra", [4]float64{8, 40, 0.4, 10}},
+		{"gpt-6.2-sol", [4]float64{2, 10, 0.1, 2.5}},
+	}
+	kinds := []Tokens{{Input: 1_000_000}, {Output: 1_000_000}, {CacheRead: 1_000_000}, {CacheWrite: 1_000_000}}
+	for _, each := range cases {
+		t.Run(each.model, func(t *testing.T) {
+			for i, tokens := range kinds {
+				got := EstimatedCostUSD(tokens, PricesOf(nil), each.model)
+				if got == nil || *got != each.want[i] {
+					t.Errorf("EstimatedCostUSD(%+v, %s) = %v, want %v", tokens, each.model, got, each.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestTheConfigurationsPricesReplaceAModelsListPriceAndAddOthers(t *testing.T) {
 	prices := PricesOf(map[string]config.Price{"claude-opus-5-5": {Input: 1}, "a-model-of-our-own": {Output: 2}})
 	if got := prices["claude-opus-5-5"]; got != (config.Price{Input: 1}) {

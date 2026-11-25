@@ -94,13 +94,20 @@ func (l Logins) At(at time.Time) string {
 }
 
 // listPrices are the list prices of the current Claude and OpenAI models, standard tier, in US dollars per million tokens, as today's trierarch has them (core/token-cost.ts): a Claude cache write at the 1 hour rate, an OpenAI one at its 30 minute rate, or at the input where none is listed.
+// Fable 5.2: https://platform.claude.com/docs/en/about-claude/pricing (2026-11-25).
+// GPT-6.2 Astra and Sol: https://developers.openai.com/api/docs/pricing (2026-11-25).
+// GPT-6.1 Terra: https://developers.openai.com/api/docs/models/gpt-6.1-terra (2026-11-25).
 var listPrices = map[string]config.Price{
+	"claude-fable-5-2":  {Input: 8, Output: 40, CacheRead: 0.2, CacheWrite: 16},
 	"claude-fable-5-1":  {Input: 10, Output: 50, CacheRead: 0.25, CacheWrite: 20},
 	"claude-opus-5-5":   {Input: 4, Output: 20, CacheRead: 0.2, CacheWrite: 8},
 	"claude-sonnet-5-5": {Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 4},
 	"claude-haiku-5-5":  {Input: 0.1, Output: 0.5, CacheRead: 0.01, CacheWrite: 0.2},
 	"gpt-6-astra":       {Input: 10, Output: 50, CacheRead: 1, CacheWrite: 12.5},
+	"gpt-6.2-astra":     {Input: 8, Output: 40, CacheRead: 0.4, CacheWrite: 10},
+	"gpt-6.2-sol":       {Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5},
 	"gpt-6.1-sol":       {Input: 2, Output: 10, CacheRead: 0.1, CacheWrite: 2.5},
+	"gpt-6.1-terra":     {Input: 1, Output: 5, CacheRead: 0.05, CacheWrite: 1.25},
 	"gpt-6-sol":         {Input: 2, Output: 10, CacheRead: 0.2, CacheWrite: 2.5},
 	"gpt-6-luna":        {Input: 0.1, Output: 0.5, CacheRead: 0.01, CacheWrite: 0.125},
 	"gpt-5.6-sol":       {Input: 4, Output: 20, CacheRead: 0.4, CacheWrite: 5},
