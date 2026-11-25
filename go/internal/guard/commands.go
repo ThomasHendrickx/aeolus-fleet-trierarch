@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"path"
 	"slices"
 	"strings"
 )
@@ -29,7 +30,7 @@ var interpreterSwitches = map[string][]string{
 
 func hasInterpreterProgram(name string, codeFlags []string, args []word) bool {
 	for index, arg := range args {
-		if !arg.literal || arg.text == "-" || arg.text == "-i" || arg.text == "--interactive" {
+		if !arg.literal || stdinScript(arg.text) || arg.text == "-i" || arg.text == "--interactive" {
 			return false
 		}
 		option, _, inline := strings.Cut(arg.text, "=")
@@ -37,7 +38,7 @@ func hasInterpreterProgram(name string, codeFlags []string, args []word) bool {
 			return inline || index+1 < len(args) && args[index+1].literal
 		}
 		if arg.text == "--" {
-			return index+1 < len(args) && args[index+1].literal && args[index+1].text != "-"
+			return index+1 < len(args) && args[index+1].literal && !stdinScript(args[index+1].text)
 		}
 		if !strings.HasPrefix(arg.text, "-") {
 			return arg.text != ""
@@ -47,4 +48,14 @@ func hasInterpreterProgram(name string, codeFlags []string, args []word) bool {
 		}
 	}
 	return false
+}
+
+// stdinScript recognizes explicit names for the input stream.
+func stdinScript(name string) bool {
+	switch path.Clean(name) {
+	case "-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0":
+		return true
+	default:
+		return false
+	}
 }

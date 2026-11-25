@@ -94,24 +94,12 @@ func (s Store) GuardStatus(ctx context.Context, shipID string) (guard.Status, bo
 	if status.Sets == nil {
 		status.Sets = []guard.AppliedSet{}
 	}
-	lines, err := Within(ctx, func() ([]byte, error) {
-		return secrets.ReadPrivate(filepath.Join(Folder(s.Guards, shipID), refusalsFile))
-	})
-	if errors.Is(err, fs.ErrNotExist) {
-		return status, true, nil
-	}
+	refusals, err := (Refusals{Guards: s.Guards, ShipID: shipID}).Read(ctx)
 	if err != nil {
-		return guard.Status{}, false, fmt.Errorf("read refusals: %w", err)
+		return guard.Status{}, false, err
 	}
-	for _, line := range strings.Split(string(lines), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		var refusal guard.Refusal
-		if err := json.Unmarshal([]byte(line), &refusal); err != nil {
-			return guard.Status{}, false, fmt.Errorf("decode refusal: %w", err)
-		}
-		status.Refusals++
+	status.Refusals = len(refusals)
+	for _, refusal := range refusals {
 		status.Recent = append(status.Recent, guard.RecentRefusal{At: refusal.At, Tool: refusal.Tool, Rule: refusal.Rule, Set: refusal.Set, Commit: refusal.Commit})
 	}
 	if len(status.Recent) > guard.RecentRefusals {
@@ -124,6 +112,34 @@ func (s Store) GuardStatus(ctx context.Context, shipID string) (guard.Status, bo
 type Refusals struct {
 	Guards string
 	ShipID string
+}
+
+// Read reads the ship's refusal records, in order, or none before any are kept.
+func (r Refusals) Read(ctx context.Context) ([]guard.Refusal, error) {
+	if !crew.IsShipID(r.ShipID) {
+		return nil, errors.New("invalid guard refusals ship id")
+	}
+	lines, err := Within(ctx, func() ([]byte, error) {
+		return secrets.ReadPrivate(filepath.Join(Folder(r.Guards, r.ShipID), refusalsFile))
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read refusals: %w", err)
+	}
+	var refusals []guard.Refusal
+	for line := range strings.SplitSeq(string(lines), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var refusal guard.Refusal
+		if err := json.Unmarshal([]byte(line), &refusal); err != nil {
+			return nil, fmt.Errorf("decode refusal: %w", err)
+		}
+		refusals = append(refusals, refusal)
+	}
+	return refusals, nil
 }
 
 // Append keeps the refusal at the end of the file, never through a link.

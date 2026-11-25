@@ -9,14 +9,17 @@
 package codex
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
@@ -69,6 +72,11 @@ type Harness struct {
 	Events func(shipID string) string
 	// ProxyURL is where sessions on an API key reach the model proxy (headless H16); false before it first listened.
 	ProxyURL func() (string, bool)
+	// GuardVersion says which installed version has proof on this computer.
+	GuardVersion func(context.Context) string
+	GuardRules   guardfile.Store
+	GuardConfig  string
+	CodexHome    string
 }
 
 // routeOf is how a session on the login reaches its model (api keys K6): on an API key, the model proxy as a provider of its own, set on the command line (a project's config cannot set one), its token in the variable the provider names and fresh for each start; on its subscription nothing, so it signs in as Codex does. Every later turn's exec keeps the flags, and the hold keeps the variable.
@@ -186,6 +194,31 @@ func (h Harness) mcpOf(entry reconciler.Entry, launchFlags []string) ([]string, 
 	return flags, &sessions.Mcp{Access: mcpproxy.Access{Token: proxytoken.New(), Servers: entry.McpServers}}, nil
 }
 
+// IsGuarded reports whether detection has proven the installed Codex.
+func (h Harness) IsGuarded() bool {
+	if h.GuardVersion == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return h.GuardVersion(ctx) != ""
+}
+
+// NeedsGuardRules is true even before proof: only a known empty resolution can start then.
+func (h Harness) NeedsGuardRules() bool { return true }
+
+// GuardProblem gives back a rule-bearing assignment when this Codex version has no proof.
+func (h Harness) GuardProblem(ctx context.Context, entry reconciler.Entry) (string, error) {
+	kept, err := h.GuardRules.Resolution(ctx, entry.ShipID)
+	if err != nil || kept == nil {
+		return "", err
+	}
+	if kept.HasSets && (h.GuardVersion == nil || h.GuardVersion(ctx) == "") {
+		return "guard disabled: Codex version has no proof", nil
+	}
+	return "", nil
+}
+
 // Launch starts the entry's session in its folder, on the login it is to start on: its first turn with its first prompt on a first start, else the wake on the folder's last conversation.
 func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
 	// The settings are read once: the flags checked are the flags it starts with, whatever detection gives meanwhile.
@@ -220,6 +253,12 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		return err
 	}
 	start := sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "codex", Command: command, Env: map[string]string{launchVariable: launchID}, ProxyToken: token, Mcp: mcp}
+	if h.GuardConfig != "" {
+		start.Env["AEOLUS_TRIERARCH_CONFIG"] = h.GuardConfig
+	}
+	if h.CodexHome != "" {
+		start.Env["CODEX_HOME"] = h.CodexHome
+	}
 	if mcp != nil {
 		start.SecretEnv = map[string]string{mcpTokenVariable: mcp.Access.Token}
 	}

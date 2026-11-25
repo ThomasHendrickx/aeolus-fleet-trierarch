@@ -707,6 +707,9 @@ func (a *analyzer) shell(name string, args []word, st *state, input shellInput) 
 		}
 		a.script(args[0].text, name+" -c", st.copy())
 	case len(args) > 0 && !fromStdin:
+		if args[0].literal && stdinScript(args[0].text) {
+			a.out.cannotResolve("reads commands from stdin")
+		}
 		if !args[0].literal {
 			a.out.cannotResolve(name + " script " + args[0].source)
 		}

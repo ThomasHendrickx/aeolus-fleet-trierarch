@@ -63,21 +63,37 @@ func Within(ctx context.Context, read func() ([]byte, error)) ([]byte, error) {
 	}
 }
 
-// KeptVersion is the settings version of the rules kept for the ship, false when none are kept.
-func (s Store) KeptVersion(ctx context.Context, shipID string) (int, bool, error) {
+// Resolution is the version of the assignment whose rules arrived and whether any set applies.
+type Resolution struct {
+	SettingsVersion int
+	HasSets         bool
+}
+
+// Resolution reads the kept assignment rules. Nil means they have not arrived.
+func (s Store) Resolution(ctx context.Context, shipID string) (*Resolution, error) {
 	text, err := s.Read(ctx, shipID)
 	if err != nil || text == nil {
-		return 0, false, err
+		return nil, err
 	}
 	var kept struct {
-		ShipID          string `json:"shipId"`
-		SettingsVersion int    `json:"settingsVersion"`
+		ShipID          string             `json:"shipId"`
+		SettingsVersion int                `json:"settingsVersion"`
+		Sets            *[]json.RawMessage `json:"sets"`
 	}
 	if err := json.Unmarshal(text, &kept); err != nil {
-		return 0, false, fmt.Errorf("decode guard rules: %w", err)
+		return nil, fmt.Errorf("decode guard rules: %w", err)
 	}
-	if kept.ShipID != shipID {
-		return 0, false, fmt.Errorf("guard rules do not belong to ship %s", shipID)
+	if kept.ShipID != shipID || kept.Sets == nil {
+		return nil, fmt.Errorf("incomplete guard rules for ship %s", shipID)
+	}
+	return &Resolution{SettingsVersion: kept.SettingsVersion, HasSets: len(*kept.Sets) > 0}, nil
+}
+
+// KeptVersion is the settings version of the rules kept for the ship, false when none are kept.
+func (s Store) KeptVersion(ctx context.Context, shipID string) (int, bool, error) {
+	kept, err := s.Resolution(ctx, shipID)
+	if err != nil || kept == nil {
+		return 0, false, err
 	}
 	return kept.SettingsVersion, true, nil
 }

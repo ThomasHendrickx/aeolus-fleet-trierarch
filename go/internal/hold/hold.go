@@ -63,6 +63,8 @@ type Files struct {
 	PID    string
 	// ExitReason is the last process exit status or signal, kept before the hold ends.
 	ExitReason string
+	// GuardProblem holds the reason an initial Codex turn could not start guarded.
+	GuardProblem string
 	// Events holds every line the harness writes, appended.
 	Events string
 	// SessionID is the harness's own session id, as its events name it, so a start resumes it.
@@ -75,7 +77,7 @@ type Files struct {
 
 func FilesOf(sessions string, shipID string) Files {
 	folder := filepath.Join(sessions, shipID)
-	return Files{Folder: folder, Socket: filepath.Join(folder, "hold.sock"), PID: filepath.Join(folder, "hold.pid"), ExitReason: filepath.Join(folder, "exit-reason"), Events: filepath.Join(folder, "events.jsonl"), SessionID: filepath.Join(folder, "session-id"), McpConfig: filepath.Join(folder, "mcp-config.json"), SecretEnv: filepath.Join(folder, "secret-env.json")}
+	return Files{Folder: folder, Socket: filepath.Join(folder, "hold.sock"), PID: filepath.Join(folder, "hold.pid"), ExitReason: filepath.Join(folder, "exit-reason"), GuardProblem: filepath.Join(folder, "guard-problem"), Events: filepath.Join(folder, "events.jsonl"), SessionID: filepath.Join(folder, "session-id"), McpConfig: filepath.Join(folder, "mcp-config.json"), SecretEnv: filepath.Join(folder, "secret-env.json")}
 }
 
 // Request is one call to a hold.
@@ -93,9 +95,10 @@ type State struct {
 
 // Answer is a hold's answer: ok, with its state when asked, or refused with why.
 type Answer struct {
-	IsOK  bool   `json:"isOk"`
-	State *State `json:"state,omitempty"`
-	Error string `json:"error,omitempty"`
+	IsOK         bool   `json:"isOk"`
+	State        *State `json:"state,omitempty"`
+	Error        string `json:"error,omitempty"`
+	GuardProblem string `json:"guardProblem,omitempty"`
 }
 
 // Refused is the answer a hold gives a caller that is not the trierarch, as today's hold words it.
@@ -123,6 +126,8 @@ type Options struct {
 	Harness string
 	// Command is the harness's command line.
 	Command []string
+	// PrepareCodexTurn checks the guard before starting a Codex turn and supplies its hook flags.
+	PrepareCodexTurn func([]string) ([]string, error)
 	// Environment is the harness's whole environment: nothing else of the hold's reaches it (H10).
 	Environment []string
 	Version     string
@@ -208,6 +213,10 @@ func Run(options Options) int {
 	first, err := h.start(options.Command)
 	h.mutex.Unlock()
 	if err != nil {
+		var guarded *codexGuardError
+		if errors.As(err, &guarded) {
+			_ = os.WriteFile(files.GuardProblem, []byte(guarded.Error()), 0o600)
+		}
 		return 1
 	}
 
@@ -254,6 +263,13 @@ func startGuard(line []string) (io.WriteCloser, error) {
 
 // start starts a run of the command, with the hold's mutex held, and makes it the hold's child. A harness with a process per turn gets no stdin: codex exec reads one that is no terminal to its end before its turn, and copilot -p may take it as its prompt.
 func (h *held) start(command []string) (*harness, error) {
+	if h.options.Harness == codex && h.options.PrepareCodexTurn != nil {
+		var err error
+		command, err = h.options.PrepareCodexTurn(command)
+		if err != nil {
+			return nil, &codexGuardError{cause: err}
+		}
+	}
 	run := exec.Command(command[0], command[1:]...)
 	run.Dir = h.options.Folder
 	run.Env = h.options.Environment
@@ -626,6 +642,10 @@ func (h *held) sendTurn(line string) Answer {
 		command = copilotTurn(h.options.Command, h.sessionID, line)
 	}
 	if _, err := h.start(command); err != nil {
+		var guarded *codexGuardError
+		if errors.As(err, &guarded) {
+			return Answer{GuardProblem: guarded.Error()}
+		}
 		return Answer{Error: "the turn did not start: " + err.Error()}
 	}
 	return Answer{IsOK: true}
@@ -861,6 +881,18 @@ const usage = "Usage: aeolus-trierarch hold <ship id> --sessions <folder> --fold
 
 // Main runs `aeolus-trierarch hold` with the words after `hold`, as the trierarch starts it, never a person: the harness's environment is built from nothing (H10), the kept variables of the hold's own, then each --env given, each --secret-env named with its value from the folder's secret file, and with --proxy-token-variable the session's model proxy token from its folder in that variable (H16); its guard is this program run as `hold --guard`. Answers its exit code, or 2 for words it cannot take.
 func Main(words []string, version string, environ []string) int {
+	return MainWithCodexGuard(words, version, environ, nil)
+}
+
+type codexGuardError struct{ cause error }
+
+func (e *codexGuardError) Error() string { return e.cause.Error() }
+
+// CodexGuard prepares one Codex turn in its own working folder and environment.
+type CodexGuard func(program, folder string, environment, command []string) ([]string, error)
+
+// MainWithCodexGuard runs Main with a guard check before each Codex turn.
+func MainWithCodexGuard(words []string, version string, environ []string, guard CodexGuard) int {
 	if len(words) == 1 && words[0] == "--guard" {
 		return Guard(os.Stdin)
 	}
@@ -928,15 +960,27 @@ func Main(words []string, version string, environ []string) int {
 			given = append(given, name+"="+value)
 		}
 	}
+	var prepare func([]string) ([]string, error)
+	folder, harness := values["--folder"], values["--harness"]
+	environment = append(environment, given...)
+	if harness == codex {
+		environment = append(environment, "AEOLUS_SHIP="+shipID)
+		if guard != nil {
+			prepare = func(command []string) ([]string, error) {
+				return guard(program, folder, environment, command)
+			}
+		}
+	}
 	return Run(Options{
-		Files:       files,
-		Folder:      values["--folder"],
-		Harness:     values["--harness"],
-		Command:     command,
-		Environment: append(environment, given...),
-		Version:     version,
-		Stop:        stop,
-		Guard:       []string{program, "hold", "--guard"},
-		MayCall:     TrierarchOnly(sessions),
+		PrepareCodexTurn: prepare,
+		Files:            files,
+		Folder:           values["--folder"],
+		Harness:          values["--harness"],
+		Command:          command,
+		Environment:      environment,
+		Version:          version,
+		Stop:             stop,
+		Guard:            []string{program, "hold", "--guard"},
+		MayCall:          TrierarchOnly(sessions),
 	})
 }

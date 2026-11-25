@@ -113,6 +113,7 @@ func guardAnswer(ctx context.Context, words []string, machine Machine) guard.Ans
 	if harness == "codex" {
 		home := codexharness.HomeOf(machine.HomeDirectory, variable(machine.Environ, "CODEX_HOME"))
 		protected = guard.CodexProtected(resolvedPath(home), guardFolder, configuration, workspaces...)
+		protected = append(protected, resolvedPath(at.Detected), resolvedPath(at.State))
 	}
 	checker := guard.Checker{
 		Harness:   harness,
@@ -138,4 +139,16 @@ func resolvedPath(path string) string {
 		return path
 	}
 	return filepath.Join(resolvedPath(parent), filepath.Base(path))
+}
+
+func prepareCodexTurn(program, folder string, environment, command []string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), guard.Deadline)
+	defer cancel()
+	home := variable(environment, "HOME")
+	config := variable(environment, "AEOLUS_TRIERARCH_CONFIG")
+	turn := codexharness.GuardTurn{
+		Program: program, Folder: folder, Environment: environment, Version: Version,
+		Paths: paths.Of(home, config), ShipID: variable(environment, "AEOLUS_SHIP"),
+	}
+	return turn.Prepare(ctx, command)
 }

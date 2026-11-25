@@ -72,8 +72,7 @@ func patchTargets(command string) []string {
 	var targets []string
 	for _, line := range lines[1 : len(lines)-1] {
 		for _, header := range []string{"*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "} {
-			if target, found := strings.CutPrefix(line, header); found {
-				target = strings.TrimSpace(target)
+			if target, found := strings.CutPrefix(strings.TrimSpace(line), header); found {
 				if target == "" {
 					return nil
 				}

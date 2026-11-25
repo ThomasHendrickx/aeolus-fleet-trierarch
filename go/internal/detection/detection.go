@@ -31,6 +31,8 @@ type Refused struct {
 
 // Harness is what detection found of one harness: its version, when it was detected and its models last confirmed, its options, a problem to tell argo, Claude Code's permission modes and the ids sessions refused at this version.
 type Harness struct {
+	// GuardProof identifies the trierarch version whose guard was proven with Version on this computer.
+	GuardProof      string                   `json:"guardProof,omitempty"`
 	Version         string                   `json:"version"`
 	DetectedAt      string                   `json:"detectedAt"`
 	ConfirmedAt     *string                  `json:"confirmedAt"`
@@ -115,7 +117,10 @@ func (d Detection) Detect(ctx context.Context, harnesses []string, by By) (Detec
 			continue
 		}
 		if by == ByStart && wasDetected && previous.Version == version {
-			continue
+			check, _ := detector.(interface{ NeedsDetection(Harness) bool })
+			if check == nil || !check.NeedsDetection(previous) {
+				continue
+			}
 		}
 		if by == ByAge && wasDetected && previous.Version == version && !isDue(previous, d.Now()) {
 			continue

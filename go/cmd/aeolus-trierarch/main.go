@@ -81,6 +81,19 @@ func main() {
 	if cli.IsGuardCheck(os.Args[1:]) {
 		guardCheckMain(os.Args[1:])
 	}
+	if slices.Equal(os.Args[1:], []string{"guard", "watchdog"}) {
+		program, err := os.Executable()
+		if err != nil {
+			os.Exit(1)
+		}
+		os.Exit(codex.GuardWatchdog(context.Background(), program, os.Stdin, os.Stderr))
+	}
+	if slices.Equal(os.Args[1:], []string{"guard", "probe-mcp"}) {
+		if err := codex.GuardProbeMCP(os.Stdin, os.Stdout); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Println(err)
@@ -194,7 +207,7 @@ func main() {
 		Stderr:     os.Stderr,
 		Detect: func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error) {
 			warn := func(line string) { fmt.Fprintln(os.Stderr, line) }
-			return detectionOf(at, environment(), home, warn).Detect(context.Background(), harnesses, by)
+			return detectionOf(at, environment(), home, program, warn).Detect(context.Background(), harnesses, by)
 		},
 	}
 	output, code := cli.Main(os.Args[1:], machine)
@@ -608,7 +621,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	}
 	pastaNotice := &pastaOwnerNotice{Fleet: client, ShipID: kept.ShipID, Key: "trierarch:pasta-apparmor:" + newLaunchID()}
 	// Detected again only for a harness whose version changed since (#365); the operator's own options win.
-	detect := detectionOf(at, env, home, logLine)
+	detect := detectionOf(at, env, home, program, logLine)
 	detected, err := detect.Detect(context.Background(), slices.Sorted(maps.Keys(configuration.Harnesses)), detection.ByStart)
 	if err != nil {
 		return nil, err
@@ -805,7 +818,11 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			offered = withTrusted(offered)
-			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now(), PastaAppArmorMissing: pastaMissing}
+			var guarded []string
+			if harness, ok := harnesses["codex"].(codex.Harness); ok && harness.IsGuarded() {
+				guarded = append(guarded, "codex")
+			}
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, GuardedHarnesses: guarded, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now(), PastaAppArmorMissing: pastaMissing}
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
@@ -859,7 +876,7 @@ func usageOf(configured config.Configuration, env map[string]string, home string
 }
 
 // detectionOf is detection of this machine's harnesses, kept in detected.json, telling the operator what it kept as before with warn.
-func detectionOf(at paths.Paths, env map[string]string, home string, warn func(line string)) detection.Detection {
+func detectionOf(at paths.Paths, env map[string]string, home, program string, warn func(line string)) detection.Detection {
 	// Codex's and Copilot's own files, in CODEX_HOME and COPILOT_HOME when set (#521).
 	codexHome, copilotHome := env["CODEX_HOME"], env["COPILOT_HOME"]
 	if codexHome == "" {
@@ -871,8 +888,11 @@ func detectionOf(at paths.Paths, env map[string]string, home string, warn func(l
 	return detection.Detection{
 		Detectors: map[string]detection.Detector{
 			"claude-code": claudecode.Detector{Run: detection.Run, NeutralFolder: detection.NeutralFolder},
-			"codex":       codex.Detector{Run: detection.Run, ReadConfig: textOf(filepath.Join(codexHome, "config.toml")), NeutralFolder: detection.NeutralFolder},
-			"copilot":     copilot.Detector{Run: detection.Run, ReadSettings: textOf(filepath.Join(copilotHome, "settings.json"))},
+			"codex": codex.Detector{
+				Run: detection.Run, ReadConfig: textOf(filepath.Join(codexHome, "config.toml")), NeutralFolder: detection.NeutralFolder,
+				GuardProof: codex.GuardProof{Program: program, Version: cli.Version, CodexHome: codexHome}, Warn: warn,
+			},
+			"copilot": copilot.Detector{Run: detection.Run, ReadSettings: textOf(filepath.Join(copilotHome, "settings.json"))},
 		},
 		Store: detection.File{Path: at.Detected},
 		Now:   time.Now,
@@ -905,19 +925,31 @@ func tellDetectionProblems(client fleet.Client, detected detection.Detected) {
 func confirmDue(detect detection.Detection, harnesses []string) func() {
 	var running atomic.Bool
 	tried := map[string]time.Time{}
+	var checkedCodexAt time.Time
+	var observedCodexVersion string
 	return func() {
 		if !running.CompareAndSwap(false, true) {
 			return
 		}
-		due := detect.Due(harnesses, tried)
-		if len(due) == 0 {
-			running.Store(false)
-			return
-		}
 		go func() {
 			defer running.Store(false)
-			if _, err := detect.Detect(context.Background(), due, detection.ByAge); err != nil {
-				logLine(fmt.Sprintf("%s could not be detected again after a day: %v", strings.Join(due, ", "), err))
+			ctx := context.Background()
+			due := detect.Due(harnesses, tried)
+			if cli, found := detect.Detectors["codex"]; found && slices.Contains(harnesses, "codex") && time.Since(checkedCodexAt) >= time.Minute {
+				checkedCodexAt = time.Now()
+				installed, ok := cli.Version(ctx)
+				if ok && installed != observedCodexVersion && installed != detect.Store.Load()["codex"].Version {
+					due = slices.DeleteFunc(due, func(name string) bool { return name == "codex" })
+					if _, err := detect.Detect(ctx, []string{"codex"}, detection.ByStart); err != nil {
+						logLine(fmt.Sprintf("codex could not be detected after its version changed: %v", err))
+					}
+				}
+				observedCodexVersion = installed
+			}
+			if len(due) > 0 {
+				if _, err := detect.Detect(ctx, due, detection.ByAge); err != nil {
+					logLine(fmt.Sprintf("%s could not be detected again after a day: %v", strings.Join(due, ", "), err))
+				}
 			}
 		}()
 	}
@@ -1040,7 +1072,14 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 			}
 		case "codex":
 			found := plugin.ForCodex(home, env)
-			harnesses[name] = codex.Harness{Plugin: found, Runtime: running, Settings: settings, Hooks: codex.AppServer{Program: "codex", Version: cli.Version}, Configuration: codex.AppServer{Program: "codex", Version: cli.Version}, Events: events, ProxyURL: proxy.URL}
+			harnesses[name] = codex.Harness{
+				Plugin: found, Runtime: running, Settings: settings, Hooks: codex.AppServer{Program: "codex", Version: cli.Version},
+				Configuration: codex.AppServer{Program: "codex", Version: cli.Version}, Events: events, ProxyURL: proxy.URL,
+				GuardRules: guardfile.Store{Guards: at.Guard}, GuardConfig: at.Config, CodexHome: env["CODEX_HOME"],
+				GuardVersion: func(ctx context.Context) string {
+					return (codex.Detector{Run: detection.Run}).GuardVersion(ctx, at.Detected, cli.Version)
+				},
+			}
 		case "copilot":
 			harnesses[name] = copilot.Harness{Plugin: plugin.FindCopilot(home, env), Runtime: running, Settings: settings, Events: events, ProxyURL: proxy.URL, Sessions: at.Sessions, Version: func() (string, bool) {
 				// As detection last found it: a Copilot not detected yet is not offered.

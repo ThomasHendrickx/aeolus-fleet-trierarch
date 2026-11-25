@@ -234,3 +234,10 @@ func cut(text string, n int) string {
 	}
 	return string([]rune(text)[:n])
 }
+
+// DisabledError means a turn could not start with its required guard.
+type DisabledError struct {
+	Reason string
+}
+
+func (e *DisabledError) Error() string { return "guard disabled: " + e.Reason }

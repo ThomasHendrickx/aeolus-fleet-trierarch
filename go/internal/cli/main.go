@@ -242,7 +242,7 @@ func IsGuardCheck(args []string) bool {
 func Main(args []string, machine Machine) (string, int) {
 	// The hold takes its own words: the trierarch starts it, never a person.
 	if len(args) > 0 && args[0] == "hold" {
-		return "", hold.Main(args[1:], Version, machine.Environ)
+		return "", hold.MainWithCodexGuard(args[1:], Version, machine.Environ, prepareCodexTurn)
 	}
 	if len(args) > 0 && args[0] == "proxy" {
 		return "", modelproxy.Main(args[1:], Version)

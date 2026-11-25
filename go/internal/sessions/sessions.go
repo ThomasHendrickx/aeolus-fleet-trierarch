@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
@@ -214,6 +215,9 @@ func (r Runtime) Start(session Start) error {
 	if err := os.MkdirAll(files.Folder, 0o700); err != nil {
 		return err
 	}
+	if err := os.Remove(files.GuardProblem); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	if r.HeldAs != nil {
 		held, err := r.HeldAs(session, files)
 		if err != nil {
@@ -270,6 +274,9 @@ func (r Runtime) Start(session Start) error {
 		}
 		// A hold whose harness ended at once has ended too: its exit is seen in the next list.
 		if _, err := os.Stat(files.PID); err == nil && r.runningPID(session.ShipID) == 0 {
+			if reason, err := os.ReadFile(files.GuardProblem); err == nil && len(reason) > 0 {
+				return &guard.DisabledError{Reason: string(reason)}
+			}
 			return nil
 		}
 		time.Sleep(startPoll)
@@ -288,6 +295,9 @@ func (r Runtime) must(shipID string, request hold.Request, timeout time.Duration
 		return err
 	}
 	if !answer.IsOK {
+		if answer.GuardProblem != "" {
+			return &guard.DisabledError{Reason: answer.GuardProblem}
+		}
 		return fmt.Errorf("the hold of %s refused %s: %s", shipID, request.Call, answer.Error)
 	}
 	return nil
@@ -295,5 +305,5 @@ func (r Runtime) must(shipID string, request hold.Request, timeout time.Duration
 
 // Send sends the line to the ship's session. A hold of a harness with a process per turn starts the line's turn once the last turn's process has ended, which it waits for as long as for an interrupted turn.
 func (r Runtime) Send(shipID string, line string) error {
-	return r.must(shipID, hold.Request{Call: "send", Line: line}, hold.InterruptWait+callTimeout)
+	return r.must(shipID, hold.Request{Call: "send", Line: line}, hold.InterruptWait+callTimeout+guard.Deadline)
 }

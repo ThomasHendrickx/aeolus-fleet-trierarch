@@ -20,6 +20,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -132,7 +133,11 @@ const guardRulesDidNotArrive = "guard rules did not arrive"
 // guardedOf is the harness as it guards its sessions, false when it starts them without the guard.
 func guardedOf(harness Harness) (Guarded, bool) {
 	guarded, ok := harness.(Guarded)
-	if !ok || !guarded.IsGuarded() {
+	if !ok {
+		return nil, false
+	}
+	needsRules, _ := harness.(interface{ NeedsGuardRules() bool })
+	if (needsRules == nil || !needsRules.NeedsGuardRules()) && !guarded.IsGuarded() {
 		return nil, false
 	}
 	return guarded, true
@@ -247,6 +252,11 @@ func (p Pass) startSession(ctx context.Context, state reconciler.State, harness 
 		return state, start.entry, false, err
 	}
 	if err := harness.Launch(start.starting, start.isFirstStart, start.launchID); err != nil {
+		var disabled *guard.DisabledError
+		if errors.As(err, &disabled) {
+			next, err := p.giveBack(state, start.entry.ShipID, start.entry.SettingsVersion, disabled.Error(), &start.entry)
+			return next, start.entry, false, err
+		}
 		return state, start.entry, false, err
 	}
 	return state, gate.entry, true, nil
@@ -845,7 +855,12 @@ func (p Pass) carryOut(ctx context.Context, state reconciler.State, action recon
 		if !isEntry || entry.Folder == "" {
 			return state, nil
 		}
-		return state, p.handOver(entry, action)
+		err := p.handOver(entry, action)
+		var disabled *guard.DisabledError
+		if errors.As(err, &disabled) {
+			return p.giveBack(state, entry.ShipID, entry.SettingsVersion, disabled.Error(), &entry)
+		}
+		return state, err
 	case reconciler.RemoveStray:
 		return state, p.removeStray(state, action.Folder)
 	case reconciler.Clear:
