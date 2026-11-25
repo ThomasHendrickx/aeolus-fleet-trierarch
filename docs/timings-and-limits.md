@@ -43,6 +43,7 @@ A default that configuration may change names its setting.
 | 30 checks a second apart | Waiting for the launchd agent to be gone on stop or install | [`service`](../go/internal/service) `STOP_CHECKS`, `STOP_CHECK_MS` | none recorded |
 | 5 s | systemd restarting the trierarch service (`RestartSec`) | [`service`](../go/internal/service) (unit template) | none recorded |
 | at least 60 s | A Codex plugin version folder is removed only when every running session started this long after the next version arrived | [`cli`](../go/internal/cli) `START_MARGIN_MS` | [trierarch.md](trierarch.md#a-machine-joins), ThomasHendrickx/aeolus-fleet#653 |
+| 10 MB, one rotated file | A session hold's event log | [`hold`](../go/internal/hold/events.go) `eventLogLimit` | The headless design (H14), ThomasHendrickx/aeolus-fleet#1467 |
 | 1 MiB, one rotated file | The macOS log (the journal caps it on Linux) | [`logfile`](../go/internal/logfile) `LOG_MAX_BYTES` | [trierarch.md](trierarch.md#a-machine-joins) |
 | 60 s | A rotation lock older than this is stale | [`logfile`](../go/internal/logfile) `STALE_LOCK_MS` | none recorded |
 | 50 lines; followed every 500 ms on macOS | `logs` | [`cli`](../go/internal/cli) `DEFAULT_LINES`, `FOLLOW_INTERVAL_MS` | none recorded |

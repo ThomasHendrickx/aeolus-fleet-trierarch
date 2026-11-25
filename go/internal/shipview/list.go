@@ -16,6 +16,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/claudecode"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/copilot"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/eventlog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mask"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -104,22 +105,22 @@ func (r Reader) List(ctx context.Context, at paths.Paths, now time.Time) (Machin
 				row.Inbox = &Inbox{IsWatched: true, Inbox: &observation.Inbox}
 			}
 		}
-		file, err := files.Open(held.Events)
+		events, err := eventlog.Open(held.Events, files.Open)
 		row.record("activity", held.Events, err)
 		if err == nil {
 			if read := readers[one.Harness]; read != nil {
 				var latest activity.Activity
 				var ok bool
-				tail, err := activityTail(ctx, file)
+				tail, err := activityTails(ctx, events)
 				if err == nil {
-					latest, ok, err = activity.OfFile(tail, func(line string) (activity.Reading, bool) { return read([]string{line}) })
+					latest, ok, err = activity.OfFiles(tail, func(line string) (activity.Reading, bool) { return read([]string{line}) })
 				}
 				row.record("activity", held.Events, err)
 				if ok && maskErr == nil {
 					row.Session.Activity = &Activity{Kind: latest.Kind, Tool: masker.Line(latest.Tool), At: latest.At.In(now.Location()).Format(time.RFC3339)}
 				}
 			}
-			_ = file.Close()
+			events.Close()
 		}
 		row.Unreadable = append(row.Unreadable, facts.Unreadable...)
 		result.Ships = append(result.Ships, row)

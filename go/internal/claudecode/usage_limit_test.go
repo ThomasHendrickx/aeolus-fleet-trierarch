@@ -75,3 +75,21 @@ func TestARejectedWindowIncludesItsStructuredResetAndAllowedWindowsAreNotStops(t
 		})
 	}
 }
+
+func TestClaudeCodeUsageLimitReaderAcrossRotation(t *testing.T) {
+	h, _, _ := aHarness(t)
+	entry := anEntry(t)
+	path := h.Events(entry.ShipID)
+	rotated := `{"type":"rate_limit_event","uuid":"stop-rotation","rate_limit_info":{"status":"rejected","resetsAt":1800000000}}`
+	active := `{"type":"result","uuid":"result-rotation","is_error":true,"result":"You've hit your usage limit"}`
+	if err := os.WriteFile(path+".1", []byte(rotated+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(active+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	id, reason := h.UsageLimit(entry)
+	if id != "stop-rotation" || reason != "You've hit your usage limit; resets at 2027-01-15T08:00:00.000Z" {
+		t.Fatalf("UsageLimit = %q, %q, want the original occurrence and reset time", id, reason)
+	}
+}

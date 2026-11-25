@@ -6,7 +6,22 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/eventlog"
 )
+
+// activityTails bounds the amount read from either retained file.
+func activityTails(ctx context.Context, events eventlog.Files) (eventlog.Files, error) {
+	tails := make(eventlog.Files, 0, len(events))
+	for _, file := range events {
+		tail, err := activityTail(ctx, file)
+		if err != nil {
+			return nil, err
+		}
+		tails = append(tails, tail)
+	}
+	return tails, nil
+}
 
 // activityTail leaves the event reader its last 200 nonempty lines while avoiding
 // a full history scan on each live refresh. Non-seekable test files remain readable.

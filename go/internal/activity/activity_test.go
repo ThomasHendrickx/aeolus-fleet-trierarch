@@ -70,3 +70,16 @@ func TestASessionThatWroteNoEventsFileHasNoActivity(t *testing.T) {
 		t.Fatalf("Of = %+v, want none", got)
 	}
 }
+
+func TestActivityReaderAcrossRotation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(path+".1", []byte("text\ntool:Bash\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Repeat("noise\n", 199)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := Of(path, readsLines); !ok || got.Kind != "tool" || got.Tool != "Bash" {
+		t.Fatalf("Of = %+v, %v, want Bash tool activity", got, ok)
+	}
+}
