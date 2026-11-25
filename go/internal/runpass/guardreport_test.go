@@ -173,3 +173,18 @@ func TestNoGuardIsReportedForAHarnessWithoutAGuard(t *testing.T) {
 		t.Fatalf("reported %q, want nothing", reports.reported)
 	}
 }
+
+func TestAnEmptyResolutionDoesNotReportAGuardOrItsOldRefusals(t *testing.T) {
+	pass, _ := aGuardedPass(t, someGuardRules{scout: 1})
+	empty := aGuardStatus(1)
+	empty.Sets = []guard.AppliedSet{}
+	reports := &someGuardReports{}
+	pass.pass.GuardStatuses, pass.pass.GuardReports = someGuardStatuses{scout: empty}, reports
+
+	pass.crewed(t)
+	pass.run(t)
+
+	if len(reports.reported) != 0 {
+		t.Fatalf("reported %q, want no guard or refused activity for an empty resolution", reports.reported)
+	}
+}
