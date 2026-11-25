@@ -142,3 +142,17 @@ func TestShipStatusActivityReaderAcrossRotation(t *testing.T) {
 		t.Fatalf("Ship activity = %+v, want command execution", got)
 	}
 }
+
+func TestTUILastLinesReaderDuringRotationBeforeTheActiveFileOpens(t *testing.T) {
+	at, now := aView(t)
+	path := filepath.Join(at.Sessions, "shp_one", "events.jsonl")
+	writeFact(t, path+".1", "rotated\n")
+
+	view, err := Ship(at, "one", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []Line{{Line: "rotated"}}; !reflect.DeepEqual(view.Lines, want) || len(view.Unreadable) != 0 {
+		t.Fatalf("Ship during rotation = lines %v, unreadable %v, want %v and no read failures", view.Lines, view.Unreadable, want)
+	}
+}
