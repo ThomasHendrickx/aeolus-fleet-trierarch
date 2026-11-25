@@ -83,3 +83,19 @@ func TestCodexProofSelectsTheTranscriptOfItsOwnTurn(t *testing.T) {
 		t.Fatalf("selected transcript = %q, %v, want the probe thread's transcript", text, err)
 	}
 }
+
+func TestCodexProofRequiresARefusedToolCallForEachWatchdogFailure(t *testing.T) {
+	var results []string
+	for _, cause := range []string{"missing", "crash", "stall"} {
+		results = append(results, `{"type":"response_item","payload":{"type":"function_call_output","output":"Command blocked by PreToolUse hook: AEOLUS_GUARD_FAULT_`+cause+` Refused by the guard: guard failed"}}`)
+	}
+	if err := verifyGuardFaults(strings.Join(results, "\n")); err != nil {
+		t.Fatalf("proof for three refused fault calls: %v", err)
+	}
+	for index := range results {
+		partial := append(append([]string{}, results[:index]...), results[index+1:]...)
+		if err := verifyGuardFaults(strings.Join(partial, "\n")); err == nil {
+			t.Errorf("proof passed without refused tool call %d", index)
+		}
+	}
+}
