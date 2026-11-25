@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -91,14 +92,45 @@ func TestARealClaudeCodeSessionInAContainerDoesNotRunACallWhenItsShipsSocketIsGo
 func TestARealClaudeCodeSessionInAContainerDoesNotRunACallWhenTheGuardMissesItsDeadline(t *testing.T) {
 	session := aRealContainerSession(t, realNoTouch)
 	// A refusal kept through a pipe no one reads hangs until the socket's deadline answers.
-	if err := syscall.Mkfifo(filepath.Join(guardfile.Folder(session.at.Guard, realContainerShip), "refusals.jsonl"), 0o600); err != nil {
+	refusals := filepath.Join(guardfile.Folder(session.at.Guard, realContainerShip), "refusals.jsonl")
+	if err := syscall.Mkfifo(refusals, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { releaseRefusalWriters(t, refusals) })
 
 	result := session.run(t)
 
 	if result.ran || !strings.Contains(result.events, "Refused by the guard: guard failed: deadline.") {
 		t.Fatalf("ran %v, want the call refused at the guard's deadline: %s", result.ran, result.events)
+	}
+}
+
+// refusalWriterWait is how long a refusal writer blocked on the refusals pipe has to end once the pipe has a reader.
+const refusalWriterWait = 10 * time.Second
+
+// releaseRefusalWriters gives the refusals pipe a reader, so every refusal writer blocked opening it goes on and ends, and fails the
+// test when none was blocked on it, or one is still at it after refusalWriterWait.
+func releaseRefusalWriters(t *testing.T, pipe string) {
+	t.Helper()
+	stacks := make([]byte, 1<<20)
+	if written := runtime.Stack(stacks, true); !strings.Contains(string(stacks[:written]), "guardfile.Refusals.Append") {
+		t.Errorf("no refusal writer is blocked on %s, want the deadline to come from the refusal kept through it", pipe)
+	}
+	reader, err := os.OpenFile(pipe, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		t.Errorf("open the refusals pipe for reading: %v", err)
+		return
+	}
+	defer func() { _ = reader.Close() }()
+	for until := time.Now().Add(refusalWriterWait); ; time.Sleep(50 * time.Millisecond) {
+		written := runtime.Stack(stacks, true)
+		if !strings.Contains(string(stacks[:written]), "guardfile.Refusals.Append") {
+			return
+		}
+		if time.Now().After(until) {
+			t.Errorf("a refusal writer is still blocked on %s %s after it got a reader:\n%s", pipe, refusalWriterWait, stacks[:written])
+			return
+		}
 	}
 }
 
