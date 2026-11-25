@@ -2,16 +2,11 @@ package claudecode
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -20,6 +15,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/test/fakemodel"
 )
 
 // The guard as the installed Claude Code runs it (aeolus-fleet docs/design/guard, sections 4.6 and 4.7): the settings the trierarch
@@ -164,7 +160,7 @@ type realGuardResult struct {
 func (s realGuardedSession) run(t *testing.T, program string) realGuardResult {
 	t.Helper()
 	marker := filepath.Join(s.folder, "ran")
-	model := aBashModel(t, "touch "+marker)
+	model := fakemodel.BashModel(t, "touch "+marker)
 	harness := Harness{Program: program, Guards: s.at.Guard}
 	settings, err := harness.writeGuardSettings(realGuardShip, nil)
 	if err != nil {
@@ -179,7 +175,7 @@ func (s realGuardedSession) run(t *testing.T, program string) realGuardResult {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "claude", "-p", "--output-format", "stream-json", "--verbose", "--model", "claude-sonnet-4-6", "--setting-sources", "", "--dangerously-skip-permissions", "--settings", settings, "--", "Run the requested Bash action once.")
+	command := exec.CommandContext(ctx, "claude", "-p", "--output-format", "stream-json", "--verbose", "--model", fakemodel.Model, "--setting-sources", "", "--dangerously-skip-permissions", "--settings", settings, "--", "Run the requested Bash action once.")
 	command.Dir = s.folder
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
@@ -194,50 +190,4 @@ func (s realGuardedSession) run(t *testing.T, program string) realGuardResult {
 	}
 	_, statErr := os.Stat(marker)
 	return realGuardResult{ran: statErr == nil, output: string(output)}
-}
-
-// aBashModel is a model server that asks for the Bash command until it gets a tool result, then ends its turn.
-func aBashModel(t *testing.T, bash string) *httptest.Server {
-	t.Helper()
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/messages") {
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, `{"input_tokens":1}`)
-			return
-		}
-		var request struct{ Messages []json.RawMessage }
-		_ = json.NewDecoder(r.Body).Decode(&request)
-		isAnswered := false
-		for _, message := range request.Messages {
-			isAnswered = isAnswered || strings.Contains(string(message), "tool_result")
-		}
-		block := map[string]any{"type": "text", "text": ""}
-		delta := map[string]any{"type": "text_delta", "text": "Done."}
-		stop := "end_turn"
-		if !isAnswered {
-			input, _ := json.Marshal(map[string]any{"command": bash, "description": "Run the requested action"})
-			block = map[string]any{"type": "tool_use", "id": fmt.Sprintf("toolu_guard_%d", calls.Add(1)), "name": "Bash", "input": map[string]any{}}
-			delta = map[string]any{"type": "input_json_delta", "partial_json": string(input)}
-			stop = "tool_use"
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		events := []struct {
-			name  string
-			value any
-		}{
-			{"message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "msg_guard", "type": "message", "role": "assistant", "content": []any{}, "model": "claude-sonnet-4-6", "stop_reason": nil, "usage": map[string]int{"input_tokens": 1, "output_tokens": 0}}}},
-			{"content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": block}},
-			{"content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": delta}},
-			{"content_block_stop", map[string]any{"type": "content_block_stop", "index": 0}},
-			{"message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": stop, "stop_sequence": nil}, "usage": map[string]int{"output_tokens": 1}}},
-			{"message_stop", map[string]string{"type": "message_stop"}},
-		}
-		for _, event := range events {
-			text, _ := json.Marshal(event.value)
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.name, text)
-		}
-	}))
-	t.Cleanup(server.Close)
-	return server
 }
