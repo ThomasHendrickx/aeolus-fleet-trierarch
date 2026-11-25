@@ -12,7 +12,11 @@ func (a *analyzer) packageLauncher(c runCall) {
 	for i := 0; i < len(c.args); i++ {
 		arg := c.args[i]
 		if !arg.literal {
-			a.out.cannotResolve("package launcher target")
+			if isLaunch {
+				a.out.cannotResolve("package launcher target")
+			} else {
+				a.out.cannotResolve("argument " + arg.source + " of " + c.name)
+			}
 			return
 		}
 		option, value, inline := strings.Cut(arg.text, "=")
