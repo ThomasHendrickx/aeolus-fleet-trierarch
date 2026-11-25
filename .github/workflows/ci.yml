@@ -286,6 +286,21 @@ jobs:
           AEOLUS_TEST_PROCESS_RECORD: ${{ runner.temp }}/test-processes
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
           TESTCONTAINERS_RYUK_DISABLED: 'true'
+      - name: Repeat plugin process cleanup under parallel load
+        if: ${{ matrix.shard == 1 }}
+        run: |
+          pids=()
+          for run in 1 2 3; do
+            npm run test:contract:go -- contract/process-cleanup.integration.test.ts -t 'leaves no plugin command or fleet worker' > "$RUNNER_TEMP/cleanup-$run.log" 2>&1 &
+            pids+=("$!")
+          done
+          result=0
+          for pid in "${pids[@]}"; do wait "$pid" || result=1; done
+          for run in 1 2 3; do cat "$RUNNER_TEMP/cleanup-$run.log"; done
+          exit "$result"
+        env:
+          AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
+          TESTCONTAINERS_RYUK_DISABLED: 'true'
       - name: Check Docker test leftovers
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         run: node scripts/check-test-run-leftovers.ts docker
