@@ -183,6 +183,7 @@ func checkCall(ctx context.Context, at paths.Paths, shipID string, now func() ti
 		Sets:      guardfile.Sets{Store: guardfile.Store{Guards: at.Guard}, ShipID: shipID},
 		Links:     links,
 		Refusals:  refusals,
+		Activity:  guardfile.ToolCalls{Guards: at.Guard, ShipID: shipID},
 		Now:       now,
 		Home:      home,
 		Boundary:  guard.Boundary{ShipFolder: view.path(shipFolder), Repositories: repositories},
