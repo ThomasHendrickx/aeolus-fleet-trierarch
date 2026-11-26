@@ -394,6 +394,8 @@ type Pass struct {
 	RefuseModel func(harness string, model string) error
 	// ReadUsage reads the harnesses' usage as often as its own intervals allow: a harness whose subscription window is used up is not offered until it resets (#263). None offers every harness.
 	ReadUsage func() (usage.Usage, error)
+	// ReportBeforeRelease publishes the stopped session's working time while its lease is still held.
+	ReportBeforeRelease func() error
 	// SendReleasedUsage sends a released ship's last usage before its folder goes (the usage design, U9); it fails while the fleet does not take it, so the folder stays. None sends nothing.
 	SendReleasedUsage func(entry reconciler.Entry) error
 	// Load reads the machine's load, at most once a minute; none reads nothing (#400).
@@ -1125,6 +1127,11 @@ func (p Pass) release(ctx context.Context, state reconciler.State, entry reconci
 		return state, err
 	}
 	if ship.Status == "crewed" {
+		if p.ReportBeforeRelease != nil {
+			if err := p.ReportBeforeRelease(); err != nil {
+				return state, fmt.Errorf("report working time before releasing %s: %w", entry.ShipID, err)
+			}
+		}
 		if err := p.Fleet.Release(entry.ShipID); err != nil {
 			return state, err
 		}

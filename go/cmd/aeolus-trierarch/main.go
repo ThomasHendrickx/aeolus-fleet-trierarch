@@ -843,6 +843,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		ask.Once()
 		askConfiguration.Once()
 		current := pass
+		current.ReportBeforeRelease = func() error { return reporter.Report(isKeyCutOff) }
 		current.Workspace, current.Repositories, current.Folders = placesOf()
 		if err := current.Run(ctx); err != nil {
 			return err
