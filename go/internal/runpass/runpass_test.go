@@ -1019,6 +1019,71 @@ func TestAReleaseReportsGuardDecisionsMadeSinceTheLastPass(t *testing.T) {
 	pass.run(t)
 }
 
+func TestAReleaseReportsUsableGuardDecisionsDespiteBadRecords(t *testing.T) {
+	for _, scenario := range []struct {
+		name, prefix, tool, reportedTool string
+	}{
+		{name: "malformed line", prefix: "{broken}\n", tool: "Read", reportedTool: "Read"},
+		{name: "oversized line", prefix: strings.Repeat("x", 130*1024) + "\n", tool: "Read", reportedTool: "Read"},
+		{name: "missing decision", prefix: "{}\n", tool: "Read", reportedTool: "Read"},
+		{name: "long tool name", tool: strings.Repeat("界", 101), reportedTool: strings.Repeat("界", 100)},
+		{name: "supplementary tool name", tool: strings.Repeat("😀", 51), reportedTool: strings.Repeat("😀", 50)},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			pass := aRunPass(t)
+			pass.crewed(t)
+			guards := t.TempDir()
+			pass.pass.ToolCalls = guardfile.Store{Guards: guards}
+			pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+			folder, err := guardfile.MakeFolder(guards, scout)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(folder, "tool-calls.jsonl"), []byte(scenario.prefix), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			log := guardfile.ToolCalls{Guards: guards, ShipID: scout}
+			if err := log.Append(t.Context(), guard.CallActivity{At: now, Tool: scenario.tool, Result: "allowed"}); err != nil {
+				t.Fatal(err)
+			}
+			pass.pass.ReportBeforeRelease = func() error {
+				want := [][]fleet.ShipActivity{{{ShipID: scout, Activity: activity.Activity{At: now, Kind: "tool", Tool: scenario.reportedTool}}}}
+				if !reflect.DeepEqual(pass.fleet.activityWrites, want) {
+					t.Fatalf("activity before release = %+v, want %+v", pass.fleet.activityWrites, want)
+				}
+				return nil
+			}
+
+			pass.run(t)
+
+			if !slices.Contains(pass.fleet.calls, "release "+scout) {
+				t.Fatalf("fleet calls = %q, want release of %s", pass.fleet.calls, scout)
+			}
+		})
+	}
+}
+
+func TestTheRunningSessionKeepsItsPlaceAfterUnreadableGuardDecisions(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	guards := t.TempDir()
+	pass.pass.ToolCalls = guardfile.Store{Guards: guards}
+	folder, err := guardfile.MakeFolder(guards, scout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := "{broken}\n{"
+	if err := os.WriteFile(filepath.Join(folder, "tool-calls.jsonl"), []byte(records), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pass.run(t)
+
+	if got, want := pass.store.state.Entries[scout].ToolCallsReported, int64(len(records)-1); got != want {
+		t.Fatalf("reported tool calls offset = %d, want %d", got, want)
+	}
+}
+
 func TestAReleaseLogsWhatItsWorktreeHeldAndRemovesItAnyway(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
