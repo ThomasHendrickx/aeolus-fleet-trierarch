@@ -19,13 +19,14 @@ func TestWorkingMinutesShareThePreReleaseUsageSnapshot(t *testing.T) {
 		stage.ShipID: {{Model: "claude-haiku-5-5", Hour: at("2026-11-05T09:00:00Z"), Tokens: Tokens{Input: 100_000, Output: 200_000}}},
 	}}
 	reader, clock, _ := aReader(map[string]Harness{"claude-code": claude}, stage, quiet, unknown, uncrewed)
+	started := clock.now.Add(-90 * time.Second)
 	reader.WorkingTime = func(entry reconciler.Entry, now time.Time) (time.Duration, bool) {
 		if now != clock.now {
 			t.Fatalf("working time read at %s, want %s", now, clock.now)
 		}
 		switch entry.ShipID {
 		case stage.ShipID:
-			return 90 * time.Second, true
+			return clock.now.Sub(started), true
 		case quiet.ShipID:
 			return 0, true
 		case unknown.ShipID:
@@ -46,7 +47,19 @@ func TestWorkingMinutesShareThePreReleaseUsageSnapshot(t *testing.T) {
 			t.Fatalf("the stage's models = %+v, want its existing estimated cost", ship.Models)
 		}
 	}
-	if len(got) != 3 || got[stage.ShipID] != "1.5" || got[quiet.ShipID] != "0" || got[unknown.ShipID] != "null" {
-		t.Fatalf("reported working minutes = %v, want stage 1.5, quiet 0 and unknown null", got)
+	if len(got) != 3 || got[stage.ShipID] != "1.5" || got[quiet.ShipID] != "0" || got[unknown.ShipID] != "" {
+		t.Fatalf("reported working minutes = %v, want stage 1.5, quiet 0 and unknown omitted", got)
+	}
+	clock.now = clock.now.Add(30 * time.Second)
+	for _, ship := range mustRead(t, reader).Ships {
+		if ship.ShipID == stage.ShipID {
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(mustJSON(t, ship)), &fields); err != nil {
+				t.Fatal(err)
+			}
+			if got := string(fields["activeMinutes"]); got != "2" {
+				t.Fatalf("working minutes before the next cost read = %s, want 2", got)
+			}
+		}
 	}
 }
