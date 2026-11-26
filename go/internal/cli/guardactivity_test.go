@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
 )
 
 func TestGuardToolCallsKeepEveryVerdictWhileTheSessionRuns(t *testing.T) {
@@ -62,5 +65,27 @@ func TestGuardToolCallsKeepEveryVerdictWhileTheSessionRuns(t *testing.T) {
 		if strings.Contains(string(data), input) {
 			t.Fatalf("the live tool calls include the input %q", input)
 		}
+	}
+}
+
+func TestGuardToolCallsKeepRefusalsWhenACheckCannotStart(t *testing.T) {
+	machine, at, folder := aGuardedShip(t, noPublishRules)
+	when := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	machine.Now = func() time.Time { return when }
+	if err := os.WriteFile(at.State, []byte("no state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, code := guardCheck(machine, guardedShip, aHookCall(t, folder, "Read", map[string]any{"file_path": "README.md"}))
+	if code != 2 {
+		t.Fatalf("guard check exit = %d, want 2", code)
+	}
+	calls, _, err := (guardfile.Store{Guards: at.Guard}).ReadToolCalls(t.Context(), guardedShip, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []guard.CallActivity{{At: when, Result: "refused", Reason: "guard failed: state unreadable"}}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("live tool calls = %+v, want %+v", calls, want)
 	}
 }
