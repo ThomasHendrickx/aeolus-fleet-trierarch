@@ -599,8 +599,14 @@ func (p Pass) writeActivities(ctx context.Context, state reconciler.State, refus
 			continue
 		}
 		shown, ok := harness.Activity(entry)
-		if p.ToolCalls != nil && entry.CrewToken != "" && p.writeToolActivity(ctx, state, entry, shown, ok) {
-			continue
+		if p.ToolCalls != nil && entry.CrewToken != "" {
+			handled, err := p.writeToolActivity(ctx, state, entry, shown, ok)
+			if err != nil {
+				p.Log(fmt.Sprintf("The activity of %s was not written: %v; the next pass tries again", nameOf(entry), err))
+			}
+			if handled {
+				continue
+			}
 		}
 		if refused, exists := refusals[shipID]; exists && (!ok || !refused.At.Before(shown.At)) {
 			shown, ok = refused, true
@@ -1127,6 +1133,11 @@ func (p Pass) release(ctx context.Context, state reconciler.State, entry reconci
 		return state, err
 	}
 	if ship.Status == "crewed" {
+		if p.ToolCalls != nil {
+			if err := p.flushToolCalls(ctx, state, entry); err != nil {
+				return state, err
+			}
+		}
 		if p.ReportBeforeRelease != nil {
 			if err := p.ReportBeforeRelease(); err != nil {
 				return state, fmt.Errorf("report working time before releasing %s: %w", entry.ShipID, err)

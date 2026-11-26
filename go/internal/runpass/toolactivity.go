@@ -17,15 +17,14 @@ type ToolCalls interface {
 }
 
 // One ship's rejected observation cannot advance another ship's cursor.
-func (p Pass) writeToolActivity(ctx context.Context, state reconciler.State, entry reconciler.Entry, shown activity.Activity, hasShown bool) bool {
+func (p Pass) writeToolActivity(ctx context.Context, state reconciler.State, entry reconciler.Entry, shown activity.Activity, hasShown bool) (bool, error) {
 	const callsPerPass = 100
 	calls, next, err := p.ToolCalls.ReadToolCalls(ctx, entry.ShipID, entry.ToolCallsReported, callsPerPass)
 	if err != nil {
-		p.Log(fmt.Sprintf("The tool calls of %s were not read: %v; the next pass tries again", nameOf(entry), err))
-		return true
+		return true, fmt.Errorf("read tool calls: %w", err)
 	}
 	if len(calls) == 0 && (!hasShown || shown.Kind != "tool") {
-		return false
+		return false, nil
 	}
 	var observations []fleet.ShipActivity
 	for _, call := range calls {
@@ -52,18 +51,31 @@ func (p Pass) writeToolActivity(ctx context.Context, state reconciler.State, ent
 		}
 	}
 	if len(observations) == 0 {
-		return true
+		return true, nil
 	}
 	if err := p.Fleet.ReportActivity(activityIntervalSeconds, observations); err != nil {
-		p.Log(fmt.Sprintf("The activity of %s was not written: %v; the next pass tries again", nameOf(entry), err))
-		return true
+		return true, fmt.Errorf("send activity: %w", err)
 	}
 	if next == entry.ToolCallsReported && reported == entry.ToolEventReported {
-		return true
+		return true, nil
 	}
 	entry.ToolCallsReported, entry.ToolEventReported = next, reported
-	if _, err := p.put(state, entry); err != nil {
-		p.Log(fmt.Sprintf("The activity reported for %s was not kept: %v", nameOf(entry), err))
+	_, err = p.put(state, entry)
+	if err != nil {
+		return true, fmt.Errorf("keep reported activity: %w", err)
 	}
-	return true
+	return true, nil
+}
+
+func (p Pass) flushToolCalls(ctx context.Context, state reconciler.State, entry reconciler.Entry) error {
+	for {
+		wrote, err := p.writeToolActivity(ctx, state, entry, activity.Activity{}, false)
+		if err != nil {
+			return fmt.Errorf("report tool calls before releasing %s: %w", entry.ShipID, err)
+		}
+		if !wrote {
+			return nil
+		}
+		entry = state.Entries[entry.ShipID]
+	}
 }
