@@ -152,12 +152,12 @@ export async function aFleet(): Promise<Fleet> {
     },
     crewInRepositories: async (shipId, { options = {}, ...at }) => {
       const { settingsVersion } = unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: at.harness, workspace: repositoriesOf(at), options } }));
-      unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
+      unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId, settingsVersion }));
       await sendGuardRules(shipId, settingsVersion);
     },
     crewInFolder: async (shipId, { folder, harness }) => {
       const { settingsVersion } = unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'folder', name: folder }, options: {} } }));
-      unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
+      unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId, settingsVersion }));
       await sendGuardRules(shipId, settingsVersion);
     },
     requestCrewAgainInRepositories: async (shipId, at) => {
