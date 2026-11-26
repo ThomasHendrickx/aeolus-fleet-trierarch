@@ -144,6 +144,8 @@ type Entry struct {
 	RefusalsReported int `json:"refusalsReported,omitempty"`
 	// ToolCallsReported is the byte offset of the last guard decision accepted by the fleet.
 	ToolCallsReported int64 `json:"toolCallsReported,omitempty"`
+	// ToolCallReportedAt is the time of the newest guard decision in the reported prefix.
+	ToolCallReportedAt time.Time `json:"toolCallReportedAt,omitzero"`
 	// ToolEventReported identifies the last unguarded tool observation accepted by the fleet.
 	ToolEventReported string `json:"toolEventReported,omitempty"`
 	// UsageLimitTold is the occurrence whose notice was sent, kept across passes and restarts (#1629).

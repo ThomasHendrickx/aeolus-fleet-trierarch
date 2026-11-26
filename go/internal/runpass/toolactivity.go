@@ -23,11 +23,23 @@ func (p Pass) writeToolActivity(ctx context.Context, state reconciler.State, ent
 	if err != nil {
 		return true, fmt.Errorf("read tool calls: %w", err)
 	}
-	if len(calls) == 0 && (!hasShown || shown.Kind != "tool") {
-		return false, nil
+	if len(calls) == 0 {
+		if !hasShown {
+			return false, nil
+		}
+		if !shown.At.After(entry.ToolCallReportedAt) {
+			return true, nil
+		}
+		if shown.Kind != "tool" {
+			return false, nil
+		}
 	}
+	newest := entry.ToolCallReportedAt
 	var observations []fleet.ShipActivity
 	for _, call := range calls {
+		if call.At.After(newest) {
+			newest = call.At
+		}
 		kind := "tool"
 		if call.Result == "refused" {
 			kind = "refused"
@@ -37,7 +49,7 @@ func (p Pass) writeToolActivity(ctx context.Context, state reconciler.State, ent
 		}})
 	}
 	reported := entry.ToolEventReported
-	if hasShown && len(calls) < callsPerPass && (len(calls) == 0 || shown.At.After(calls[len(calls)-1].At)) {
+	if hasShown && len(calls) < callsPerPass && shown.At.After(newest) {
 		if shown.Kind == "tool" {
 			// The harness reports its own copy of the call. The guard's decision is authoritative.
 			key := shown.At.Format(time.RFC3339Nano) + ":" + shown.Tool
@@ -59,7 +71,7 @@ func (p Pass) writeToolActivity(ctx context.Context, state reconciler.State, ent
 	if next == entry.ToolCallsReported && reported == entry.ToolEventReported {
 		return true, nil
 	}
-	entry.ToolCallsReported, entry.ToolEventReported = next, reported
+	entry.ToolCallsReported, entry.ToolEventReported, entry.ToolCallReportedAt = next, reported, newest
 	_, err = p.put(state, entry)
 	if err != nil {
 		return true, fmt.Errorf("keep reported activity: %w", err)
