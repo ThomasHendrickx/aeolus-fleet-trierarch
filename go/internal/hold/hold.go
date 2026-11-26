@@ -378,6 +378,9 @@ func (h *held) onLine(line string) {
 	var said struct {
 		Type      string `json:"type"`
 		SessionID string `json:"session_id"`
+		RateLimit *struct {
+			Status string `json:"status"`
+		} `json:"rate_limit_info"`
 		// ThreadID is the thread a Codex turn names, which a later turn resumes.
 		ThreadID string `json:"thread_id"`
 		// CopilotSessionID is the session a Copilot result names, the only event naming it.
@@ -410,6 +413,10 @@ func (h *held) onLine(line string) {
 		_ = os.WriteFile(h.options.Files.SessionID, []byte(id), 0o600)
 	}
 	switch said.Type {
+	case "rate_limit_event":
+		if h.options.Harness == claudeCode && said.RateLimit != nil {
+			h.working.usageWindow(said.RateLimit.Status)
+		}
 	case "turn.started":
 		if h.options.Harness == codex {
 			h.working.start()

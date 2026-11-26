@@ -113,6 +113,16 @@ func (c *workingClock) resume(id string) {
 	}
 }
 
+func (c *workingClock) usageWindow(status string) {
+	const waitID = "usage-limit"
+	switch status {
+	case "rejected":
+		c.wait(waitID)
+	case "allowed", "allowed_warning":
+		c.resume(waitID)
+	}
+}
+
 func (c *workingClock) stopWorking() {
 	if !c.reading.Since.IsZero() {
 		c.reading.Elapsed += max(0, c.now().Sub(c.reading.Since))
