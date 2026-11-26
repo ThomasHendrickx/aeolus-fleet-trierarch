@@ -1,27 +1,29 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { expect, it } from 'vitest';
 
-import { aShortFolder, SHORT_FOLDER_VARIABLE } from './test-folders.js';
+import { aMachine } from '../../contract/support/machine.js';
+import { SHORT_FOLDER_VARIABLE } from './test-folders.js';
 
-it('makes each contract machine in a different short folder without reusing an existing one', () => {
-  const root = mkdtempSync(join(tmpdir(), 'machine-folders-'));
-  const env = { [SHORT_FOLDER_VARIABLE]: root };
-  try {
-    const first = aShortFolder(env);
-    const marker = join(first, 'left');
-    writeFileSync(marker, 'keep');
+// A machine fixture links system programs and initializes a Git repository.
+const MACHINE_SETUP_TIMEOUT_MS = 30_000;
 
-    const second = aShortFolder(env);
+it('gives each contract machine its own short folder and keeps earlier contents', async () => {
+  const shortFolder = process.env[SHORT_FOLDER_VARIABLE];
+  if (shortFolder === undefined) throw new Error('expected a short folder from test setup');
 
-    expect(dirname(first)).toBe(realpathSync(root));
-    expect(dirname(second)).toBe(realpathSync(root));
-    expect(first).not.toBe(second);
-    expect(existsSync(second)).toBe(true);
-    expect(readFileSync(marker, 'utf8')).toBe('keep');
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+  const underTest = [process.execPath, '--version'];
+  const first = await aMachine({ underTest });
+  const firstRoot = dirname(first.home);
+  const marker = join(firstRoot, 'left');
+  writeFileSync(marker, 'keep');
+
+  const second = await aMachine({ underTest });
+  const secondRoot = dirname(second.home);
+
+  expect(dirname(firstRoot)).toBe(realpathSync(shortFolder));
+  expect(dirname(secondRoot)).toBe(realpathSync(shortFolder));
+  expect(secondRoot).not.toBe(firstRoot);
+  expect(readFileSync(marker, 'utf8')).toBe('keep');
+}, MACHINE_SETUP_TIMEOUT_MS);
