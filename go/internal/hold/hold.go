@@ -131,6 +131,10 @@ type Options struct {
 	// Environment is the harness's whole environment: nothing else of the hold's reaches it (H10).
 	Environment []string
 	Version     string
+	// WorkingTimePath holds this crew's working time, if this crew can be measured.
+	WorkingTimePath string
+	// Now is the clock for working time. Nil uses the system clock.
+	Now func() time.Time
 	// Stop is closed when the hold is told to stop.
 	Stop <-chan struct{}
 	// Guard is the command line of the guard, none when empty.
@@ -174,6 +178,7 @@ type held struct {
 	child        *harness
 	sessionID    string
 	isBusy       bool
+	working      workingClock
 	isRestarting bool
 	isStopping   bool
 	controls     int
@@ -199,7 +204,7 @@ func Run(options Options) int {
 		return 1
 	}
 	defer events.close()
-	h := &held{options: options, events: events, watchers: map[chan event]struct{}{}, ended: make(chan int, 1)}
+	h := &held{options: options, events: events, working: openWorkingClock(options.WorkingTimePath, options.Now), watchers: map[chan event]struct{}{}, ended: make(chan int, 1)}
 	if len(options.Guard) > 0 {
 		guard, err := startGuard(options.Guard)
 		if err != nil {
@@ -235,6 +240,7 @@ func Run(options Options) int {
 	}
 	h.mutex.Lock()
 	last := h.child
+	h.working.end()
 	h.mutex.Unlock()
 	// What the harness started is ended with it, whichever way it ended.
 	if last != nil {
@@ -315,6 +321,9 @@ func (h *held) start(command []string) (*harness, error) {
 	h.child = started
 	if h.isTurnPerProcess() {
 		h.isBusy = true
+		if h.options.Harness == copilot {
+			h.working.start()
+		}
 	}
 	if h.guard != nil {
 		_, _ = fmt.Fprintf(h.guard, "%d %s\n", run.Process.Pid, startOf(run.Process.Pid))
@@ -400,6 +409,14 @@ func (h *held) onLine(line string) {
 		h.sessionID = id
 		_ = os.WriteFile(h.options.Files.SessionID, []byte(id), 0o600)
 	}
+	switch said.Type {
+	case "turn.started":
+		if h.options.Harness == codex {
+			h.working.start()
+		}
+	case "turn.completed", "turn.failed", "turn.aborted", "result":
+		h.working.end()
+	}
 	if said.Type == "result" {
 		h.isBusy = false
 		h.tell(event{kind: resultEvent})
@@ -435,6 +452,9 @@ func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 	isTurnPerProcess := h.isTurnPerProcess()
+	if h.child == run {
+		h.working.end()
+	}
 	if isTurnPerProcess && h.child == run {
 		h.isBusy = false
 		h.child = nil
@@ -544,6 +564,16 @@ func (h *held) answer(request Request) Answer {
 		h.isBusy = true
 		if _, err := h.child.stdin.Write([]byte(request.Line + "\n")); err != nil {
 			return Answer{Error: "the harness takes no more lines: " + err.Error()}
+		}
+		h.working.start()
+		return Answer{IsOK: true}
+	case "wait-started", "wait-ended":
+		h.mutex.Lock()
+		defer h.mutex.Unlock()
+		if request.Call == "wait-started" {
+			h.working.wait(request.Line)
+		} else {
+			h.working.resume(request.Line)
 		}
 		return Answer{IsOK: true}
 	case "interrupt":
