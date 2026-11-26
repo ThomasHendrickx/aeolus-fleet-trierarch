@@ -1,0 +1,26 @@
+name: Verify machine folders on macOS (#653)
+
+on:
+  push:
+    branches: ['verify/653-macos-56f377ed']
+
+permissions:
+  contents: read
+
+jobs:
+  machine-folders:
+    name: Run the machine-folders test 20 times on macOS
+    runs-on: macos-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 56f377eda7ae36010d1cd90cbae7e671a5837647
+      - uses: ./.github/actions/install-node-modules
+      - name: Run 20 consecutive tests
+        shell: bash
+        run: |
+          for run in {1..20}; do
+            printf 'macOS run %02d/20\n' "$run"
+            npm test -- --project scripts:unit scripts/support/machine-folders.test.ts --reporter=verbose
+          done
