@@ -113,3 +113,32 @@ func TestWorkingTimeIsUnknownWithoutCompleteEvidence(t *testing.T) {
 		t.Fatal("an open turn with no running hold reads as known")
 	}
 }
+
+func TestARejectedUsageWindowPausesWorkingTimeBeforeTheTurnEnds(t *testing.T) {
+	var seconds atomic.Int64
+	now := func() time.Time { return time.Unix(1_800_000_000+seconds.Load(), 0) }
+	path := filepath.Join(t.TempDir(), "working-time.json")
+	session := aHoldOf(t, Options{
+		Harness: "claude-code", WorkingTimePath: path, Now: now,
+		Command: []string{"sh", "-c", `while read -r line; do printf '%s\n' "$line"; done`},
+	})
+	send := func(event string, after time.Duration, want time.Duration) {
+		t.Helper()
+		answer, err := Call(session.files.Socket, Request{Call: "send", Line: event}, time.Second)
+		if err != nil || !answer.IsOK {
+			t.Fatalf("send = %+v, %v", answer, err)
+		}
+		eventually(t, "the working time after "+event, func() bool {
+			got, known := ReadWorkingTime(path, now().Add(after), true)
+			return known && got == want
+		})
+	}
+
+	send(`{"type":"system"}`, 30*time.Second, 30*time.Second)
+	seconds.Store(30)
+	send(`{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}`, 10*time.Minute, 30*time.Second)
+	seconds.Store(630)
+	send(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}`, time.Minute, 90*time.Second)
+	seconds.Store(690)
+	send(`{"type":"result"}`, 10*time.Minute, 90*time.Second)
+}
