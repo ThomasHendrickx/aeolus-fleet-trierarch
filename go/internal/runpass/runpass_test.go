@@ -19,6 +19,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
@@ -2561,14 +2563,47 @@ func TestTheActivityOfARunningSessionIsWrittenEachPassWithTheInterval30Seconds(t
 	at := aRunPass(t)
 	at.crewed(t)
 	wrote := now.Add(-2 * time.Second)
-	at.harness.activities = map[string]activity.Activity{scout: {At: wrote, Kind: "tool", Tool: "Bash"}}
+	at.harness.activities = map[string]activity.Activity{scout: {At: wrote, Kind: "text"}}
 
 	at.run(t)
 	at.run(t)
 
-	want := []fleet.ShipActivity{{ShipID: scout, Activity: activity.Activity{At: wrote, Kind: "tool", Tool: "Bash"}}}
+	want := []fleet.ShipActivity{{ShipID: scout, Activity: activity.Activity{At: wrote, Kind: "text"}}}
 	if len(at.fleet.activityWrites) != 2 || !reflect.DeepEqual(at.fleet.activityWrites[1], want) || at.fleet.activityInterval != 30 {
 		t.Fatalf("written %+v at an interval of %d, want %+v each pass at 30", at.fleet.activityWrites, at.fleet.activityInterval, want)
+	}
+}
+
+func TestTheRunningSessionReportsAllGuardDecisionsInOrderWithoutReplayingThem(t *testing.T) {
+	at := aRunPass(t)
+	at.crewed(t)
+	guards := t.TempDir()
+	at.pass.ToolCalls = guardfile.Store{Guards: guards}
+	log := guardfile.ToolCalls{Guards: guards, ShipID: scout}
+	for _, call := range []guard.CallActivity{
+		{At: now, Tool: "Read", Result: "allowed"},
+		{At: now, Tool: "Bash", Result: "refused", Reason: "blocked rule"},
+		{At: now, Tool: "Read", Result: "allowed"},
+	} {
+		if err := log.Append(t.Context(), call); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at.harness.activities = map[string]activity.Activity{scout: {At: now, Kind: "tool", Tool: "Read"}}
+
+	at.fleet.cannotWriteActivity = errors.New("unreachable")
+	at.run(t)
+	at.fleet.cannotWriteActivity = nil
+	at.run(t)
+	at.run(t)
+
+	want := [][]fleet.ShipActivity{{
+		{ShipID: scout, Activity: activity.Activity{At: now, Kind: "tool", Tool: "Read"}},
+		{ShipID: scout, Activity: activity.Activity{At: now, Kind: "refused", Tool: "Bash", Reason: "blocked rule"}},
+		{ShipID: scout, Activity: activity.Activity{At: now, Kind: "tool", Tool: "Read"}},
+	}}
+	if !reflect.DeepEqual(at.fleet.activityWrites, want) {
+		t.Fatalf("wrote %+v, want %+v", at.fleet.activityWrites, want)
 	}
 }
 

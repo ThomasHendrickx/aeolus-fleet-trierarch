@@ -267,6 +267,7 @@ func TestSessionsActivitiesAreWrittenToTheFleetWithTheIntervalTheTrierarchStates
 
 	err := Client{URL: server.URL, CrewToken: "aeolus_ct_v1_trierarch"}.ReportActivity(30, []ShipActivity{
 		{ShipID: shipID, Activity: activity.Activity{At: at, Kind: "tool", Tool: "Bash"}},
+		{ShipID: shipID, Activity: activity.Activity{At: at, Kind: "refused", Tool: "Write", Reason: "blocked rule"}},
 		{ShipID: "shp_other", Activity: activity.Activity{At: at, Kind: "result"}},
 	})
 
@@ -275,6 +276,7 @@ func TestSessionsActivitiesAreWrittenToTheFleetWithTheIntervalTheTrierarchStates
 	}
 	want := map[string]any{"intervalSeconds": 30, "activities": []any{
 		map[string]any{"shipId": shipID, "at": "2026-11-05T12:00:00.000Z", "kind": "tool", "tool": "Bash"},
+		map[string]any{"shipId": shipID, "at": "2026-11-05T12:00:00.000Z", "kind": "refused", "tool": "Write", "reason": "blocked rule"},
 		map[string]any{"shipId": "shp_other", "at": "2026-11-05T12:00:00.000Z", "kind": "result"},
 	}}
 	if got, _ := json.Marshal(asked); string(got) != mustJSON(want) {
