@@ -99,7 +99,11 @@ func failedCheck(ctx context.Context, at paths.Paths, shipID string, now func() 
 		return guard.Failed("deadline")
 	}
 	if _, err := os.Stat(guardfile.Folder(at.Guard, shipID)); err == nil {
-		_ = (guardfile.Refusals{Guards: at.Guard, ShipID: shipID}).Append(ctx, guard.FailedRefusal(now(), cause))
+		refusal := guard.FailedRefusal(now(), cause)
+		_ = (guardfile.Refusals{Guards: at.Guard, ShipID: shipID}).Append(ctx, refusal)
+		_ = (guardfile.ToolCalls{Guards: at.Guard, ShipID: shipID}).Append(ctx, guard.CallActivity{
+			At: refusal.At, Result: "refused", Reason: refusal.Rule,
+		})
 	}
 	return guard.Failed(cause)
 }
