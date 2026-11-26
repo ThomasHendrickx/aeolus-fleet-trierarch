@@ -61,8 +61,10 @@ type Start struct {
 	Folder string
 	// ShipFolder is the ship's own folder, which holds its home and its sockets; none for a ship crewed before the ship folders.
 	ShipFolder string
-	Harness    string
-	Command    []string
+	// MeasureWorkingTime starts measuring a new crew from its first launch.
+	MeasureWorkingTime bool
+	Harness            string
+	Command            []string
 	// Env is given to the harness on top of the hold's own few variables.
 	Env map[string]string
 	// ProxyToken is the session's model proxy token, none for a session on its subscription (headless H16).
@@ -226,6 +228,11 @@ func (r Runtime) Start(session Start) error {
 		session = held
 	}
 	words := append(append([]string{}, r.Program...), "hold", session.ShipID, "--sessions", r.Sessions, "--folder", session.Folder, "--harness", session.Harness)
+	if path := hold.WorkingTimePath(session.ShipFolder); path != "" {
+		if _, err := os.Stat(path); err == nil || session.MeasureWorkingTime {
+			words = append(words, "--working-time", path)
+		}
+	}
 	// The token goes in the session's folder, which only its user reads, and the hold reads it there: a command line is anyone's to see.
 	if token := session.ProxyToken; token != nil {
 		if err := proxytoken.Write(files.Folder, proxytoken.Token{Harness: token.Harness, Token: token.Token}); err != nil {

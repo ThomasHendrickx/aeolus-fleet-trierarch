@@ -914,7 +914,7 @@ func ReadSecretEnv(path string) (map[string]string, error) {
 // keptVariables are what the harness takes of the hold's own environment; everything else it is given. USER and LOGNAME name the user, by which Claude Code finds its login on macOS.
 var keptVariables = []string{"HOME", "PATH", "USER", "LOGNAME"}
 
-const usage = "Usage: aeolus-trierarch hold <ship id> --sessions <folder> --folder <folder> --harness <name> [--proxy-token-variable NAME] [--env NAME=value]... [--secret-env NAME]... -- <command>..."
+const usage = "Usage: aeolus-trierarch hold <ship id> --sessions <folder> --folder <folder> --harness <name> [--working-time <file>] [--proxy-token-variable NAME] [--env NAME=value]... [--secret-env NAME]... -- <command>..."
 
 // Main runs `aeolus-trierarch hold` with the words after `hold`, as the trierarch starts it, never a person: the harness's environment is built from nothing (H10), the kept variables of the hold's own, then each --env given, each --secret-env named with its value from the folder's secret file, and with --proxy-token-variable the session's model proxy token from its folder in that variable (H16); its guard is this program run as `hold --guard`. Answers its exit code, or 2 for words it cannot take.
 func Main(words []string, version string, environ []string) int {
@@ -1010,6 +1010,7 @@ func MainWithCodexGuard(words []string, version string, environ []string, guard 
 	}
 	return Run(Options{
 		PrepareCodexTurn: prepare,
+		WorkingTimePath:  values["--working-time"],
 		Files:            files,
 		Folder:           values["--folder"],
 		Harness:          values["--harness"],

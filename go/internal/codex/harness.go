@@ -252,7 +252,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if err := h.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
-	start := sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "codex", Command: command, Env: map[string]string{launchVariable: launchID}, ProxyToken: token, Mcp: mcp}
+	start := sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, ShipFolder: entry.ShipFolder, MeasureWorkingTime: isFirstStart && !entry.HasStarted && entry.ShipFolder != "", Harness: "codex", Command: command, Env: map[string]string{launchVariable: launchID}, ProxyToken: token, Mcp: mcp}
 	if h.GuardConfig != "" {
 		start.Env["AEOLUS_TRIERARCH_CONFIG"] = h.GuardConfig
 	}

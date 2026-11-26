@@ -302,7 +302,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	}
 	env[launchVariable] = launchID
 	env[claudeAiConnectorsVariable] = "false"
-	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, ShipFolder: entry.ShipFolder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, Mcp: mcp}); err != nil {
+	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, ShipFolder: entry.ShipFolder, MeasureWorkingTime: isFirstStart && !entry.HasStarted && entry.ShipFolder != "", Harness: "claude-code", Command: command, Env: env, ProxyToken: token, Mcp: mcp}); err != nil {
 		return err
 	}
 	return h.Runtime.Send(entry.ShipID, UserLine(line))

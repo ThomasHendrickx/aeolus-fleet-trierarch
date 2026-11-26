@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -12,6 +13,14 @@ type workingTime struct {
 	Since   time.Time     `json:"workingSince,omitzero"`
 	IsOpen  bool          `json:"isTurnOpen,omitempty"`
 	Unknown bool          `json:"unknown,omitempty"`
+}
+
+// WorkingTimePath is the working time record in the folder that lives as long as the crew.
+func WorkingTimePath(shipFolder string) string {
+	if shipFolder == "" {
+		return ""
+	}
+	return filepath.Join(shipFolder, "working-time.json")
 }
 
 // ReadWorkingTime reads the time its hold observed the ship working. An open turn whose
@@ -112,17 +121,21 @@ func (c *workingClock) stopWorking() {
 }
 
 func (c *workingClock) save() {
-	temp := c.path + ".tmp"
-	data, err := json.Marshal(c.reading)
-	if err == nil {
-		err = os.WriteFile(temp, data, 0o600)
-	}
-	if err == nil {
-		err = os.Rename(temp, c.path)
-	}
-	if err != nil {
-		_ = os.Remove(temp)
+	if err := c.write(); err != nil {
 		_ = os.Remove(c.path)
 		c.path = ""
 	}
+}
+
+func (c *workingClock) write() error {
+	file, err := os.CreateTemp(filepath.Dir(c.path), ".working-time-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	writeErr := json.NewEncoder(file).Encode(c.reading)
+	if err := errors.Join(writeErr, file.Close()); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), c.path)
 }

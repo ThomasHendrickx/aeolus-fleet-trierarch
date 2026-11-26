@@ -196,12 +196,13 @@ func (c Client) Owner(ctx context.Context, ship string) (Owner, error) {
 
 // Fleet reads whoami as the ship, inside the trierarch only.
 type Fleet struct {
-	Questions Questions
-	URL       string
-	TokenOf   func(string) string
-	Clock     Clock
-	Log       func(string)
-	Waits     *ReportWaits
+	Questions        Questions
+	URL              string
+	TokenOf          func(string) string
+	Clock            Clock
+	Log              func(string)
+	Waits            *ReportWaits
+	PauseWorkingTime func(ship string) func()
 }
 
 // Owner calls whoami with the current crew token and validates its owner.
