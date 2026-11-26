@@ -23,7 +23,7 @@ func (p Pass) writeToolActivity(ctx context.Context, state reconciler.State, ent
 	if err != nil {
 		return true, fmt.Errorf("read tool calls: %w", err)
 	}
-	if len(calls) == 0 {
+	if len(calls) == 0 && next == entry.ToolCallsReported {
 		if !hasShown {
 			return false, nil
 		}
@@ -62,11 +62,10 @@ func (p Pass) writeToolActivity(ctx context.Context, state reconciler.State, ent
 			observations = append(observations, fleet.ShipActivity{ShipID: entry.ShipID, Activity: shown})
 		}
 	}
-	if len(observations) == 0 {
-		return true, nil
-	}
-	if err := p.Fleet.ReportActivity(activityIntervalSeconds, observations); err != nil {
-		return true, fmt.Errorf("send activity: %w", err)
+	if len(observations) > 0 {
+		if err := p.Fleet.ReportActivity(activityIntervalSeconds, observations); err != nil {
+			return true, fmt.Errorf("send activity: %w", err)
+		}
 	}
 	if next == entry.ToolCallsReported && reported == entry.ToolEventReported {
 		return true, nil
