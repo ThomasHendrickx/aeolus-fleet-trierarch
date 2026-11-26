@@ -812,6 +812,9 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	}
 
 	read := usageOf(configured, env, home, homesOf(at, configured.Runtime), pass.Store)
+	read.WorkingTime = func(entry reconciler.Entry, now time.Time) (time.Duration, bool) {
+		return (sessions.Runtime{Sessions: at.Sessions}).WorkingTime(entry.ShipID, entry.ShipFolder, now)
+	}
 	// The usage goes to the trierarch plugin's ship once an hour, and a released ship's last usage before its folder goes.
 	sender := &usage.Sender{Harnesses: read.Harnesses, Reader: read, MadeAt: usage.FolderMadeAt, Store: saved, Fleet: client, Prices: read.Prices, Now: time.Now, Log: logLine, TrierarchShipID: kept.ShipID, PluginShipID: kept.PluginShipID}
 	pass.SendReleasedUsage = sender.SendReleased

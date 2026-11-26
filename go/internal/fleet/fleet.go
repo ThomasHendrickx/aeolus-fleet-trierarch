@@ -28,7 +28,7 @@ import (
 )
 
 // MinimumCoreVersion is the oldest core the trierarch runs against (decision 0049, docs/compatibility.md).
-const MinimumCoreVersion = "0.47.0"
+const MinimumCoreVersion = "0.48.0"
 
 // Harness is what the trierarch registers its own ship with.
 const Harness = "aeolus-trierarch"
