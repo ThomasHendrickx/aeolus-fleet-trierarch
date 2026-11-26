@@ -349,6 +349,7 @@ type Pass struct {
 	// GuardStatuses read each guarded session's guard; GuardReports report it.
 	GuardStatuses GuardStatuses
 	GuardReports  GuardReports
+	ToolCalls     ToolCalls
 	Workspace     Workspace
 	// FolderProcesses are stopped in an orphan worktree before it is removed.
 	FolderProcesses FolderProcesses
@@ -519,7 +520,7 @@ func (p Pass) Run(ctx context.Context) error {
 	}
 	p.tidyRepositories()
 	p.emptyTrash()
-	p.writeActivities(next, p.reportGuards(ctx, next))
+	p.writeActivities(ctx, next, p.reportGuards(ctx, next))
 	if p.Seen != nil {
 		snapshot.PassAt = p.Now().UTC().Format(isoMillis)
 		if err := p.Seen.Save(snapshot); err != nil {
@@ -578,7 +579,7 @@ func (p Pass) emptyTrash() {
 const activityIntervalSeconds = 30
 
 // writeActivities writes the activity of every running session, each pass (monitoring W3b): a trierarch that is down then reads as unknown, not as stopped work. A failure is logged and never fails the pass.
-func (p Pass) writeActivities(state reconciler.State, refusals map[string]activity.Activity) {
+func (p Pass) writeActivities(ctx context.Context, state reconciler.State, refusals map[string]activity.Activity) {
 	running, err := p.Sessions.List()
 	if err != nil {
 		p.Log(fmt.Sprintf("The activity of the sessions was not written: %v; the next pass tries again", err))
@@ -596,6 +597,9 @@ func (p Pass) writeActivities(state reconciler.State, refusals map[string]activi
 			continue
 		}
 		shown, ok := harness.Activity(entry)
+		if p.ToolCalls != nil && entry.CrewToken != "" && p.writeToolActivity(ctx, state, entry, shown, ok) {
+			continue
+		}
 		if refused, exists := refusals[shipID]; exists && (!ok || !refused.At.Before(shown.At)) {
 			shown, ok = refused, true
 		}

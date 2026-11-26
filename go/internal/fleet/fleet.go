@@ -398,6 +398,9 @@ func (c Client) ReportActivity(intervalSeconds int, activities []ShipActivity) e
 			if each.Activity.Tool != "" {
 				written["tool"] = each.Activity.Tool
 			}
+			if each.Activity.Kind == "refused" && each.Activity.Reason != "" {
+				written["reason"] = each.Activity.Reason
+			}
 			chunk = append(chunk, written)
 		}
 		body := map[string]any{"intervalSeconds": intervalSeconds, "activities": chunk}
