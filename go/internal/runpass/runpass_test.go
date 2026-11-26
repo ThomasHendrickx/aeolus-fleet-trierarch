@@ -998,6 +998,27 @@ func TestAReleaseSendsTheFinalUsageReportBeforeEndingTheLease(t *testing.T) {
 	}
 }
 
+func TestAReleaseReportsGuardDecisionsMadeSinceTheLastPass(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	guards := t.TempDir()
+	pass.pass.ToolCalls = guardfile.Store{Guards: guards}
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+	log := guardfile.ToolCalls{Guards: guards, ShipID: scout}
+	if err := log.Append(t.Context(), guard.CallActivity{At: now, Tool: "Read", Result: "allowed"}); err != nil {
+		t.Fatal(err)
+	}
+	pass.pass.ReportBeforeRelease = func() error {
+		want := [][]fleet.ShipActivity{{{ShipID: scout, Activity: activity.Activity{At: now, Kind: "tool", Tool: "Read"}}}}
+		if !reflect.DeepEqual(pass.fleet.activityWrites, want) {
+			t.Fatalf("activity before release = %+v, want %+v", pass.fleet.activityWrites, want)
+		}
+		return nil
+	}
+
+	pass.run(t)
+}
+
 func TestAReleaseLogsWhatItsWorktreeHeldAndRemovesItAnyway(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
