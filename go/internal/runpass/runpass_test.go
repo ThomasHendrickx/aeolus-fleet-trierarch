@@ -2637,6 +2637,7 @@ func TestTheRunningSessionReportsAllGuardDecisionsInOrderWithoutReplayingThem(t 
 	at.run(t)
 	at.fleet.cannotWriteActivity = nil
 	at.run(t)
+	at.harness.activities[scout] = activity.Activity{At: now.Add(-time.Second), Kind: "result"}
 	at.run(t)
 
 	want := [][]fleet.ShipActivity{{
