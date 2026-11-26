@@ -977,6 +977,27 @@ func TestAReleaseStopsTheSessionEndsTheLeaseRemovesTheWorktreeThenConfirms(t *te
 	}
 }
 
+func TestAReleaseSendsTheFinalUsageReportBeforeEndingTheLease(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+	pass.pass.ReportBeforeRelease = func() error {
+		if !slices.Equal(pass.sessions.stopped, []string{scout}) {
+			t.Fatalf("the session must be stopped before its final measurement, got %q", pass.sessions.stopped)
+		}
+		if _, ok := pass.store.state.Entries[scout]; !ok {
+			t.Fatal("the report must still be able to read the ship's usage")
+		}
+		return pass.fleet.call("report")
+	}
+
+	pass.run(t)
+
+	if want := []string{"report", "release " + scout, "confirm " + scout}; !slices.Equal(pass.fleet.calls, want) {
+		t.Fatalf("fleet calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
 func TestAReleaseLogsWhatItsWorktreeHeldAndRemovesItAnyway(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
