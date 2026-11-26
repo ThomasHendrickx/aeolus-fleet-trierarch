@@ -142,6 +142,12 @@ type Entry struct {
 	GuardReported string `json:"guardReported,omitempty"`
 	// RefusalsReported is how many of its guard's refusals were reported as its session's activity, counted over its guard folder.
 	RefusalsReported int `json:"refusalsReported,omitempty"`
+	// ToolCallsReported is the byte offset of the last guard decision accepted by the fleet.
+	ToolCallsReported int64 `json:"toolCallsReported,omitempty"`
+	// ToolCallReportedAt is the time of the newest guard decision in the reported prefix.
+	ToolCallReportedAt time.Time `json:"toolCallReportedAt,omitzero"`
+	// ToolEventReported identifies the last unguarded tool observation accepted by the fleet.
+	ToolEventReported string `json:"toolEventReported,omitempty"`
 	// UsageLimitTold is the occurrence whose notice was sent, kept across passes and restarts (#1629).
 	UsageLimitTold string `json:"usageLimitTold,omitempty"`
 	// LaunchedAt and LaunchID are set while its session's launch window is open (#382, #490).

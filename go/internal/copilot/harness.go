@@ -149,7 +149,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if h.CopilotHome != "" {
 		env[copilotHomeVariable] = h.CopilotHome
 	}
-	return h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "copilot", Command: command, Env: env, Mcp: mcp})
+	return h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, ShipFolder: entry.ShipFolder, MeasureWorkingTime: isFirstStart && !entry.HasStarted && entry.ShipFolder != "", Harness: "copilot", Command: command, Env: env, Mcp: mcp})
 }
 
 // LaunchSeen is what the session did in its launch window, as its marker says; with no activity, the cause Copilot's last error gives (H13).

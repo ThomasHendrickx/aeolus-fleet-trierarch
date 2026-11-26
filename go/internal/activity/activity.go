@@ -22,9 +22,10 @@ type Reading struct {
 
 // Activity is a session's reading, at when its events were last written.
 type Activity struct {
-	At   time.Time
-	Kind string
-	Tool string
+	At     time.Time
+	Kind   string
+	Tool   string
+	Reason string
 }
 
 // Latest is the reading of the newest of the events that reads as activity; none when none does.

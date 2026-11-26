@@ -349,6 +349,7 @@ type Pass struct {
 	// GuardStatuses read each guarded session's guard; GuardReports report it.
 	GuardStatuses GuardStatuses
 	GuardReports  GuardReports
+	ToolCalls     ToolCalls
 	Workspace     Workspace
 	// FolderProcesses are stopped in an orphan worktree before it is removed.
 	FolderProcesses FolderProcesses
@@ -393,6 +394,8 @@ type Pass struct {
 	RefuseModel func(harness string, model string) error
 	// ReadUsage reads the harnesses' usage as often as its own intervals allow: a harness whose subscription window is used up is not offered until it resets (#263). None offers every harness.
 	ReadUsage func() (usage.Usage, error)
+	// ReportBeforeRelease publishes the stopped session's working time while its lease is still held.
+	ReportBeforeRelease func() error
 	// SendReleasedUsage sends a released ship's last usage before its folder goes (the usage design, U9); it fails while the fleet does not take it, so the folder stays. None sends nothing.
 	SendReleasedUsage func(entry reconciler.Entry) error
 	// Load reads the machine's load, at most once a minute; none reads nothing (#400).
@@ -519,7 +522,7 @@ func (p Pass) Run(ctx context.Context) error {
 	}
 	p.tidyRepositories()
 	p.emptyTrash()
-	p.writeActivities(next, p.reportGuards(ctx, next))
+	p.writeActivities(ctx, next, p.reportGuards(ctx, next))
 	if p.Seen != nil {
 		snapshot.PassAt = p.Now().UTC().Format(isoMillis)
 		if err := p.Seen.Save(snapshot); err != nil {
@@ -578,7 +581,7 @@ func (p Pass) emptyTrash() {
 const activityIntervalSeconds = 30
 
 // writeActivities writes the activity of every running session, each pass (monitoring W3b): a trierarch that is down then reads as unknown, not as stopped work. A failure is logged and never fails the pass.
-func (p Pass) writeActivities(state reconciler.State, refusals map[string]activity.Activity) {
+func (p Pass) writeActivities(ctx context.Context, state reconciler.State, refusals map[string]activity.Activity) {
 	running, err := p.Sessions.List()
 	if err != nil {
 		p.Log(fmt.Sprintf("The activity of the sessions was not written: %v; the next pass tries again", err))
@@ -596,6 +599,15 @@ func (p Pass) writeActivities(state reconciler.State, refusals map[string]activi
 			continue
 		}
 		shown, ok := harness.Activity(entry)
+		if p.ToolCalls != nil && entry.CrewToken != "" {
+			handled, err := p.writeToolActivity(ctx, state, entry, shown, ok)
+			if err != nil {
+				p.Log(fmt.Sprintf("The activity of %s was not written: %v; the next pass tries again", nameOf(entry), err))
+			}
+			if handled {
+				continue
+			}
+		}
 		if refused, exists := refusals[shipID]; exists && (!ok || !refused.At.Before(shown.At)) {
 			shown, ok = refused, true
 		}
@@ -1121,6 +1133,16 @@ func (p Pass) release(ctx context.Context, state reconciler.State, entry reconci
 		return state, err
 	}
 	if ship.Status == "crewed" {
+		if p.ToolCalls != nil {
+			if err := p.flushToolCalls(ctx, state, entry); err != nil {
+				return state, err
+			}
+		}
+		if p.ReportBeforeRelease != nil {
+			if err := p.ReportBeforeRelease(); err != nil {
+				return state, fmt.Errorf("report working time before releasing %s: %w", entry.ShipID, err)
+			}
+		}
 		if err := p.Fleet.Release(entry.ShipID); err != nil {
 			return state, err
 		}

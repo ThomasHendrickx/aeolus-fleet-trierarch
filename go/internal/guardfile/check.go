@@ -147,29 +147,27 @@ func (r Refusals) Append(ctx context.Context, refusal guard.Refusal) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !crew.IsShipID(r.ShipID) {
-		return errors.New("invalid guard refusals ship id")
+	if err := appendRecord(r.Guards, r.ShipID, refusalsFile, refusal); err != nil {
+		return fmt.Errorf("record refusal: %w", err)
 	}
-	line, err := json.Marshal(refusal)
+	return nil
+}
+
+func appendRecord(guards string, shipID string, name string, record any) error {
+	line, err := json.Marshal(record)
 	if err != nil {
-		return fmt.Errorf("encode refusal: %w", err)
+		return fmt.Errorf("encode record: %w", err)
 	}
-	folder, err := MakeFolder(r.Guards, r.ShipID)
+	folder, err := MakeFolder(guards, shipID)
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(filepath.Join(folder, refusalsFile), os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
+	file, err := os.OpenFile(filepath.Join(folder, name), os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
-		return fmt.Errorf("open refusals: %w", err)
+		return fmt.Errorf("open log: %w", err)
 	}
-	if _, err := file.Write(append(line, '\n')); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("append refusal: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close refusals: %w", err)
-	}
-	return nil
+	_, writeErr := file.Write(append(line, '\n'))
+	return errors.Join(writeErr, file.Close())
 }
 
 // Links reads the file system's symbolic links.

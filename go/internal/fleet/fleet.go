@@ -28,7 +28,7 @@ import (
 )
 
 // MinimumCoreVersion is the oldest core the trierarch runs against (decision 0049, docs/compatibility.md).
-const MinimumCoreVersion = "0.47.0"
+const MinimumCoreVersion = "0.48.0"
 
 // Harness is what the trierarch registers its own ship with.
 const Harness = "aeolus-trierarch"
@@ -397,6 +397,9 @@ func (c Client) ReportActivity(intervalSeconds int, activities []ShipActivity) e
 			written := map[string]string{"shipId": each.ShipID, "at": each.Activity.At.UTC().Format("2006-01-02T15:04:05.000Z"), "kind": each.Activity.Kind}
 			if each.Activity.Tool != "" {
 				written["tool"] = each.Activity.Tool
+			}
+			if each.Activity.Kind == "refused" && each.Activity.Reason != "" {
+				written["reason"] = each.Activity.Reason
 			}
 			chunk = append(chunk, written)
 		}

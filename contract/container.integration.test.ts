@@ -202,7 +202,7 @@ describe('a session in a container', () => {
           sets: [{ ...at.guard, file: 'no-touch.yaml', rules: { commands: { deny: [{ command: 'touch' }] } } }],
         }),
       });
-      unwrap(await fleet.useCases.assignCrew(fleet.argo, { shipId: scout, trierarchShipId: fleet.trierarchShip.shipId }));
+      unwrap(await fleet.useCases.assignCrew(fleet.argo, { shipId: scout, trierarchShipId: fleet.trierarchShip.shipId, settingsVersion }));
     }
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
     await expect.poll(() => sessionOf(machine, 'scout').turns().length, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(0);
@@ -230,6 +230,18 @@ describe('a session in a container', () => {
       status: 'running', guard: { sets: [appliedGuard], refusals: 0, recent: [] },
     });
     const { at, ...refused } = recordRefusal();
+    const calls = [
+      { at, tool: 'Read', result: 'allowed' },
+      { at, tool: 'Bash', result: 'refused', reason: 'commands.deny' },
+    ];
+    appendFileSync(join(machine.trierarchHome, 'guard', scout, 'tool-calls.jsonl'), calls.map((call) => `${JSON.stringify(call)}\n`).join(''), { mode: 0o600 });
+    await expect.poll(async () => {
+      const page = unwrap(await fleet.useCases.readShipTimeline(fleet.argo, { shipId: scout }));
+      return page.items.filter((event) => event.type === 'ToolCallObserved').map((event) => event.details);
+    }, { timeout: SAID_WITHIN_MS }).toMatchObject([
+      { tool: 'Bash', outcome: 'refused', reason: 'commands.deny' },
+      { tool: 'Read', outcome: 'allowed' },
+    ]);
 
     await expect.poll(crewStatus, { timeout: SAID_WITHIN_MS }).toMatchObject({
       status: 'running', guard: { sets: [appliedGuard], refusals: 1, recent: [refused] },

@@ -55,7 +55,7 @@ func (p Pass) reportGuards(ctx context.Context, state reconciler.State) map[stri
 			continue
 		}
 		state = p.reportGuard(state, entry, status)
-		if len(status.Recent) > 0 {
+		if p.ToolCalls == nil && len(status.Recent) > 0 {
 			refused := status.Recent[len(status.Recent)-1]
 			started, _ := time.Parse(time.RFC3339Nano, entry.Since)
 			if !refused.At.Before(started) {
@@ -103,6 +103,9 @@ func (p Pass) reportGuard(state reconciler.State, entry reconciler.Entry, status
 		}
 		entry.GuardReported = reported
 		state = p.keptReported(state, entry)
+	}
+	if p.ToolCalls != nil {
+		return state
 	}
 	// The status holds the last refusals only: an older one not reported yet is no longer there to report.
 	first := status.Refusals - len(status.Recent) + 1

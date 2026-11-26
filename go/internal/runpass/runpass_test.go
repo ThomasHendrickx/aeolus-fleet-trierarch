@@ -19,6 +19,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guard"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/guardfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
@@ -972,6 +974,113 @@ func TestAReleaseStopsTheSessionEndsTheLeaseRemovesTheWorktreeThenConfirms(t *te
 	}
 	if len(pass.store.state.Entries) != 0 {
 		t.Fatalf("entries %+v", pass.store.state.Entries)
+	}
+}
+
+func TestAReleaseSendsTheFinalUsageReportBeforeEndingTheLease(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+	pass.pass.ReportBeforeRelease = func() error {
+		if !slices.Equal(pass.sessions.stopped, []string{scout}) {
+			t.Fatalf("the session must be stopped before its final measurement, got %q", pass.sessions.stopped)
+		}
+		if _, ok := pass.store.state.Entries[scout]; !ok {
+			t.Fatal("the report must still be able to read the ship's usage")
+		}
+		return pass.fleet.call("report")
+	}
+
+	pass.run(t)
+
+	if want := []string{"report", "release " + scout, "confirm " + scout}; !slices.Equal(pass.fleet.calls, want) {
+		t.Fatalf("fleet calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
+func TestAReleaseReportsGuardDecisionsMadeSinceTheLastPass(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	guards := t.TempDir()
+	pass.pass.ToolCalls = guardfile.Store{Guards: guards}
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+	log := guardfile.ToolCalls{Guards: guards, ShipID: scout}
+	if err := log.Append(t.Context(), guard.CallActivity{At: now, Tool: "Read", Result: "allowed"}); err != nil {
+		t.Fatal(err)
+	}
+	pass.pass.ReportBeforeRelease = func() error {
+		want := [][]fleet.ShipActivity{{{ShipID: scout, Activity: activity.Activity{At: now, Kind: "tool", Tool: "Read"}}}}
+		if !reflect.DeepEqual(pass.fleet.activityWrites, want) {
+			t.Fatalf("activity before release = %+v, want %+v", pass.fleet.activityWrites, want)
+		}
+		return nil
+	}
+
+	pass.run(t)
+}
+
+func TestAReleaseReportsUsableGuardDecisionsDespiteBadRecords(t *testing.T) {
+	for _, scenario := range []struct {
+		name, prefix, tool, reportedTool string
+	}{
+		{name: "malformed line", prefix: "{broken}\n", tool: "Read", reportedTool: "Read"},
+		{name: "oversized line", prefix: strings.Repeat("x", 130*1024) + "\n", tool: "Read", reportedTool: "Read"},
+		{name: "missing decision", prefix: "{}\n", tool: "Read", reportedTool: "Read"},
+		{name: "long tool name", tool: strings.Repeat("界", 101), reportedTool: strings.Repeat("界", 100)},
+		{name: "supplementary tool name", tool: strings.Repeat("😀", 51), reportedTool: strings.Repeat("😀", 50)},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			pass := aRunPass(t)
+			pass.crewed(t)
+			guards := t.TempDir()
+			pass.pass.ToolCalls = guardfile.Store{Guards: guards}
+			pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+			folder, err := guardfile.MakeFolder(guards, scout)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(folder, "tool-calls.jsonl"), []byte(scenario.prefix), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			log := guardfile.ToolCalls{Guards: guards, ShipID: scout}
+			if err := log.Append(t.Context(), guard.CallActivity{At: now, Tool: scenario.tool, Result: "allowed"}); err != nil {
+				t.Fatal(err)
+			}
+			pass.pass.ReportBeforeRelease = func() error {
+				want := [][]fleet.ShipActivity{{{ShipID: scout, Activity: activity.Activity{At: now, Kind: "tool", Tool: scenario.reportedTool}}}}
+				if !reflect.DeepEqual(pass.fleet.activityWrites, want) {
+					t.Fatalf("activity before release = %+v, want %+v", pass.fleet.activityWrites, want)
+				}
+				return nil
+			}
+
+			pass.run(t)
+
+			if !slices.Contains(pass.fleet.calls, "release "+scout) {
+				t.Fatalf("fleet calls = %q, want release of %s", pass.fleet.calls, scout)
+			}
+		})
+	}
+}
+
+func TestTheRunningSessionKeepsItsPlaceAfterUnreadableGuardDecisions(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	guards := t.TempDir()
+	pass.pass.ToolCalls = guardfile.Store{Guards: guards}
+	folder, err := guardfile.MakeFolder(guards, scout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := "{broken}\n{"
+	if err := os.WriteFile(filepath.Join(folder, "tool-calls.jsonl"), []byte(records), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pass.run(t)
+
+	if got, want := pass.store.state.Entries[scout].ToolCallsReported, int64(len(records)-1); got != want {
+		t.Fatalf("reported tool calls offset = %d, want %d", got, want)
 	}
 }
 
@@ -2561,14 +2670,48 @@ func TestTheActivityOfARunningSessionIsWrittenEachPassWithTheInterval30Seconds(t
 	at := aRunPass(t)
 	at.crewed(t)
 	wrote := now.Add(-2 * time.Second)
-	at.harness.activities = map[string]activity.Activity{scout: {At: wrote, Kind: "tool", Tool: "Bash"}}
+	at.harness.activities = map[string]activity.Activity{scout: {At: wrote, Kind: "text"}}
 
 	at.run(t)
 	at.run(t)
 
-	want := []fleet.ShipActivity{{ShipID: scout, Activity: activity.Activity{At: wrote, Kind: "tool", Tool: "Bash"}}}
+	want := []fleet.ShipActivity{{ShipID: scout, Activity: activity.Activity{At: wrote, Kind: "text"}}}
 	if len(at.fleet.activityWrites) != 2 || !reflect.DeepEqual(at.fleet.activityWrites[1], want) || at.fleet.activityInterval != 30 {
 		t.Fatalf("written %+v at an interval of %d, want %+v each pass at 30", at.fleet.activityWrites, at.fleet.activityInterval, want)
+	}
+}
+
+func TestTheRunningSessionReportsAllGuardDecisionsInOrderWithoutReplayingThem(t *testing.T) {
+	at := aRunPass(t)
+	at.crewed(t)
+	guards := t.TempDir()
+	at.pass.ToolCalls = guardfile.Store{Guards: guards}
+	log := guardfile.ToolCalls{Guards: guards, ShipID: scout}
+	for _, call := range []guard.CallActivity{
+		{At: now, Tool: "Read", Result: "allowed"},
+		{At: now, Tool: "Bash", Result: "refused", Reason: "blocked rule"},
+		{At: now, Tool: "Read", Result: "allowed"},
+	} {
+		if err := log.Append(t.Context(), call); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at.harness.activities = map[string]activity.Activity{scout: {At: now, Kind: "tool", Tool: "Read"}}
+
+	at.fleet.cannotWriteActivity = errors.New("unreachable")
+	at.run(t)
+	at.fleet.cannotWriteActivity = nil
+	at.run(t)
+	at.harness.activities[scout] = activity.Activity{At: now.Add(-time.Second), Kind: "result"}
+	at.run(t)
+
+	want := [][]fleet.ShipActivity{{
+		{ShipID: scout, Activity: activity.Activity{At: now, Kind: "tool", Tool: "Read"}},
+		{ShipID: scout, Activity: activity.Activity{At: now, Kind: "refused", Tool: "Bash", Reason: "blocked rule"}},
+		{ShipID: scout, Activity: activity.Activity{At: now, Kind: "tool", Tool: "Read"}},
+	}}
+	if !reflect.DeepEqual(at.fleet.activityWrites, want) {
+		t.Fatalf("wrote %+v, want %+v", at.fleet.activityWrites, want)
 	}
 }
 

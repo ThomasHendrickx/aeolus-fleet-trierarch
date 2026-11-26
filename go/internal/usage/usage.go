@@ -71,10 +71,11 @@ type WindowReport struct {
 	ResetsAt      string  `json:"resetsAt"`
 }
 
-// ShipUsage is a crewed ship's tokens per model and login.
+// ShipUsage is a crewed ship's tokens per model and login, and its working time when the report carries it.
 type ShipUsage struct {
-	ShipID string       `json:"shipId"`
-	Models []ModelUsage `json:"models"`
+	ShipID        string       `json:"shipId"`
+	Models        []ModelUsage `json:"models"`
+	ActiveMinutes *float64     `json:"activeMinutes,omitempty"`
 }
 
 // ModelUsage is a ship's tokens of one model and login, with what they cost at its price; no cost for a model the prices do not name.
@@ -99,9 +100,11 @@ type Reader struct {
 	// Configured are the configured harnesses, in order: each one's subscription is read.
 	Configured []string
 	Store      Store
-	Prices     map[string]config.Price
-	Now        func() time.Time
-	Log        func(line string)
+	// WorkingTime measures the crew when the usage report is read.
+	WorkingTime func(entry reconciler.Entry, now time.Time) (time.Duration, bool)
+	Prices      map[string]config.Price
+	Now         func() time.Time
+	Log         func(line string)
 
 	ships           []ShipUsage
 	tokensReadAt    time.Time
@@ -113,7 +116,7 @@ type Reader struct {
 func (r *Reader) Read() (Usage, error) {
 	now := r.Now()
 	if r.tokensReadAt.IsZero() || now.Sub(r.tokensReadAt) >= TokensReadEvery {
-		if err := r.readTokens(); err != nil {
+		if err := r.readTokens(now); err != nil {
 			return Usage{}, err
 		}
 		r.tokensReadAt = now
@@ -122,6 +125,13 @@ func (r *Reader) Read() (Usage, error) {
 		r.readSubscription(harness, now)
 	}
 	read := Usage{Subscriptions: []Subscription{}, Ships: append([]ShipUsage{}, r.ships...)}
+	if r.WorkingTime != nil {
+		ships, err := r.withWorkingTime(read.Ships, now)
+		if err != nil {
+			return Usage{}, err
+		}
+		read.Ships = ships
+	}
 	for _, harness := range r.Configured {
 		last, ok := r.subscriptions[harness]
 		if !ok || last.windows == nil {
@@ -136,7 +146,37 @@ func (r *Reader) Read() (Usage, error) {
 	return read, nil
 }
 
-func (r *Reader) readTokens() error {
+func (r *Reader) withWorkingTime(ships []ShipUsage, now time.Time) ([]ShipUsage, error) {
+	state, err := r.Store.Load()
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]ShipUsage, len(ships))
+	for _, ship := range ships {
+		byID[ship.ShipID] = ship
+	}
+	for id, entry := range state.Entries {
+		if entry.Folder == "" || entry.CrewToken == "" {
+			continue
+		}
+		ship, ok := byID[id]
+		if !ok {
+			ship = ShipUsage{ShipID: id, Models: []ModelUsage{}}
+		}
+		if elapsed, known := r.WorkingTime(entry, now); known && elapsed >= 0 {
+			minutes := elapsed.Minutes()
+			ship.ActiveMinutes = &minutes
+		}
+		byID[id] = ship
+	}
+	ships = ships[:0]
+	for _, id := range slices.Sorted(maps.Keys(byID)) {
+		ships = append(ships, byID[id])
+	}
+	return ships, nil
+}
+
+func (r *Reader) readTokens(now time.Time) error {
 	state, err := r.Store.Load()
 	if err != nil {
 		return err
@@ -152,9 +192,13 @@ func (r *Reader) readTokens() error {
 		if entry.Login != "" {
 			ship.Logins = &Logins{Login: entry.Login, Earlier: entry.EarlierLogins}
 		}
-		usage, ok := r.shipUsageOf(entry.Harness, ship)
-		if !ok || len(usage.Models) == 0 {
+		usage, _ := r.shipUsageOf(entry.Harness, ship)
+		if len(usage.Models) == 0 {
 			continue
+		}
+		usage.ShipID = entry.ShipID
+		if usage.Models == nil {
+			usage.Models = []ModelUsage{}
 		}
 		read = append(read, usage)
 		for _, model := range usage.Models {

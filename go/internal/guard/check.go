@@ -49,6 +49,7 @@ type Checker struct {
 	Sets     SetSource
 	Links    Links
 	Refusals RefusalLog
+	Activity ActivityLog
 	Now      func() time.Time
 	// Home is the session's home folder, for ~ in shell words.
 	Home     string
@@ -117,22 +118,31 @@ func (c Checker) Check(ctx context.Context, input io.ReadCloser) Answer {
 		result, cause = guarded(bounded, func() outcome { return c.evaluate(bounded, read) })
 	}
 	if cause != "" {
-		result = outcome{refusal: failed(cause)}
+		result = outcome{call: read, refusal: failed(cause)}
 	}
-	if result.refusal == nil {
+	refusal := c.keepRefusal(bounded, result)
+	c.observe(bounded, result.call.tool, refusal)
+	if refusal == nil {
 		return Answer{}
 	}
-	if bounded.Err() != nil {
-		return deny(failed("deadline"))
+	return deny(refusal)
+}
+
+func (c Checker) keepRefusal(ctx context.Context, result outcome) *verdict {
+	if result.refusal == nil {
+		return nil
 	}
-	err, cause := guarded(bounded, func() error { return c.Refusals.Append(bounded, c.record(result)) })
+	if ctx.Err() != nil {
+		return failed("deadline")
+	}
+	err, cause := guarded(ctx, func() error { return c.Refusals.Append(ctx, c.record(result)) })
 	if cause == "" && err != nil {
 		cause = "refusal unrecorded"
 	}
 	if cause != "" {
-		return deny(failed(cause))
+		return failed(cause)
 	}
-	return deny(result.refusal)
+	return result.refusal
 }
 
 // readWithin reads the call from input in the caller, which closes input at

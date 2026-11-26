@@ -22,3 +22,9 @@ func TestTheMinimumCoreVersionSupportsMeetingCalls(t *testing.T) {
 		t.Fatalf("meeting calls need core 0.46.0, got %s", MinimumCoreVersion)
 	}
 }
+
+func TestTheMinimumCoreVersionSupportsStageOversight(t *testing.T) {
+	if slices.Compare(versionOf(MinimumCoreVersion), []int{0, 48, 0}) < 0 {
+		t.Fatalf("stage oversight needs core 0.48.0, got %s", MinimumCoreVersion)
+	}
+}

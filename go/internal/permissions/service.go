@@ -47,6 +47,8 @@ type Service struct {
 	// Waits is shared by every ask of this process, so overlapping asks on one
 	// ship restore one report; nil coordinates this call alone.
 	Waits *ReportWaits
+	// PauseWorkingTime suspends the ship's working clock while its question is open.
+	PauseWorkingTime func(ship string) func()
 }
 
 // Await reads the owner for this call, reports its wait and, when the ship's
@@ -100,6 +102,9 @@ func (s Service) Ask(ctx context.Context, ship string, request Request) Decision
 		return Wait(ctx, s.Clock)
 	}
 
+	if s.PauseWorkingTime != nil {
+		defer s.PauseWorkingTime(ship)()
+	}
 	waits := s.Waits
 	if waits == nil {
 		waits = &ReportWaits{}
