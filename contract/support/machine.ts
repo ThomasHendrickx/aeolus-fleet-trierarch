@@ -536,8 +536,8 @@ async function git(args: readonly string[]): Promise<void> {
 /** The harnesses a machine may have installed, besides Claude Code, which every machine has. */
 export type OtherHarness = 'codex' | 'copilot';
 
-/** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet; its trierarch runs at the suite's shortened timings unless `timings` says production. */
-export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean; timings?: Timings } = {}): Promise<Machine> {
+/** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch running. The command and timings default to the contract suite's choices. */
+export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean; timings?: Timings; underTest?: readonly string[] } = {}): Promise<Machine> {
   const others = at.others ?? [];
   // In the run's short folder: the ship sockets under the machine's home are within the system's limit only for a short path.
   const root = aShortFolder(process.env);
@@ -594,10 +594,11 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
     return existsSync(file) ? Number(readFileSync(file, 'utf8').trim()) : undefined;
   };
   // A trierarch that is one file is copied, as an install puts it in the user's own folder; one run by an interpreter is run as it is.
-  const [program = '', ...programWords] = TRIERARCH_UNDER_TEST;
+  const command = at.underTest ?? TRIERARCH_UNDER_TEST;
+  const [program = '', ...programWords] = command;
   const installed = join(home, '.local', 'bin', 'aeolus-trierarch');
   const isOneFile = programWords.length === 0;
-  const underTest = isOneFile ? [installed] : TRIERARCH_UNDER_TEST;
+  const underTest = isOneFile ? [installed] : command;
   if (isOneFile) {
     mkdirSync(dirname(installed), { recursive: true });
     copyFileSync(program, installed);
