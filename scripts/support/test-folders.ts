@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /** A run folder untouched for this long belongs to a run that was killed. */
@@ -8,6 +8,11 @@ const STALE_AFTER_MS = 24 * 3_600_000;
 const RUN_MARKER = 'TRIERARCH_TEST_RUN';
 /** Names the short run folder, for what needs a short path (a Unix socket's is at most 104 bytes on macOS). */
 export const SHORT_FOLDER_VARIABLE = 'TRIERARCH_TEST_SHORT_FOLDER';
+
+/** A new folder made atomically within the short run folder to keep ship socket paths within the system limit. */
+export function aShortFolder(env: Readonly<Record<string, string | undefined>>): string {
+  return realpathSync(mkdtempSync(`${env[SHORT_FOLDER_VARIABLE] ?? '.'}/`));
+}
 
 export interface TestFolders {
   readonly repositoryRoot: string;

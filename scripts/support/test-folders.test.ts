@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { startTestFolders } from './test-folders.js';
+import { aShortFolder, SHORT_FOLDER_VARIABLE, startTestFolders } from './test-folders.js';
 
 const HOUR = 3_600_000;
 const NOW = new Date('2026-11-16T12:00:00Z');
@@ -37,6 +37,21 @@ function anEarlierRun(folder: string, hoursAgo: number): string {
   utimesSync(folder, touched, touched);
   return folder;
 }
+
+it('allocates a new short folder and keeps the contents of earlier folders', () => {
+  env[SHORT_FOLDER_VARIABLE] = shortRoot;
+  const first = aShortFolder(env);
+  const marker = join(first, 'left');
+  writeFileSync(marker, 'keep');
+
+  const second = aShortFolder(env);
+
+  expect(dirname(first)).toBe(realpathSync(shortRoot));
+  expect(dirname(second)).toBe(realpathSync(shortRoot));
+  expect(second).not.toBe(first);
+  expect(existsSync(second)).toBe(true);
+  expect(readFileSync(marker, 'utf8')).toBe('keep');
+});
 
 describe('the folders a test run makes its temporary folders in (#454)', () => {
   it("points TMPDIR at a folder of the repository's cache, outside the operating system's temporary folder", () => {

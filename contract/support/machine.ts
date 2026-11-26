@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,6 +7,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 
 import { onTestFinished, TestRunner } from 'vitest';
 
+import { aShortFolder } from '../../scripts/support/test-folders.js';
 import { descendantsOf, PROCESS_RECORD_VARIABLE, recordTestProcess, stopDescendants, stopProcess } from '../../scripts/support/test-process.js';
 import { timingVariablesOf, type Timings } from './timings.js';
 import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
@@ -535,16 +536,11 @@ async function git(args: readonly string[]): Promise<void> {
 /** The harnesses a machine may have installed, besides Claude Code, which every machine has. */
 export type OtherHarness = 'codex' | 'copilot';
 
-/** A new short folder made atomically in the run's short folder, keeping a ship's socket path within the system limit. */
-function aShortFolder(): string {
-  return realpathSync(mkdtempSync(`${process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '.'}/`));
-}
-
-/** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet; its trierarch runs at the suite's shortened timings unless `timings` says production. */
-export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean; timings?: Timings } = {}): Promise<Machine> {
+/** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch running. The command and timings default to the contract suite's choices. */
+export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean; timings?: Timings; underTest?: readonly string[] } = {}): Promise<Machine> {
   const others = at.others ?? [];
   // In the run's short folder: the ship sockets under the machine's home are within the system's limit only for a short path.
-  const root = aShortFolder();
+  const root = aShortFolder(process.env);
   let remove: () => Promise<void> = () => { rmSync(root, { recursive: true, force: true }); return Promise.resolve(); };
   whenTestFinishes(() => remove());
   const home = join(root, 'h');
@@ -598,10 +594,11 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
     return existsSync(file) ? Number(readFileSync(file, 'utf8').trim()) : undefined;
   };
   // A trierarch that is one file is copied, as an install puts it in the user's own folder; one run by an interpreter is run as it is.
-  const [program = '', ...programWords] = TRIERARCH_UNDER_TEST;
+  const command = at.underTest ?? TRIERARCH_UNDER_TEST;
+  const [program = '', ...programWords] = command;
   const installed = join(home, '.local', 'bin', 'aeolus-trierarch');
   const isOneFile = programWords.length === 0;
-  const underTest = isOneFile ? [installed] : TRIERARCH_UNDER_TEST;
+  const underTest = isOneFile ? [installed] : command;
   if (isOneFile) {
     mkdirSync(dirname(installed), { recursive: true });
     copyFileSync(program, installed);
