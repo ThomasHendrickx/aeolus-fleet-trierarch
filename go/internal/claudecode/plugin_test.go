@@ -2,12 +2,16 @@ package claudecode
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 )
 
 // aClaude is a `claude` that keeps each command line it is given, lists the plugins named in its file, and fails every plugin command once told to.
@@ -141,5 +145,110 @@ func TestPluginUpdateKeepsAndNamesTheErrorWhenClaudeCodeCannotStart(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "claude") {
 		t.Errorf("error %q does not name the harness", err)
+	}
+}
+
+func TestPluginUpdateKeepsTheClaudeCachePathUntilTheSessionExits(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		age  time.Duration
+	}{
+		{"folder timestamp changes during downgrade", time.Hour},
+		{"running session keeps its original directory", 10 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			checkClaudeDowngrade(t, test.age)
+		})
+	}
+}
+
+func checkClaudeDowngrade(t *testing.T, age time.Duration) {
+	t.Helper()
+	claude := aClaudeWith(t, "aeolus-fleet@aeolus-fleet")
+	settings := filepath.Join(claude.folder, "settings.json")
+	plugins := filepath.Join(claude.folder, "plugins")
+	cache := filepath.Join(plugins, "cache", "aeolus-fleet", "aeolus-fleet")
+	older, newer := filepath.Join(cache, "0.41.0"), filepath.Join(cache, "0.42.0")
+	for _, root := range []string{older, newer} {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hook := filepath.Join(newer, "hook")
+	if err := os.WriteFile(hook, []byte("newer hook"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(plugins, "installed_plugins.json")
+	for index, root := range []string{newer, older} {
+		content := fmt.Sprintf(`{"plugins":{"aeolus-fleet@aeolus-fleet":[{"scope":"user","installPath":%q}]}}`, root)
+		if err := os.WriteFile(filepath.Join(claude.folder, fmt.Sprintf("registry-%d", index)), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	program := filepath.Join(claude.folder, "claude")
+	script := fmt.Sprintf(`#!/bin/sh
+case "$2" in
+  list) cat %q ;;
+  update)
+    cp %q %q &&
+    touch %q
+    ;;
+esac
+`, filepath.Join(claude.folder, "list.json"), filepath.Join(claude.folder, "registry-1"), registry, filepath.Join(newer, ".orphaned_at"))
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := os.ReadFile(filepath.Join(claude.folder, "registry-0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(registry, initial, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	starts := []time.Time{time.Now().Add(-age)}
+	update := PluginUpdate{Program: program, Settings: settings, ProcessStarts: func() ([]time.Time, error) {
+		return starts, nil
+	}}
+	if err := update.Update("v0.41.0"); err != nil {
+		t.Fatal(err)
+	}
+	if got := plugin.ClaudeUserInstall(plugins); got != older {
+		t.Fatalf("new Claude Code sessions select %q, want %q", got, older)
+	}
+	if err := update.ReapRetired(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(hook); err != nil || string(got) != "newer hook" {
+		t.Fatalf("running session's hook = %q, %v, want newer hook", got, err)
+	}
+	if info, err := os.Lstat(newer); err != nil || !info.IsDir() {
+		t.Fatalf("running session's cache path = %v, %v, want its original directory", info, err)
+	}
+	starts = nil
+	if err := update.ReapRetired(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(newer); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stopped session's cache path: %v, want it removed", err)
+	}
+}
+
+func TestZeroPluginUpdateUsesClaudeAndItsConfigDirectory(t *testing.T) {
+	claude := aClaudeWith(t, "aeolus-fleet@aeolus-fleet")
+	t.Setenv("PATH", claude.folder+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_CONFIG_DIR", claude.folder)
+	settings := filepath.Join(claude.folder, "settings.json")
+	if err := os.WriteFile(settings, []byte(`{"extraKnownMarketplaces":{"aeolus-fleet":{}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var update PluginUpdate
+	if err := update.Update("v0.41.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.ReapRetired(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readJSON(t, settings)["extraKnownMarketplaces"]; !reflect.DeepEqual(got, map[string]any{}) {
+		t.Fatalf("declared marketplaces = %v, want empty", got)
 	}
 }
