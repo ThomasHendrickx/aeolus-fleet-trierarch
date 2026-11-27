@@ -39,6 +39,8 @@ export interface Fleet {
   commission(name: string, at?: { owner?: ShipId; scopes?: readonly string[] }): Promise<ShipId>;
   /** Requests a crew for the ship in a ship folder of the main repository and the sub-repositories given, none without, with the harness and the options given, and assigns it to the machine's trierarch. */
   crewInRepositories(shipId: ShipId, at: RepositoriesAt & { options?: Readonly<Record<string, string>> }): Promise<void>;
+  /** Sends the empty guard resolution for the ship’s current crew settings. */
+  resendGuardRules(shipId: ShipId): Promise<void>;
   /** Requests a crew for the ship in the configured folder, with the harness given, and assigns it to the machine's trierarch. */
   crewInFolder(shipId: ShipId, at: { folder: string; harness: string }): Promise<void>;
   /** Requests the ship's crew again in a ship folder of the main repository and the sub-repositories given, with the harness given: a new settings version, its assignment kept. */
@@ -154,6 +156,10 @@ export async function aFleet(): Promise<Fleet> {
       const { settingsVersion } = unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: at.harness, workspace: repositoriesOf(at), options } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId, settingsVersion }));
       await sendGuardRules(shipId, settingsVersion);
+    },
+    resendGuardRules: async (shipId) => {
+      const request = await database.crewRequest.findUniqueOrThrow({ where: { shipId } });
+      await sendGuardRules(shipId, request.settingsVersion);
     },
     crewInFolder: async (shipId, { folder, harness }) => {
       const { settingsVersion } = unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'folder', name: folder }, options: {} } }));

@@ -86,6 +86,10 @@ async function takenOver(from: readonly string[], to: readonly string[]): Promis
 
   expect(moved.status, moved.stdout + moved.stderr).toBe(0);
   expect(restarted.status, restarted.stdout + restarted.stderr).toBe(0);
+  if (fromVersion === '0.45.0' && toVersion === '0.46.0') {
+    // 0.45.0 acknowledged guard rules as unhandled. The candidate needs the resolution for the existing request.
+    await fleet.resendGuardRules(shipId);
+  }
   await expect.poll(() => holdVersionOf(shipId), { timeout: TAKEN_OVER_WITHIN_MS }).toBe(toVersion);
   expect(holdPidOf(shipId)).not.toBe(before);
   return shipId;
