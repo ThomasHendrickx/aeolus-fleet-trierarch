@@ -17,8 +17,9 @@ import (
 // guardCheckOver is the answer of the ship's socket, as shipSockets opens it on the runtime, to a guard check of a ship not crewed here.
 func guardCheckOver(t *testing.T, running runningSessions) (int, string) {
 	t.Helper()
-	// A Unix socket's path holds at most about a hundred bytes, which a test's own temp folder can pass.
-	home, err := os.MkdirTemp("", "s")
+	// Use a short absolute path because the runner's TMPDIR can already be
+	// long enough to push the nested socket path past the Unix socket limit.
+	home, err := os.MkdirTemp("/tmp", "s")
 	if err != nil {
 		t.Fatal(err)
 	}
