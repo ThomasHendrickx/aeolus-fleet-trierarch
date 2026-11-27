@@ -546,10 +546,6 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
-	pass, err := machine.NewPass(at, kept, configuration)
-	if err != nil {
-		return answer{}, err
-	}
 	if err := os.MkdirAll(at.Home, 0o700); err != nil {
 		return answer{}, err
 	}
@@ -557,6 +553,11 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		return answer{}, err
 	}
 	machine.Log(fmt.Sprintf("aeolus-trierarch %s runs as pid %d", Version, machine.PID))
+	// Preparing the first pass detects harnesses, including Codex's guard proof, which can outlast upgrade's version check.
+	pass, err := machine.NewPass(at, kept, configuration)
+	if err != nil {
+		return answer{}, err
+	}
 	stopped, done := context.WithCancel(context.Background())
 	defer done()
 	received := make(chan struct{})
