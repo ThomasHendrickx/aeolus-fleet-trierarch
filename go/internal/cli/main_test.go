@@ -345,6 +345,35 @@ func TestRunSaysItsPidAndVersionAndEndsWhenStopped(t *testing.T) {
 	}
 }
 
+func TestRunSaysItsVersionBeforeWaitingForHarnessDetection(t *testing.T) {
+	machine, _, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, exit %d", output, code)
+	}
+	machine.PID++
+	stop := make(chan struct{})
+	close(stop)
+	machine.Stop = stop
+	var lines []string
+	machine.Log = func(line string) { lines = append(lines, line) }
+	machine.NewPass = func(at paths.Paths, _ crew.File, _ config.Configuration) (func(context.Context, bool) error, error) {
+		want := Running{PID: machine.PID, Version: Version}
+		if running, ok := readRunning(at.Running); !ok || running != want {
+			t.Errorf("running.json before harness detection = %+v, want %+v", running, want)
+		}
+		if !slices.ContainsFunc(lines, func(line string) bool {
+			return strings.HasPrefix(line, "aeolus-trierarch "+Version+" runs as pid ")
+		}) {
+			t.Errorf("logs before harness detection = %q, want the version announcement", lines)
+		}
+		return func(context.Context, bool) error { return nil }, nil
+	}
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run = %q, exit %d", output, code)
+	}
+}
+
 func TestRunMakesTheSealingKeyOfAMachineSetUpBeforeThereWasOne(t *testing.T) {
 	machine, _, _ := aMain(t)
 	Main(setupWords(), machine)
