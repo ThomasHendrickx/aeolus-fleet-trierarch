@@ -112,22 +112,34 @@ func (p Plugin) resolve() (Plugin, error) {
 	return newestIn(p.plugins, Plugin{Root: p.Root, Data: p.Data, Crews: p.Crews}, p.harness, p.rootVariable)
 }
 
-// ClaudeUserInstall reads the user-scoped plugin root Claude Code selects.
-func ClaudeUserInstall(plugins string) string {
-	text, err := os.ReadFile(filepath.Join(plugins, "installed_plugins.json"))
+type claudeInstall struct {
+	Scope string `json:"scope"`
+	Path  string `json:"installPath"`
+}
+
+func claudeInstalls(plugins string) ([]claudeInstall, error) {
+	path := filepath.Join(plugins, "installed_plugins.json")
+	text, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return nil, fmt.Errorf("read claude code plugin registry %s: %w", path, err)
 	}
 	var registry struct {
-		Plugins map[string][]struct {
-			Scope string `json:"scope"`
-			Path  string `json:"installPath"`
-		} `json:"plugins"`
+		Plugins map[string][]claudeInstall `json:"plugins"`
 	}
-	if json.Unmarshal(text, &registry) != nil {
-		return ""
+	if err := json.Unmarshal(text, &registry); err != nil {
+		return nil, fmt.Errorf("decode claude code plugin registry %s: %w", path, err)
 	}
-	for _, install := range registry.Plugins["aeolus-fleet@aeolus-fleet"] {
+	return registry.Plugins["aeolus-fleet@aeolus-fleet"], nil
+}
+
+// ClaudeUserInstall reads the user-scoped plugin root Claude Code selects.
+func ClaudeUserInstall(plugins string) string {
+	installs, _ := claudeInstalls(plugins)
+	return claudeUserInstall(installs)
+}
+
+func claudeUserInstall(installs []claudeInstall) string {
+	for _, install := range installs {
 		if install.Scope == "user" && filepath.IsAbs(install.Path) {
 			if info, err := os.Stat(install.Path); err == nil && info.IsDir() {
 				return install.Path

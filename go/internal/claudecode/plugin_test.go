@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -150,19 +151,21 @@ func TestPluginUpdateKeepsAndNamesTheErrorWhenClaudeCodeCannotStart(t *testing.T
 
 func TestPluginUpdateKeepsTheClaudeCachePathUntilTheSessionExits(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		age  time.Duration
+		name         string
+		age          time.Duration
+		hasUseMarker bool
 	}{
-		{"folder timestamp changes during downgrade", time.Hour},
-		{"running session keeps its original directory", 10 * time.Second},
+		{"folder timestamp changes during downgrade", time.Hour, false},
+		{"running session keeps its original directory", 10 * time.Second, false},
+		{"live usage marker without a matching process name", 0, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			checkClaudeDowngrade(t, test.age)
+			checkClaudeDowngrade(t, test.age, test.hasUseMarker)
 		})
 	}
 }
 
-func checkClaudeDowngrade(t *testing.T, age time.Duration) {
+func checkClaudeDowngrade(t *testing.T, age time.Duration, hasUseMarker bool) {
 	t.Helper()
 	claude := aClaudeWith(t, "aeolus-fleet@aeolus-fleet")
 	settings := filepath.Join(claude.folder, "settings.json")
@@ -205,7 +208,24 @@ esac
 	if err := os.WriteFile(registry, initial, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	starts := []time.Time{time.Now().Add(-age)}
+	var starts []time.Time
+	var marker string
+	if hasUseMarker {
+		markers := filepath.Join(newer, ".in_use")
+		if err := os.Mkdir(markers, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		marker = filepath.Join(markers, strconv.Itoa(os.Getpid()))
+		if err := os.WriteFile(marker, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		starts = []time.Time{time.Now().Add(-age)}
+	}
+	installedAt := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(newer, installedAt, installedAt); err != nil {
+		t.Fatal(err)
+	}
 	update := PluginUpdate{Program: program, Settings: settings, ProcessStarts: func() ([]time.Time, error) {
 		return starts, nil
 	}}
@@ -215,7 +235,7 @@ esac
 	if got := plugin.ClaudeUserInstall(plugins); got != older {
 		t.Fatalf("new Claude Code sessions select %q, want %q", got, older)
 	}
-	if err := update.ReapRetired(); err != nil {
+	if err := update.RemoveUnusedVersions(); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(hook); err != nil || string(got) != "newer hook" {
@@ -224,8 +244,13 @@ esac
 	if info, err := os.Lstat(newer); err != nil || !info.IsDir() {
 		t.Fatalf("running session's cache path = %v, %v, want its original directory", info, err)
 	}
-	starts = nil
-	if err := update.ReapRetired(); err != nil {
+	if hasUseMarker {
+		if err := os.Remove(marker); err != nil {
+			t.Fatal(err)
+		}
+	}
+	starts = []time.Time{time.Now().Add(2 * time.Minute)}
+	if err := update.RemoveUnusedVersions(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(newer); !errors.Is(err, os.ErrNotExist) {
@@ -245,7 +270,7 @@ func TestZeroPluginUpdateUsesClaudeAndItsConfigDirectory(t *testing.T) {
 	if err := update.Update("v0.41.0"); err != nil {
 		t.Fatal(err)
 	}
-	if err := update.ReapRetired(); err != nil {
+	if err := update.RemoveUnusedVersions(); err != nil {
 		t.Fatal(err)
 	}
 	if got := readJSON(t, settings)["extraKnownMarketplaces"]; !reflect.DeepEqual(got, map[string]any{}) {

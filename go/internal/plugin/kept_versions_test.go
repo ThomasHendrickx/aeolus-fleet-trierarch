@@ -17,7 +17,7 @@ func TestPreservedVersionPathNamesTheKeptPluginFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if err := RetireNewer(cache, "0.41.0", now, []time.Time{now}); err != nil {
+	if err := KeepNewerVersions(cache, "0.41.0", now, []time.Time{now}); err != nil {
 		t.Fatal(err)
 	}
 	want := filepath.Join("..", ".aeolus-fleet-kept-versions", "0.42.0", "plugin")

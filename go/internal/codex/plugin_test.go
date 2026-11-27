@@ -332,13 +332,13 @@ func TestDowngradeSelectsTheOlderPluginAndKeepsTheNewerPathOnlyForRunningSession
 			}, nil
 		},
 	}
-	if err := update.ReapRetired(); err != nil {
+	if err := update.RemoveUnusedVersions(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(newer); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("newer path after the last session using it exits: %v, want it removed", err)
 	}
-	if _, err := os.Stat(plugin.RetiredPath(codex.cache(), "0.42.0")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("retired newer folder: %v, want it removed", err)
+	if _, err := os.Stat(plugin.KeptVersionPath(codex.cache(), "0.42.0")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("kept newer folder: %v, want it removed", err)
 	}
 }

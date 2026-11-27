@@ -304,12 +304,7 @@ func (p plugins) Update(harness string, tag string) error {
 }
 
 func (p plugins) claudeUpdate() claudecode.PluginUpdate {
-	update := claudecode.PluginUpdateOf(p.home, p.env["CLAUDE_CONFIG_DIR"])
-	update.ProcessStarts = func() ([]time.Time, error) {
-		processes, err := codex.RunningProcesses(time.Now())
-		return codex.ProcessStarts(processes, "claude"), err
-	}
-	return update
+	return claudecode.PluginUpdateOf(p.home, p.env["CLAUDE_CONFIG_DIR"])
 }
 
 func (p plugins) codexUpdate() codex.PluginUpdate {
@@ -856,7 +851,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	return func(ctx context.Context, isKeyCutOff bool) error {
 		ask.Once()
 		askConfiguration.Once()
-		if err := errors.Join(cleanClaude.ReapRetired(), cleanCodex.ReapRetired()); err != nil {
+		if err := errors.Join(cleanClaude.RemoveUnusedVersions(), cleanCodex.RemoveUnusedVersions()); err != nil {
 			logLine(fmt.Sprintf("Could not remove retired aeolus-fleet plugin folders: %v", err))
 		}
 		current := pass

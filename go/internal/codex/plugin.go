@@ -104,7 +104,7 @@ func (p PluginUpdate) Update(tag string) error {
 		return ErrDeletesPluginData
 	}
 	cache := p.cache()
-	if err := p.ReapRetired(); err != nil {
+	if err := p.RemoveUnusedVersions(); err != nil {
 		return err
 	}
 	return plugin.WithCacheLock(cache, func() error { return p.update(cache, tag) })
@@ -139,7 +139,7 @@ func (p PluginUpdate) update(cache, tag string) error {
 		if err != nil {
 			return err
 		}
-		if err := plugin.RetireNewer(cache, active, upgradedAt, ProcessStarts(processes, p.Program)); err != nil {
+		if err := plugin.KeepNewerVersions(cache, active, upgradedAt, ProcessStarts(processes, p.Program)); err != nil {
 			return err
 		}
 		removeUnused(cache, earliestStartOf(processes, p.TrierarchPID()))
@@ -147,9 +147,9 @@ func (p PluginUpdate) update(cache, tag string) error {
 	})
 }
 
-// ReapRetired removes newer plugin folders that running Codex processes no longer need.
-func (p PluginUpdate) ReapRetired() error {
-	return plugin.ReapRetired(p.cache(), func() ([]time.Time, error) {
+// RemoveUnusedVersions removes newer plugin folders that running Codex processes no longer need.
+func (p PluginUpdate) RemoveUnusedVersions() error {
+	return plugin.RemoveUnusedVersions(p.cache(), func() ([]time.Time, error) {
 		processes, err := p.Processes(p.Now())
 		return ProcessStarts(processes, p.Program), err
 	})
@@ -263,12 +263,12 @@ func byVersion(left string, right string) int {
 	return 0
 }
 
-// cacheEntries also includes symlinks to retired versions so their paths survive an update.
+// cacheEntries also includes symlinks to kept versions so their paths survive an update.
 func cacheEntries(cache string) []string {
 	entries, _ := os.ReadDir(cache)
 	var names []string
 	for _, entry := range entries {
-		if entry.IsDir() || plugin.IsRetiredLink(cache, entry.Name()) {
+		if entry.IsDir() || plugin.IsKeptVersionLink(cache, entry.Name()) {
 			names = append(names, entry.Name())
 		}
 	}
