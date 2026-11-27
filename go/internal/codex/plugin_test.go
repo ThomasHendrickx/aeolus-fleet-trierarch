@@ -302,3 +302,43 @@ func TestAnUpgradeKeepsACrewedCodexShipsIdentityAndRunningPluginPath(t *testing.
 		t.Fatalf("versions = %q, want running and new versions", got)
 	}
 }
+
+func TestDowngradeSelectsTheOlderPluginAndKeepsTheNewerPathOnlyForRunningSessions(t *testing.T) {
+	codex := aCodexOn(t)
+	codex.versionFolder(t, "0.42.0", upgradedAt.Add(-time.Hour))
+	running := []Process{{PID: 7, Program: "codex", StartedAt: upgradedAt.Add(-time.Minute)}}
+
+	if err := codex.update(t, running, 0); err != nil {
+		t.Fatal(err)
+	}
+	root, err := plugin.FindCodex("", map[string]string{"CODEX_HOME": codex.home})
+	if err != nil || PluginVersion(root.Root) != "0.41.0" {
+		t.Errorf("new session plugin = %q, %v, want 0.41.0", root.Root, err)
+	}
+	newer := filepath.Join(codex.cache(), "0.42.0")
+	info, err := os.Lstat(newer)
+	if err != nil || info.IsDir() || PluginVersion(newer) != "0.42.0" {
+		t.Errorf("newer session path = %v, %v, want a usable path excluded from Codex selection", info, err)
+	}
+
+	update := PluginUpdate{
+		Program: "codex",
+		Home:    codex.home,
+		Now:     func() time.Time { return upgradedAt.Add(2 * time.Minute) },
+		Processes: func(now time.Time) ([]Process, error) {
+			return []Process{
+				{PID: 8, Program: "codex", StartedAt: now},
+				{PID: 9, Program: "codex", StartedAt: upgradedAt.Add(-2 * time.Hour)},
+			}, nil
+		},
+	}
+	if err := update.RemoveUnusedVersions(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(newer); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("newer path after the last session using it exits: %v, want it removed", err)
+	}
+	if _, err := os.Stat(plugin.KeptVersionPath(codex.cache(), "0.42.0")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("kept newer folder: %v, want it removed", err)
+	}
+}

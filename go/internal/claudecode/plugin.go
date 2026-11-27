@@ -3,6 +3,7 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +11,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 )
 
 const (
@@ -30,6 +34,8 @@ type PluginUpdate struct {
 	Program string
 	// Settings is Claude Code's settings.json: in CLAUDE_CONFIG_DIR when it is set, else in ~/.claude.
 	Settings string
+	// ProcessStarts lists the start times of running Claude Code processes.
+	ProcessStarts func() ([]time.Time, error)
 }
 
 // PluginUpdateOf the user's home folder, and CLAUDE_CONFIG_DIR when it is not empty.
@@ -58,8 +64,73 @@ func (p PluginUpdate) run(args ...string) (string, error) {
 
 // Update installs the plugin of the release tag.
 func (p PluginUpdate) Update(tag string) error {
-	if err := p.dropDeclaredMarketplace(); err != nil {
+	p, err := p.withDefaults()
+	if err != nil {
 		return err
+	}
+	plugins := filepath.Join(filepath.Dir(p.Settings), "plugins")
+	return plugin.WithCacheLock(p.cache(), func() error {
+		if err := p.update(tag); err != nil {
+			return fmt.Errorf("install claude code plugin for %s: %w", tag, err)
+		}
+		return plugin.RemoveUnusedClaudeVersions(plugins, p.cache(), p.ProcessStarts)
+	})
+}
+
+func (p PluginUpdate) cache() string {
+	return filepath.Join(filepath.Dir(p.Settings), "plugins", "cache", marketplace, "aeolus-fleet")
+}
+
+func (p PluginUpdate) withDefaults() (PluginUpdate, error) {
+	if p.Program == "" {
+		p.Program = "claude"
+	}
+	if p.Settings == "" {
+		configDirectory := os.Getenv("CLAUDE_CONFIG_DIR")
+		var home string
+		if configDirectory == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				return p, fmt.Errorf("locate claude code settings: %w", err)
+			}
+		}
+		p.Settings = PluginUpdateOf(home, configDirectory).Settings
+	}
+	if p.ProcessStarts == nil {
+		program := p.Program
+		p.ProcessStarts = func() ([]time.Time, error) {
+			processes, err := codex.RunningProcesses(time.Now())
+			if err != nil {
+				return nil, fmt.Errorf("list claude code processes: %w", err)
+			}
+			return codex.ProcessStarts(processes, program), nil
+		}
+	}
+	return p, nil
+}
+
+// RemoveUnusedVersions removes newer plugin folders that running Claude Code processes no longer need.
+func (p PluginUpdate) RemoveUnusedVersions() error {
+	p, err := p.withDefaults()
+	if err != nil {
+		return err
+	}
+	cache := p.cache()
+	if _, err := os.Stat(cache); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("check claude code plugin cache %s: %w", cache, err)
+	}
+	plugins := filepath.Join(filepath.Dir(p.Settings), "plugins")
+	return plugin.TryWithCacheLock(cache, func() error {
+		return plugin.RemoveUnusedClaudeVersions(plugins, cache, p.ProcessStarts)
+	})
+}
+
+func (p PluginUpdate) update(tag string) error {
+	if err := p.dropDeclaredMarketplace(); err != nil {
+		return fmt.Errorf("drop declared marketplace from %s: %w", p.Settings, err)
 	}
 	if _, err := p.run("plugin", "marketplace", "add", repository+"#"+tag); err != nil {
 		return err

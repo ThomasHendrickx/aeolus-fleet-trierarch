@@ -294,15 +294,22 @@ type plugins struct {
 func (p plugins) Update(harness string, tag string) error {
 	switch harness {
 	case "claude-code":
-		return claudecode.PluginUpdateOf(p.home, p.env["CLAUDE_CONFIG_DIR"]).Update(tag)
+		return p.claudeUpdate().Update(tag)
 	case "codex":
-		// The running trierarch took its plugin scripts from the newest version when it started.
-		running := paths.Of(p.home, "").Running
-		return codex.PluginUpdateOf(p.home, p.env["CODEX_HOME"], func() int { return cli.RunningPID(running) }).Update(tag)
+		return p.codexUpdate().Update(tag)
 	case "copilot":
 		return copilot.PluginInstall{Program: "copilot", Home: p.env["COPILOT_HOME"]}.Install(tag)
 	}
 	return fmt.Errorf("the plugin for %s is not updated by upgrade", harness)
+}
+
+func (p plugins) claudeUpdate() claudecode.PluginUpdate {
+	return claudecode.PluginUpdateOf(p.home, p.env["CLAUDE_CONFIG_DIR"])
+}
+
+func (p plugins) codexUpdate() codex.PluginUpdate {
+	running := paths.Of(p.home, "").Running
+	return codex.PluginUpdateOf(p.home, p.env["CODEX_HOME"], func() int { return cli.RunningPID(running) })
 }
 
 func (p plugins) Version(harness string) string {
@@ -838,10 +845,15 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, GuardedHarnesses: guarded, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now(), PastaAppArmorMissing: pastaMissing}
 		},
 	}
+	updaters := plugins{home: home, env: env}
+	cleanClaude, cleanCodex := updaters.claudeUpdate(), updaters.codexUpdate()
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
 	return func(ctx context.Context, isKeyCutOff bool) error {
 		ask.Once()
 		askConfiguration.Once()
+		if err := errors.Join(cleanClaude.RemoveUnusedVersions(), cleanCodex.RemoveUnusedVersions()); err != nil {
+			logLine(fmt.Sprintf("Could not remove retired aeolus-fleet plugin folders: %v", err))
+		}
 		current := pass
 		current.ReportBeforeRelease = func() error { return reporter.Report(isKeyCutOff) }
 		current.Workspace, current.Repositories, current.Folders = placesOf()

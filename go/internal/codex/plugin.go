@@ -49,8 +49,8 @@ type Process struct {
 // that succeeded, a version folder no running session can use is removed
 // (#653): a session uses the newest version there was when it started, so a
 // version is left behind once its next version came before every running
-// Codex process, and the trierarch, started. A version counts from when the
-// upgrade installed it.
+// Codex process, and the trierarch, started. Downgrades keep newer paths as
+// symlinks because Codex selects real directories for new sessions.
 type PluginUpdate struct {
 	// Program is Codex's command, `codex` on the machine.
 	Program string
@@ -104,6 +104,14 @@ func (p PluginUpdate) Update(tag string) error {
 		return ErrDeletesPluginData
 	}
 	cache := p.cache()
+	if err := p.RemoveUnusedVersions(); err != nil {
+		return err
+	}
+	return plugin.WithCacheLock(cache, func() error { return p.update(cache, tag) })
+}
+
+func (p PluginUpdate) update(cache, tag string) error {
+	var active string
 	return keepingVersions(cache, func() error {
 		// There may be no marketplace to remove: adding it says what is wrong.
 		_ = run(p.Program, "", "plugin", "marketplace", "remove", marketplace)
@@ -120,6 +128,9 @@ func (p PluginUpdate) Update(tag string) error {
 			}
 		}
 		// Codex enables the renamed plugin until told otherwise, also once its marketplace entry is gone; removing one it lacks succeeds.
+		if versions := versionsIn(cache); len(versions) > 0 {
+			active = versions[len(versions)-1]
+		}
 		return run(p.Program, "", "plugin", "remove", renamedPlugin)
 	}, func(before []string) error {
 		upgradedAt := p.Now()
@@ -128,9 +139,38 @@ func (p PluginUpdate) Update(tag string) error {
 		if err != nil {
 			return err
 		}
+		if err := plugin.KeepNewerVersions(cache, active, upgradedAt, ProcessStarts(processes, p.Program)); err != nil {
+			return err
+		}
 		removeUnused(cache, earliestStartOf(processes, p.TrierarchPID()))
 		return nil
 	})
+}
+
+// RemoveUnusedVersions removes newer plugin folders that running Codex processes no longer need.
+func (p PluginUpdate) RemoveUnusedVersions() error {
+	return plugin.RemoveUnusedVersions(p.cache(), func() ([]time.Time, error) {
+		processes, err := p.Processes(p.Now())
+		return ProcessStarts(processes, p.Program), err
+	})
+}
+
+// ProcessStarts returns the start times of processes running the given program.
+func ProcessStarts(processes []Process, program string) []time.Time {
+	name := filepath.Base(program)
+	resolved := name
+	if path, err := exec.LookPath(program); err == nil {
+		if path, err := filepath.EvalSymlinks(path); err == nil {
+			resolved = filepath.Base(path)
+		}
+	}
+	var starts []time.Time
+	for _, process := range processes {
+		if processName := filepath.Base(process.Program); processName == name || processName == resolved {
+			starts = append(starts, process.StartedAt)
+		}
+	}
+	return starts
 }
 
 // KeepsPluginData says whether Codex keeps the aeolus-fleet plugin's data
@@ -223,9 +263,21 @@ func byVersion(left string, right string) int {
 	return 0
 }
 
+// cacheEntries also includes symlinks to kept versions so their paths survive an update.
+func cacheEntries(cache string) []string {
+	entries, _ := os.ReadDir(cache)
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() || plugin.IsKeptVersionLink(cache, entry.Name()) {
+			names = append(names, entry.Name())
+		}
+	}
+	return names
+}
+
 // keepingVersions runs upgrade with every folder in the cache kept aside, and puts back each one it deleted, with the time it came; then, once upgrade succeeded, runs after with the folders there before.
 func keepingVersions(cache string, upgrade func() error, after func(before []string) error) error {
-	before := folders(cache)
+	before := cacheEntries(cache)
 	aside, err := os.MkdirTemp("", "aeolus-plugin-versions-")
 	if err != nil {
 		return err
@@ -233,17 +285,19 @@ func keepingVersions(cache string, upgrade func() error, after func(before []str
 	defer os.RemoveAll(aside)
 	came := map[string]time.Time{}
 	for _, version := range before {
-		info, err := os.Stat(filepath.Join(cache, version))
+		info, err := os.Lstat(filepath.Join(cache, version))
 		if err != nil {
 			return err
 		}
-		came[version] = info.ModTime()
+		if info.IsDir() {
+			came[version] = info.ModTime()
+		}
 		if err := copyTree(filepath.Join(cache, version), filepath.Join(aside, version)); err != nil {
 			return err
 		}
 	}
 	upgraded := upgrade()
-	left := folders(cache)
+	left := cacheEntries(cache)
 	for _, version := range before {
 		if slices.Contains(left, version) {
 			continue
@@ -253,14 +307,19 @@ func keepingVersions(cache string, upgrade func() error, after func(before []str
 			return errors.Join(upgraded, err)
 		}
 		// The folder's time says when its version came.
-		if err := os.Chtimes(folder, came[version], came[version]); err != nil {
-			return errors.Join(upgraded, err)
+		if installedAt, ok := came[version]; ok {
+			if err := os.Chtimes(folder, installedAt, installedAt); err != nil {
+				return errors.Join(upgraded, err)
+			}
 		}
 	}
 	if upgraded != nil {
 		return upgraded
 	}
-	return after(before)
+	return after(slices.DeleteFunc(before, func(version string) bool {
+		_, wasDirectory := came[version]
+		return !wasDirectory
+	}))
 }
 
 // copyTree copies the folder to another path with the modes and times of its files.
