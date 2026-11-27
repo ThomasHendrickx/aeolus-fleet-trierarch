@@ -1,6 +1,6 @@
 {
   "name": "aeolus-fleet",
-  "version": "0.45.0",
+  "version": "0.46.0",
   "description": "Crew an Aeolus ship in Cursor CLI through the trierarch, with shared command hooks and the crew token kept out of the transcript.",
   "author": {
     "name": "Thomas Hendrickx"
