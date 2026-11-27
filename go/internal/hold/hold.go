@@ -214,8 +214,15 @@ func Run(options Options) int {
 		h.guard = guard
 	}
 
+	// A harness can call the socket as soon as it starts.
+	listener, err := net.Listen("unix", files.Socket)
+	if err != nil {
+		return 1
+	}
+	defer listener.Close()
+
 	h.mutex.Lock()
-	first, err := h.start(options.Command)
+	_, err = h.start(options.Command)
 	h.mutex.Unlock()
 	if err != nil {
 		var guarded *codexGuardError
@@ -225,11 +232,6 @@ func Run(options Options) int {
 		return 1
 	}
 
-	listener, err := net.Listen("unix", files.Socket)
-	if err != nil {
-		killGroup(first, syscall.SIGKILL)
-		return 1
-	}
 	go h.serve(listener)
 
 	var code int
@@ -246,8 +248,6 @@ func Run(options Options) int {
 	if last != nil {
 		killGroup(last, syscall.SIGKILL)
 	}
-	_ = listener.Close()
-	_ = os.Remove(files.Socket)
 	return code
 }
 
@@ -329,17 +329,18 @@ func (h *held) start(command []string) (*harness, error) {
 		_, _ = fmt.Fprintf(h.guard, "%d %s\n", run.Process.Pid, startOf(run.Process.Pid))
 	}
 	read := make(chan struct{})
+	exited := make(chan struct{})
 	var reading sync.WaitGroup
 	reading.Add(len(readers))
-	go h.read(stdout, h.onLine, &reading)
+	go h.read(harnessOutput{stdout, exited}, h.onLine, &reading)
 	if len(readers) > 1 {
-		go h.read(readers[1], func(line string) { h.onLine(stderrLine(line)) }, &reading)
+		go h.read(harnessOutput{readers[1], exited}, func(line string) { h.onLine(stderrLine(line)) }, &reading)
 	}
 	go func() {
 		reading.Wait()
 		close(read)
 	}()
-	go h.wait(started, readers, read)
+	go h.wait(started, readers, read, exited)
 	return started, nil
 }
 
@@ -353,6 +354,28 @@ func stderrLine(line string) string {
 		Line string `json:"line"`
 	}{Type: StderrEvent, Line: line})
 	return strings.TrimSuffix(text.String(), "\n")
+}
+
+// harnessOutput bounds idle reads after the harness exits in case a descendant
+// still holds the pipe. Each read gets its own deadline so processing a large
+// event cannot cut off the rest of the output.
+type harnessOutput struct {
+	file   *os.File
+	exited <-chan struct{}
+}
+
+const (
+	outputIdleWait   = time.Second
+	outputDrainLimit = 5 * time.Second
+)
+
+func (o harnessOutput) Read(p []byte) (int, error) {
+	select {
+	case <-o.exited:
+		_ = o.file.SetReadDeadline(time.Now().Add(outputIdleWait))
+	default:
+	}
+	return o.file.Read(p)
 }
 
 // read appends each line the harness writes to the events, and tells what it says.
@@ -434,19 +457,26 @@ func (h *held) onLine(line string) {
 }
 
 // wait waits for the run to end, its last lines kept, and ends the hold with it unless the hold starts its harness again or runs a process per turn. Copilot's turn ends once its native process closed the output it inherited from the launcher, which may exit first; a Copilot or Codex turn that exited with a failure status died, with or without a failure event: either ends the hold with its status, so the session is seen exited, restarted and reported as one that died. A turn the hold stopped by a signal does not, nor a Codex turn interrupted, which writes turn.aborted.
-func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}) {
+func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}, exited chan struct{}) {
 	err := run.command.Wait()
-	if h.options.Harness == copilot {
-		<-read
-	} else {
+	if h.options.Harness != copilot {
+		close(exited)
+		for _, output := range outputs {
+			// Wake a read that started before the harness exited as well.
+			_ = output.SetReadDeadline(time.Now().Add(outputIdleWait))
+		}
 		select {
 		case <-read:
-		case <-time.After(time.Second):
+		case <-time.After(outputDrainLimit):
 		}
+	} else {
+		<-read
 	}
 	for _, output := range outputs {
 		_ = output.Close()
 	}
+	// Keep lines already read before publishing the harness's exit.
+	<-read
 	code := 1
 	isExited := false
 	var exit *exec.ExitError

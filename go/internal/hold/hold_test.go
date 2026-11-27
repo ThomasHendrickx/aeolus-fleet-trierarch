@@ -148,6 +148,24 @@ func TestTheHoldEndsWhenItsHarnessEndsAndAnswersNoMore(t *testing.T) {
 	}
 }
 
+func TestTheHoldEndsWhenADescendantKeepsWritingAfterItsHarnessExits(t *testing.T) {
+	hold := aHold(t, `read -r line; (while :; do echo descendant; sleep 0.1; done) & exit 3`)
+
+	if _, err := Call(hold.files.Socket, Request{Call: "send", Line: "{}"}, time.Second); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	select {
+	case code := <-hold.ended:
+		hold.ended <- code
+		if code != 3 {
+			t.Fatalf("hold exit code = %d, want 3", code)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("the hold did not end while the descendant kept writing")
+	}
+}
+
 func TestAStoppedHoldEndsItsHarnessAndEveryProcessItStarted(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "child.pid")
 	hold := aHold(t, `sleep 300 & echo $! > `+marker+`; wait`)

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHoldRotatesEventsAtTenMegabytesAndKeepsOneBackup(t *testing.T) {
@@ -52,6 +53,45 @@ func TestHoldRotatesEventsAtTenMegabytesAndKeepsOneBackup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHoldKeepsPendingEventsAfterTheHarnessExits(t *testing.T) {
+	dir := shortFolder(t)
+	path := filepath.Join(dir, "events.jsonl")
+	events, err := openEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer events.close()
+
+	h := &held{
+		options: Options{Folder: dir},
+		events:  events,
+		ended:   make(chan int, 1),
+	}
+	events.mutex.Lock()
+	h.mutex.Lock()
+	_, err = h.start([]string{"sh", "-c", "printf '1\\n2\\n'"})
+	h.mutex.Unlock()
+	if err != nil {
+		events.mutex.Unlock()
+		t.Fatal(err)
+	}
+
+	// A slow event log can still have lines from the pipe to write after the harness ends.
+	select {
+	case <-h.ended:
+		events.mutex.Unlock()
+		t.Fatal("the hold ended while its events were still pending")
+	case <-time.After(2 * time.Second):
+		events.mutex.Unlock()
+	}
+	select {
+	case <-h.ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the hold did not end after writing the pending events")
+	}
+	assertEventFile(t, path, "1\n2\n")
 }
 
 func assertEventFile(t *testing.T, path, want string) {
