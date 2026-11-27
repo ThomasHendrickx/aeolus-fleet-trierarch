@@ -24,8 +24,8 @@ func guardCheckOver(t *testing.T, running runningSessions) (int, string) {
 	}
 	t.Setenv("TMPDIR", longTemp)
 
-	// A Unix socket's path holds at most about a hundred bytes, which a test's own temp folder can pass.
-	home, err := os.MkdirTemp("", "s")
+	// Use /tmp directly so the full socket path fits in the macOS Unix address.
+	home, err := os.MkdirTemp("/tmp", "s")
 	if err != nil {
 		t.Fatal(err)
 	}
