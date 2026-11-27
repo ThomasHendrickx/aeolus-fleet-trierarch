@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -17,8 +18,14 @@ import (
 // guardCheckOver is the answer of the ship's socket, as shipSockets opens it on the runtime, to a guard check of a ship not crewed here.
 func guardCheckOver(t *testing.T, running runningSessions) (int, string) {
 	t.Helper()
-	// A Unix socket's path holds at most about a hundred bytes, which a test's own temp folder can pass.
-	home, err := os.MkdirTemp("", "s")
+	longTemp := filepath.Join(t.TempDir(), strings.Repeat("x", 108))
+	if err := os.Mkdir(longTemp, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", longTemp)
+
+	// Use /tmp directly so the full socket path fits in the macOS Unix address.
+	home, err := os.MkdirTemp("/tmp", "s")
 	if err != nil {
 		t.Fatal(err)
 	}
