@@ -6,6 +6,7 @@
 package plugin
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -105,7 +106,35 @@ func (p Plugin) resolve() (Plugin, error) {
 	if p.plugins == "" {
 		return p, nil
 	}
+	if p.Root == "" && p.harness == "Claude Code" {
+		p.Root = ClaudeUserInstall(p.plugins)
+	}
 	return newestIn(p.plugins, Plugin{Root: p.Root, Data: p.Data, Crews: p.Crews}, p.harness, p.rootVariable)
+}
+
+// ClaudeUserInstall reads the user-scoped plugin root Claude Code selects.
+func ClaudeUserInstall(plugins string) string {
+	text, err := os.ReadFile(filepath.Join(plugins, "installed_plugins.json"))
+	if err != nil {
+		return ""
+	}
+	var registry struct {
+		Plugins map[string][]struct {
+			Scope string `json:"scope"`
+			Path  string `json:"installPath"`
+		} `json:"plugins"`
+	}
+	if json.Unmarshal(text, &registry) != nil {
+		return ""
+	}
+	for _, install := range registry.Plugins["aeolus-fleet@aeolus-fleet"] {
+		if install.Scope == "user" && filepath.IsAbs(install.Path) {
+			if info, err := os.Stat(install.Path); err == nil && info.IsDir() {
+				return install.Path
+			}
+		}
+	}
+	return ""
 }
 
 // newestIn is the plugin as given, its data folder in the harness's plugins folder when none is given, and its root the newest version in that folder's cache when none is given.
@@ -120,7 +149,7 @@ func newestIn(plugins string, plugin Plugin, harness string, rootVariable string
 	folders, _ := os.ReadDir(cache)
 	versions := []string{}
 	for _, folder := range folders {
-		if releaseVersion.MatchString(folder.Name()) {
+		if folder.IsDir() && releaseVersion.MatchString(folder.Name()) {
 			versions = append(versions, folder.Name())
 		}
 	}

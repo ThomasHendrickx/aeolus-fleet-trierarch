@@ -321,10 +321,24 @@ func TestDowngradeSelectsTheOlderPluginAndKeepsTheNewerPathOnlyForRunningSession
 		t.Errorf("newer session path = %v, %v, want a usable path excluded from Codex selection", info, err)
 	}
 
-	if err := codex.update(t, nil, 0); err != nil {
+	update := PluginUpdate{
+		Program: "codex",
+		Home:    codex.home,
+		Now:     func() time.Time { return upgradedAt.Add(2 * time.Minute) },
+		Processes: func(now time.Time) ([]Process, error) {
+			return []Process{
+				{PID: 8, Program: "codex", StartedAt: now},
+				{PID: 9, Program: "codex", StartedAt: upgradedAt.Add(-2 * time.Hour)},
+			}, nil
+		},
+	}
+	if err := update.ReapRetired(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(newer); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("newer path after all sessions exit: %v, want it removed", err)
+		t.Errorf("newer path after the last session using it exits: %v, want it removed", err)
+	}
+	if _, err := os.Stat(plugin.RetiredPath(codex.cache(), "0.42.0")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("retired newer folder: %v, want it removed", err)
 	}
 }

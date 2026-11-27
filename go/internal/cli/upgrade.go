@@ -147,7 +147,7 @@ func (u Upgrade) onItsVersion() (UpgradeReport, error) {
 	if err := config.WriteSchema(u.Paths.ConfigSchema); err != nil {
 		return UpgradeReport{}, err
 	}
-	isPluginUpdated, pluginSaid := u.updatePlugin()
+	isPluginUpdated, pluginSaid := u.updatePlugin(u.Harnesses)
 	said := []string{alreadyOn(from)}
 	if len(removed) > 0 {
 		said = append(said, remoteControlRemoved(removed))
@@ -181,11 +181,11 @@ func (u Upgrade) onItsVersion() (UpgradeReport, error) {
 }
 
 // updatePlugin updates the aeolus-fleet plugin of each harness on offer from this version's release tag, each on its own: one that fails leaves the others to update.
-func (u Upgrade) updatePlugin() (bool, []string) {
+func (u Upgrade) updatePlugin(harnesses []string) (bool, []string) {
 	isUpdated := true
 	var said []string
 	tag := "v" + u.Version
-	for _, harness := range u.Harnesses {
+	for _, harness := range harnesses {
 		name := harnessNames[harness]
 		if name == "" {
 			continue
@@ -208,10 +208,6 @@ func (u Upgrade) updatePlugin() (bool, []string) {
 		}
 		if harness != codex {
 			continue
-		}
-		// Codex starts on its newest version folder, and the update keeps a newer one for the sessions running on it (#652).
-		if releaseVersion.MatchString(after) && byVersion(after, u.Version) > 0 {
-			said = append(said, fmt.Sprintf("New Codex sessions keep starting on the aeolus-fleet plugin %s, not on %s: Codex starts on the newest version it has, and %s stays for the Codex sessions running on it.", after, u.Version, after))
 		}
 		trusted, err := u.Codex.TrustAeolusHooks(u.HookFolder)
 		if err != nil {
@@ -321,13 +317,21 @@ func (u Upgrade) putBack(previous string, to string) error {
 	if err := os.Rename(previous, u.Program); err != nil {
 		return refused(errors.Join(errNotPutBack, err), "%s\nThe trierarch %s could not be put back in place of %s: %v. It is kept at %s: run aeolus-trierarch upgrade %s from it.", failed, from, u.Program, err, previous, from)
 	}
+	harnesses := slices.DeleteFunc(slices.Clone(u.Harnesses), func(harness string) bool {
+		return harness != claudeCode && harness != codex
+	})
+	pluginRestored, pluginSaid := u.updatePlugin(harnesses)
+	pluginReport := strings.Join(pluginSaid, "\n")
+	if !pluginRestored {
+		pluginReport += fmt.Sprintf("\nRun aeolus-trierarch upgrade %s to retry restoring the plugin.", from)
+	}
 	if err := errors.Join(u.Service.Rewrite(), u.Service.Restart()); err != nil {
-		return refused(err, "%s\nThe trierarch %s is back in place, but the service did not restart on it: %v", failed, from, err)
+		return refused(err, "%s\nThe trierarch %s is back in place, but the service did not restart on it: %v\n%s", failed, from, err, pluginReport)
 	}
 	if !u.hasSaid(from) {
-		return refused(nil, "%s\nThe trierarch %s is back in place; the service restarted on it, which has not said its version yet either.", failed, from)
+		return refused(nil, "%s\nThe trierarch %s is back in place; the service restarted on it, which has not said its version yet either.\n%s", failed, from, pluginReport)
 	}
-	return refused(nil, "%s\nThe trierarch %s is back in place, and the service runs %s again; the aeolus-fleet plugin stays on %s's: run aeolus-trierarch upgrade %s to put it back too.", failed, from, from, to, from)
+	return refused(nil, "%s\nThe trierarch %s is back in place, and the service runs %s again.\n%s", failed, from, from, pluginReport)
 }
 
 // refusal is what upgrade says when it refuses, in whole sentences as today's trierarch says it, keeping the reason for errors.Is.

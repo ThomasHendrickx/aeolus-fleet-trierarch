@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 )
 
 const (
@@ -30,6 +32,8 @@ type PluginUpdate struct {
 	Program string
 	// Settings is Claude Code's settings.json: in CLAUDE_CONFIG_DIR when it is set, else in ~/.claude.
 	Settings string
+	// ProcessStarts lists the start times of running Claude Code processes.
+	ProcessStarts func() ([]time.Time, error)
 }
 
 // PluginUpdateOf the user's home folder, and CLAUDE_CONFIG_DIR when it is not empty.
@@ -58,6 +62,43 @@ func (p PluginUpdate) run(args ...string) (string, error) {
 
 // Update installs the plugin of the release tag.
 func (p PluginUpdate) Update(tag string) error {
+	if p.ProcessStarts == nil {
+		return p.update(tag)
+	}
+	if err := p.ReapRetired(); err != nil {
+		return err
+	}
+	return plugin.WithCacheLock(p.cache(), func() error {
+		if err := p.update(tag); err != nil {
+			return err
+		}
+		root := plugin.ClaudeUserInstall(filepath.Join(filepath.Dir(p.Settings), "plugins"))
+		if filepath.Dir(root) != p.cache() {
+			return nil
+		}
+		active := filepath.Base(root)
+		if err := plugin.ActivateRetired(p.cache(), active); err != nil {
+			return err
+		}
+		switched := time.Now()
+		starts, err := p.ProcessStarts()
+		if err != nil {
+			return err
+		}
+		return plugin.RetireNewer(p.cache(), active, switched, starts)
+	})
+}
+
+func (p PluginUpdate) cache() string {
+	return filepath.Join(filepath.Dir(p.Settings), "plugins", "cache", marketplace, "aeolus-fleet")
+}
+
+// ReapRetired removes newer plugin folders that running Claude Code processes no longer need.
+func (p PluginUpdate) ReapRetired() error {
+	return plugin.ReapRetired(p.cache(), p.ProcessStarts)
+}
+
+func (p PluginUpdate) update(tag string) error {
 	if err := p.dropDeclaredMarketplace(); err != nil {
 		return err
 	}
