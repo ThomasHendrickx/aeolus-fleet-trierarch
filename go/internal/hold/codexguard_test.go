@@ -2,6 +2,7 @@ package hold
 
 import (
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,5 +39,27 @@ func TestTheHoldChecksCodexGuardTrustBeforeFirstAndResumedTurns(t *testing.T) {
 	}
 	if got := strings.TrimSpace(read(calls)); got != "exec -c guard-hook -- first\nexec resume thread-1 -c guard-hook -- resumed" {
 		t.Fatalf("starts = %q, want only initial and trusted resumed turn with the hook", got)
+	}
+}
+
+func TestTheHoldListensBeforePreparingItsFirstHarnessTurn(t *testing.T) {
+	files := FilesOf(shortFolder(t), ship)
+	options := Options{
+		Files:   files,
+		Folder:  t.TempDir(),
+		Harness: "codex",
+		Command: []string{"sh", "-c", "exit 3"},
+		PrepareCodexTurn: func(command []string) ([]string, error) {
+			connection, err := net.DialTimeout("unix", files.Socket, time.Second)
+			if err != nil {
+				return nil, err
+			}
+			_ = connection.Close()
+			return command, nil
+		},
+	}
+
+	if code := Run(options); code != 3 {
+		t.Fatalf("hold exit code = %d, want 3 from the harness, guard problem: %s", code, read(files.GuardProblem))
 	}
 }
