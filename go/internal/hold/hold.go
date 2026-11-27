@@ -364,7 +364,10 @@ type harnessOutput struct {
 	exited <-chan struct{}
 }
 
-const outputIdleWait = time.Second
+const (
+	outputIdleWait   = time.Second
+	outputDrainLimit = 5 * time.Second
+)
 
 func (o harnessOutput) Read(p []byte) (int, error) {
 	select {
@@ -462,11 +465,18 @@ func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}, exit
 			// Wake a read that started before the harness exited as well.
 			_ = output.SetReadDeadline(time.Now().Add(outputIdleWait))
 		}
+		select {
+		case <-read:
+		case <-time.After(outputDrainLimit):
+		}
+	} else {
+		<-read
 	}
-	<-read
 	for _, output := range outputs {
 		_ = output.Close()
 	}
+	// Keep lines already read before publishing the harness's exit.
+	<-read
 	code := 1
 	isExited := false
 	var exit *exec.ExitError
