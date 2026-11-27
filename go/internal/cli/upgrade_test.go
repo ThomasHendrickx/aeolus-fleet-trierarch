@@ -80,12 +80,11 @@ func (s *aServiceOf) Status() (service.Status, error) {
 	return service.Status{IsInstalled: s.installed, IsRunning: s.installed && s.pid != 0, PID: s.pid, File: "aeolus-trierarch.service"}, nil
 }
 
-// somePlugins update the aeolus-fleet plugin of each harness from the tag, Claude Code's from 0.40.0 to the tag's version, or to the version kept when one is.
+// somePlugins update the aeolus-fleet plugin of each harness from the tag.
 type somePlugins struct {
 	failing  error
 	updates  []string
 	versions map[string]string
-	kept     map[string]string
 }
 
 func (p *somePlugins) Update(harness string, tag string) error {
@@ -94,9 +93,6 @@ func (p *somePlugins) Update(harness string, tag string) error {
 		return p.failing
 	}
 	p.versions[harness] = strings.TrimPrefix(tag, "v")
-	if kept := p.kept[harness]; kept != "" {
-		p.versions[harness] = kept
-	}
 	return nil
 }
 
@@ -292,19 +288,27 @@ func TestUpgradeTrustsNoHooksOfACodexPluginItCouldNotUpdate(t *testing.T) {
 	}
 }
 
-func TestUpgradeSaysNewCodexSessionsKeepStartingOnANewerPluginVersion(t *testing.T) {
+func TestUpgradeRestoresBothPluginsWhenTheNewServiceDoesNotStart(t *testing.T) {
 	machine := anUpgradeOn(t)
 	withCodexOnOffer(machine)
-	machine.plugins.kept = map[string]string{"codex": "0.41.0"}
-
-	report, err := machine.upgrade.Run(running)
-
-	if err != nil || !report.IsPluginUpdated {
-		t.Fatalf("Run(a Codex downgrade) = %+v, %v, want the plugin updated", report, err)
+	machine.upgrade.Releases = releasesOf(noStart)
+	run := machine.upgrade.Trierarch
+	machine.upgrade.Trierarch = func(file string, isPluginStep bool, words ...string) (string, int) {
+		if isPluginStep {
+			for _, harness := range machine.upgrade.Harnesses {
+				machine.plugins.versions[harness] = released
+			}
+		}
+		return run(file, isPluginStep, words...)
 	}
-	want := "New Codex sessions keep starting on the aeolus-fleet plugin 0.41.0, not on 0.40.0: Codex starts on the newest version it has, and 0.41.0 stays for the Codex sessions running on it."
-	if !slices.Contains(report.Said, want) {
-		t.Errorf("said %q, want %q", report.Said, want)
+
+	if _, err := machine.upgrade.Run(released); err == nil {
+		t.Fatal("upgrade succeeded, want the failed upgrade reported")
+	}
+	for _, harness := range machine.upgrade.Harnesses {
+		if got := machine.plugins.Version(harness); got != running {
+			t.Errorf("%s plugin = %q after rollback, want %q", harness, got, running)
+		}
 	}
 }
 

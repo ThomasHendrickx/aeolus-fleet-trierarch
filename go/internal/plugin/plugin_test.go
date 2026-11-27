@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 )
 
@@ -212,5 +213,26 @@ func TestAPluginThatCannotBeFoundCannotSayWhetherItMarksLaunches(t *testing.T) {
 
 	if _, err := plugin.MarksLaunches(); err == nil {
 		t.Fatal("MarksLaunches had no error for a plugin that is not there")
+	}
+}
+
+func TestClaudePluginUsesTheInstalledUserVersionWhenANewerFolderRemains(t *testing.T) {
+	config := t.TempDir()
+	plugins := filepath.Join(config, "plugins")
+	cache := filepath.Join(plugins, "cache", "aeolus-fleet", "aeolus-fleet")
+	older := filepath.Join(cache, "0.40.0")
+	for _, path := range []string{older, filepath.Join(cache, "0.41.0")} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	registry := `{"version":2,"plugins":{"aeolus-fleet@aeolus-fleet":[{"scope":"user","installPath":` + strconv.Quote(older) + `}]}}`
+	if err := os.WriteFile(filepath.Join(plugins, "installed_plugins.json"), []byte(registry), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := Find("", map[string]string{"CLAUDE_CONFIG_DIR": config})
+	if err != nil || found.Root != older {
+		t.Errorf("Find() = %q, %v, want %q", found.Root, err, older)
 	}
 }

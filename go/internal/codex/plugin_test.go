@@ -302,3 +302,29 @@ func TestAnUpgradeKeepsACrewedCodexShipsIdentityAndRunningPluginPath(t *testing.
 		t.Fatalf("versions = %q, want running and new versions", got)
 	}
 }
+
+func TestDowngradeSelectsTheOlderPluginAndKeepsTheNewerPathOnlyForRunningSessions(t *testing.T) {
+	codex := aCodexOn(t)
+	codex.versionFolder(t, "0.42.0", upgradedAt.Add(-time.Hour))
+	running := []Process{{PID: 7, Program: "codex", StartedAt: upgradedAt.Add(-time.Minute)}}
+
+	if err := codex.update(t, running, 0); err != nil {
+		t.Fatal(err)
+	}
+	root, err := plugin.FindCodex("", map[string]string{"CODEX_HOME": codex.home})
+	if err != nil || PluginVersion(root.Root) != "0.41.0" {
+		t.Errorf("new session plugin = %q, %v, want 0.41.0", root.Root, err)
+	}
+	newer := filepath.Join(codex.cache(), "0.42.0")
+	info, err := os.Lstat(newer)
+	if err != nil || info.IsDir() || PluginVersion(newer) != "0.42.0" {
+		t.Errorf("newer session path = %v, %v, want a usable path excluded from Codex selection", info, err)
+	}
+
+	if err := codex.update(t, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(newer); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("newer path after all sessions exit: %v, want it removed", err)
+	}
+}
